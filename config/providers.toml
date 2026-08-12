@@ -1,0 +1,39 @@
+# Provider 列表（按数组顺序作主备；supports_snapshot 决定 COLD 主源）
+# 零依赖：仅用标准库 urllib。熔断/退避/限频见 core 与 data_quality/health.py
+
+[[providers]]
+name = "tencent"
+cls = "TencentProvider"
+markets = ["a", "hk", "us"]
+primary = true
+supports_snapshot = false
+timeout_ms = 3000
+max_rps = 5
+backoff_base_sec = 1.0
+backoff_max_sec = 60.0
+circuit_fail_threshold = 5
+host = ""
+
+[[providers]]
+name = "eastmoney"
+cls = "EastmoneyProvider"
+markets = ["a"]
+primary = false
+supports_snapshot = true
+timeout_ms = 3000
+max_rps = 3
+backoff_base_sec = 1.0
+backoff_max_sec = 60.0
+circuit_fail_threshold = 5
+
+[[providers]]
+name = "sina"
+cls = "SinaProvider"
+markets = ["a"]
+primary = false
+supports_snapshot = false
+timeout_ms = 3000
+max_rps = 5
+backoff_base_sec = 1.0
+backoff_max_sec = 60.0
+circuit_fail_threshold = 5
