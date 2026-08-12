@@ -122,3 +122,42 @@ stock-tracker 已实现为一个**零第三方依赖的 Python 标准库后端 +
 3. **T7（回测/校准）** 让 `success_probability` 有真实值，是 PRD #11.5 硬性要求，也是独立成功率指标的前提。
 4. **严守数据真实性铁律（§4）**：任何"让数据好看"的伪装在 PRD 中明令禁止，会直接破坏系统价值主张。
 5. 改动后务必跑全量回归 + 在可联网环境做真实行情 curl 验收（`/api/overview` 含 `breadth`/`risk_events`；`/api/markets` 收盘后 A/HK 应为 STALE 且 `observed_age_ms>0`）。
+
+---
+
+## 9. 前端可视化验证（Playwright 截屏 + 浏览器真实操作）
+
+> 日期：2026-08-12｜触发：用户开放沙箱完全网络访问后，补齐此前被拦截的可视化验证目标④。
+> 工具：`qa/ui/shot.cjs`（Playwright Node 版，多策略解析 playwright，截图落 `qa/ui/shots/`，支持 `BASE`/`SHOT_OUT` 环境变量；`qa/ui/click_test.cjs` 点击机会卡断言 sheet 非空）。
+> **模型限制**：本模型无法读取 PNG（`Read` 截图返回图片被过滤），故验证证据以「脚本文本断言 + `/api/*` curl 实测」为准，截图仅作人工辅助。
+
+### 9.1 本会话经可视化验证发现并修复的 Bug
+
+| Bug | 严重度 | 根因 | 修复 | 提交 |
+|---|---|---|---|---|
+| 指数卡切换不过滤 | P1 | `renderIndexGrid` 用 `markets[market]` 但 dict 键为小写 `a/hk/us`、tab market 为大写 `A/HK/US`，不匹配 fallback 到 `markets.a` | 改为大小写不敏感 + 兼容 Array | `94ae7f3` |
+| banner 开休市状态全显示 `?` | P1 | 后端 `market_open_status()` 返回字符串 `'TRADING'/'CLOSED'/'WEEKEND'/'DISABLED'`，前端 `renderBanner` 却按布尔判断（`open===true?开:open===false?休:?`），字符串永不等于布尔 | `renderBanner` 增加字符串→中文映射（开/周末休/休/停） | `94ae7f3` |
+
+> 其余 6 个 UI/数据缺陷（市场 tab 不过滤 topList、信号 sheet 打不开、桌面响应式缺失、quote.last=0→全标"数据异常"、指数数据缺失、markets.toml 重复 `[index]` 节）已在 `7b9d863`/`79bdb0a`/`d972622` 修复并验证。
+
+### 9.2 可视化回归结论（Playwright 实锤）
+
+- **真实数据活体**：`/api/overview` `data_mode=LIVE`，腾讯主源熔断 `CLOSED`、真实指数流入（上证 `3946.68`、恒生 `25440.17`、纳指 `26585.51`），收盘后诚实标 `STALE` + `observed_age_ms>0`，绝不伪 `LIVE`。
+- **banner 修复生效**：`A:休 港:休 美:开`（北京时间 23:30，A/港已休、美股正交易），与后端 `{'a':'CLOSED','hk':'CLOSED','us':'TRADING'}` 一致。
+- **市场过滤生效**：切 HK/US → topList 显「该市场暂无重点机会」(len≈9)；切 A → 显 125 条。
+- **指数卡渲染**：`indexGrid.len=29`（非空，切换修复生效）。
+- **信号 sheet 弹层**：点击机会行 → `sheet open=true, len=284`。
+- **三页导航**：watch/radar/research 均 `active=true`，内容正常渲染。
+- **移动端/桌面响应式**：1440 视口 `body.width=1280`、多列布局；390 移动端单列（桌面容器 960→1280 修复见 `7b9d863`）。
+- **控制台**：仅 1 个 `404`（favicon.ico，次要），**无 JS pageerror、无其他 reqfail**。
+
+### 9.3 已知遗留 nit（非阻断，列入路线图）
+
+- **N1 favicon 404**：未提供 `web/favicon.ico`，浏览器请求 404。建议放一个 1x1 或品牌图标。
+- **N2 收盘后信号态 `DATA_INVALID` 文案偏 alarmist**：收盘后 `last=None` → 信号引擎将 A 股机会标 `DATA_INVALID` 态（显示"数据异常不给信号"）。此为信号状态机（12 态之一）在缺实时价时**主动 withholding 信号**的正确行为，**非新鲜度 bug**（新鲜度 `data_status` 为 `STALE`，`INVALID` 数量=0）。UX 上"数据异常"易误读为系统故障，建议接入 T1 历史收盘价后改为"休市无实时价"之类的温和文案。
+- **N3 `_read_toml` 静默吞异常（设计缺陷，高风险）**：`stock_tracker/core/config.py::_read_toml` 用 `try/except` 吞掉 `TOMLDecodeError` 返回 `{}`，导致配置错误（如重复 `[index]` 节）被**完全掩盖**——本次 `markets.toml` 重复节就曾让整份配置静默回退默认值、指数卡全空。建议改为：解析失败时**抛错或至少 warn 日志 + 字段级校验**，避免"配置错了但服务照常起、界面静默空白"的排查地狱。**强烈建议列入 P0 修复。**
+
+### 9.4 接续建议（可视化方向）
+
+- 把 `qa/ui/shot.cjs` 接入 CI：每次前端改动后跑一遍，断言 `indexGrid.len>0` / `topList.len>0` / `sheet open` / 无 `pageerror`。需 CI 环境装 Playwright + Chromium（`PLAYWRIGHT_PATH` 或 `npm i -D playwright`）。
+- N3 修复后，应补一个「故意写坏 TOML → 启动应报错而非静默回退」的测试。
