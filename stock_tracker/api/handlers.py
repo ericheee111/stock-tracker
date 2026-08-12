@@ -66,6 +66,82 @@ def _market_cfg(ctx: AppContext, market: T.Market):
             "US": ctx.bundle.markets.us}[market.value]
 
 
+def _build_index(q: Optional[T.Quote], ctx: AppContext, mk: T.Market) -> dict:
+    """构造单一代表性指数行情摘要；无有效行情时 last/change 为 null（前端渲染「—」）。"""
+    last = q.last if (q is not None and q.last is not None and q.last > 0) else None
+    prev = q.prev_close if (q is not None and q.prev_close is not None) else None
+    change: Optional[float] = None
+    change_pct: Optional[float] = None
+    if last is not None and prev is not None and prev > 0:
+        change = round(last - prev, 4)
+        change_pct = round((last - prev) / prev * 100.0, 4)
+    mc = _market_cfg(ctx, mk)
+    age = S.recompute_age_ms(q) if q is not None else 0
+    if q is not None and q.data_status != T.DataStatus.UNKNOWN:
+        ds = S.quote_data_status(age, mc).value
+    else:
+        ds = T.DataStatus.UNKNOWN.value
+    index_map = getattr(ctx.bundle.markets, "index", None) or {}
+    idx_sym = (q.symbol if q is not None else index_map.get(mk.value.lower(), ""))
+    name = (q.name if (q is not None and q.name) else idx_sym)
+    return {
+        "symbol": idx_sym,
+        "name": name or idx_sym,
+        "last": last,
+        "change": change,
+        "change_pct": change_pct,
+        "data_status": ds,
+        "observed_age_ms": age,
+    }
+
+
+def _build_markets(ctx: AppContext) -> list[dict]:
+    """构造各市场汇总（含代表性指数 index），供 /api/markets 与 /api/overview 共用。
+
+    返回数组，每项形如 {market, enabled, session, count, up, down, flat,
+    latency_p50_ms, data_status, observed_age_ms, index}。前端 renderIndexGrid
+    按 market 过滤后读取 index 渲染指数卡。
+    """
+    healths = {h.provider: h for h in ctx.router.health_list()}
+    quotes = ctx.store.get_quotes()
+    index_map = getattr(ctx.bundle.markets, "index", None) or {}
+    out: list[dict] = []
+    for key, mk in (("a", T.Market.A), ("hk", T.Market.HK), ("us", T.Market.US)):
+        if not ctx.bundle.app.markets_enabled.get(key, False):
+            out.append({"market": key, "enabled": False, "session": "DISABLED"})
+            continue
+        mq = [q for q in quotes.values() if q.market == mk]
+        session = _session(ctx, mk)
+        # 宽度统计：价格缺失（None）的标的跳过，避免 None 比较崩溃
+        up = sum(1 for q in mq if q.last is not None and q.prev_close is not None
+                 and q.prev_close > 0 and q.last > q.prev_close)
+        down = sum(1 for q in mq if q.last is not None and q.prev_close is not None
+                   and q.prev_close > 0 and q.last < q.prev_close)
+        flat = len(mq) - up - down
+        latency = None
+        for pc in ctx.bundle.providers:
+            if pc.primary and key in pc.markets:
+                h = healths.get(pc.name)
+                if h:
+                    latency = round(h.latency_p50, 1)
+        mc = _market_cfg(ctx, mk)
+        age = S.market_observed_age_ms(mq)
+        idx_sym = index_map.get(key)
+        idx = _build_index(quotes.get(idx_sym) if idx_sym else None, ctx, mk)
+        out.append({
+            "market": key,
+            "enabled": True,
+            "session": session,
+            "count": len(mq),
+            "up": up, "down": down, "flat": flat,
+            "latency_p50_ms": latency,
+            "data_status": S.market_data_status(session, age, mc),
+            "observed_age_ms": age,
+            "index": idx,
+        })
+    return out
+
+
 def _build_breadth(ctx: AppContext) -> dict:
     """市场宽度汇总（§9 契约：前端 UI.renderBreadthCard 依赖）。
 
@@ -81,8 +157,10 @@ def _build_breadth(ctx: AppContext) -> dict:
                         "flat": 0, "ratio": 0.0}
             continue
         mq = [q for q in quotes if q.market == mk]
-        adv = sum(1 for q in mq if q.prev_close > 0 and q.last > q.prev_close)
-        dec = sum(1 for q in mq if q.prev_close > 0 and q.last < q.prev_close)
+        adv = sum(1 for q in mq if q.last is not None and q.prev_close is not None
+                  and q.prev_close > 0 and q.last > q.prev_close)
+        dec = sum(1 for q in mq if q.last is not None and q.prev_close is not None
+                  and q.prev_close > 0 and q.last < q.prev_close)
         flat = len(mq) - adv - dec
         denom = adv + dec
         out[key] = {
@@ -169,6 +247,8 @@ def get_overview(ctx: AppContext) -> dict:
         # 顶层附带，满足「行情/信号响应必含」契约（概览层面用整体模式表达）
         "data_status": meta["data_mode"],
         "observed_age_ms": S.market_observed_age_ms(list(quotes.values())),
+        # 各市场汇总（含代表性指数 index），供前端指数卡 + 实时探针读取
+        "markets": _build_markets(ctx),
     }
 
 
@@ -200,7 +280,7 @@ def get_positions(ctx: AppContext) -> dict:
     for pid, p in positions.items():
         q = ctx.store.get_quote(p.symbol)
         qs.append(q)
-        last = q.last if q else p.cost
+        last = q.last if (q is not None and q.last is not None) else p.cost
         pnl = (last - p.cost) * p.shares if p.shares else 0.0
         pnl_pct = ((last / p.cost - 1.0) * 100.0) if p.cost > 0 else 0.0
         if q is not None:
@@ -264,11 +344,14 @@ def get_signal(ctx: AppContext, signal_id: str) -> Optional[dict]:
 
 def get_markets(ctx: AppContext) -> dict:
     healths = {h.provider: h for h in ctx.router.health_list()}
-    out: dict[str, dict] = {}
     quotes = ctx.store.get_quotes()
+    index_map = getattr(ctx.bundle.markets, "index", None) or {}
+    out: dict[str, dict] = {}
     for key, mk in (("a", T.Market.A), ("hk", T.Market.HK), ("us", T.Market.US)):
+        idx_sym = index_map.get(key)
+        idx = _build_index(quotes.get(idx_sym) if idx_sym else None, ctx, mk)
         if not ctx.bundle.app.markets_enabled.get(key, False):
-            out[key] = {"enabled": False, "session": "DISABLED"}
+            out[key] = {"enabled": False, "session": "DISABLED", "index": idx}
             continue
         mq = [q for q in quotes.values() if q.market == mk]
         session = _session(ctx, mk)
@@ -276,11 +359,14 @@ def get_markets(ctx: AppContext) -> dict:
             out[key] = {
                 "enabled": True, "session": session, "count": 0,
                 "up": 0, "down": 0, "flat": 0, "latency_p50_ms": None,
-                "data_status": "UNKNOWN", "observed_age_ms": 0,
+                "data_status": "UNKNOWN", "observed_age_ms": 0, "index": idx,
             }
             continue
-        up = sum(1 for q in mq if q.prev_close > 0 and q.last > q.prev_close)
-        down = sum(1 for q in mq if q.prev_close > 0 and q.last < q.prev_close)
+        # 宽度统计：价格缺失（None）的标的跳过，避免 None 比较崩溃
+        up = sum(1 for q in mq if q.prev_close is not None and q.prev_close > 0
+                 and q.last is not None and q.last > q.prev_close)
+        down = sum(1 for q in mq if q.prev_close is not None and q.prev_close > 0
+                   and q.last is not None and q.last < q.prev_close)
         flat = len(mq) - up - down
         # 该市场主源延迟
         latency = None
@@ -300,6 +386,7 @@ def get_markets(ctx: AppContext) -> dict:
             "latency_p50_ms": latency,
             "data_status": S.market_data_status(session, age, mc),
             "observed_age_ms": age,
+            "index": idx,
         }
     # 顶层 observed_age_ms：全市场真实年龄最大值（不伪造 0）
     out["observed_age_ms"] = S.market_observed_age_ms(list(quotes.values()))

@@ -13,9 +13,28 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 from datetime import datetime
+
+
+# --------------------------------------------------------------------------- #
+# 指数标的注册表（供 provider 符号映射区分指数 / 个股）
+# 腾讯对港股/美股指数使用 `r_` 前缀（如 r_hkHSI / r_usIXIC），对 A 股指数无前缀。
+# 该集合在应用启动时由配置（markets.toml [index]）注册，供 to_provider_symbol 使用。
+# --------------------------------------------------------------------------- #
+_INDEX_SYMBOLS: set[str] = set()
+
+
+def register_index_symbols(symbols: Iterable[str]) -> None:
+    """注册指数标的（如 000001.SH / HSI.HK / IXIC.US），用于 provider 符号映射。"""
+    _INDEX_SYMBOLS.clear()
+    _INDEX_SYMBOLS.update(symbols)
+
+
+def is_index_symbol(symbol: str) -> bool:
+    """symbol 是否为已注册的指数标的（影响 tencent 查询符号的 r_ 前缀）。"""
+    return symbol in _INDEX_SYMBOLS
 
 
 # --------------------------------------------------------------------------- #
@@ -104,12 +123,14 @@ class Quote:
     market: Market
     timestamp: datetime            # 源行情时间（交易所时间，Point-in-Time）
     name: str = ""                 # 名称（扩展字段，便于展示/落 instruments）
-    open: float = 0.0
-    high: float = 0.0
-    low: float = 0.0
-    close: float = 0.0
-    last: float = 0.0
-    prev_close: float = 0.0        # 昨收（振幅/涨跌幅参考）
+    # 价格字段允许 None：源返回 "--"/空/字段缺失时解析为 None（缺失），而非 0.0。
+    # 0.0 会被数据质量闸门误判为「非法价格」，且前端会把缺失渲染成 "0.00"。
+    open: Optional[float] = 0.0
+    high: Optional[float] = 0.0
+    low: Optional[float] = 0.0
+    close: Optional[float] = 0.0
+    last: Optional[float] = 0.0
+    prev_close: Optional[float] = 0.0   # 昨收（振幅/涨跌幅参考）
     volume: int = 0                # 成交量（股）
     amount: float = 0.0            # 成交额（元/本币）
     turnover: float = 0.0          # 换手率（%）
@@ -299,9 +320,11 @@ def to_provider_symbol(symbol: str, provider: str) -> str:
         if mk in ("SH", "SZ"):
             return ("sh" if mk == "SH" else "sz") + code
         if mk == "HK":
-            return "hk" + code
+            # 港股指数（如恒生 HSI）腾讯使用 r_ 前缀：r_hkHSI
+            return ("r_hk" if is_index_symbol(symbol) else "hk") + code
         if mk == "US":
-            return "us" + code.upper()
+            # 美股指数（如纳指 IXIC）腾讯使用 r_ 前缀：r_usIXIC
+            return ("r_us" if is_index_symbol(symbol) else "us") + code.upper()
     if provider == "sina":
         if mk in ("SH", "SZ"):
             return ("sh" if mk == "SH" else "sz") + code

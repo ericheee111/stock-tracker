@@ -71,11 +71,17 @@ class EastmoneyProvider(MarketDataProvider):
         return self._normalize_snapshot(payload, market)
 
     def _normalize_single(self, d: dict, market: T.Market) -> T.Quote:
-        last = (d.get("f43") or 0) / 100.0
-        high = (d.get("f44") or 0) / 100.0
-        low = (d.get("f45") or 0) / 100.0
-        open_ = (d.get("f46") or 0) / 100.0
-        prev = (d.get("f60") or 0) / 100.0
+        # 价格字段缺失（源返回 null/缺字段）→ None，不要回落 0.0（0.0 会被 DQ 误判非法）
+        f43 = d.get("f43")
+        f44 = d.get("f44")
+        f45 = d.get("f45")
+        f46 = d.get("f46")
+        f60 = d.get("f60")
+        last = None if f43 is None else f43 / 100.0
+        high = None if f44 is None else f44 / 100.0
+        low = None if f45 is None else f45 / 100.0
+        open_ = None if f46 is None else f46 / 100.0
+        prev = None if f60 is None else f60 / 100.0
         code = str(d.get("f57") or "")
         name = (d.get("f58") or "") or ""  # 单票布局 f58=名称
         symbol = f"{code}.SH" if market == T.Market.A and code else ""
@@ -89,11 +95,13 @@ class EastmoneyProvider(MarketDataProvider):
     def _normalize_snapshot(self, item: dict, market: T.Market) -> T.Quote:
         f13 = item.get("f13")
         code = str(item.get("f12") or "")
-        last = float(item.get("f2") or 0.0)
-        high = float(item.get("f15") or 0.0)
-        low = float(item.get("f16") or 0.0)
-        open_ = float(item.get("f17") or 0.0)
-        prev = float(item.get("f18") or 0.0)
+        # 价格字段缺失 → None（不要 0.0）
+        f2 = item.get("f2")
+        last = None if f2 is None else float(f2)
+        high = None if item.get("f15") is None else float(item.get("f15"))
+        low = None if item.get("f16") is None else float(item.get("f16"))
+        open_ = None if item.get("f17") is None else float(item.get("f17"))
+        prev = None if item.get("f18") is None else float(item.get("f18"))
         volume = int(float(item.get("f5") or 0.0)) * 100  # 手 → 股（估算）
         amount = float(item.get("f6") or 0.0)
         turnover = float(item.get("f8") or 0.0)

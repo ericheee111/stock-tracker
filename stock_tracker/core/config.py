@@ -72,6 +72,9 @@ class MarketsConfig:
     hk: MarketConfig = field(default_factory=MarketConfig)
     us: MarketConfig = field(default_factory=MarketConfig)
     price_limit_version: str = "unknown"
+    # 各市场代表性指数 symbol（如 {"a":"000001.SH","hk":"HSI.HK","us":"IXIC.US"}）。
+    # 供 handlers 构造指数卡，并经由 T.register_index_symbols 让 provider 符号映射区分指数。
+    index: dict = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -191,11 +194,16 @@ def load_markets(path: str) -> MarketsConfig:
             **over,
         )
 
+    raw_index = d.get("index", {}) or {}
+    index_map = {k: v for k, v in raw_index.items() if v}
+    # 注册指数标的符号，供 to_provider_symbol 对港/美指数使用 r_ 前缀（r_hkHSI / r_usIXIC）
+    T.register_index_symbols(list(index_map.values()))
     return MarketsConfig(
         a=mk("a"),
         hk=mk("hk"),
         us=mk("us"),
         price_limit_version=_opt(d.get("price_limit_rules", {}), "version", "unknown"),
+        index=index_map,
     )
 
 

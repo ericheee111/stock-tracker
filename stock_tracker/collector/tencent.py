@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from typing import Optional
 
 from ..core import types as T
 from .provider import MarketDataProvider
@@ -43,13 +44,23 @@ def _parse_dt(s: str) -> datetime:
     return datetime.now()
 
 
-def _f(parts: list[str], idx: int, default: float = 0.0) -> float:
-    if idx < len(parts):
-        try:
-            return float(parts[idx])
-        except (ValueError, TypeError):
-            return default
-    return default
+def _f(parts: list[str], idx: int, default: float = 0.0) -> Optional[float]:
+    """取第 idx 段并转 float。
+
+    - 索引越界 → 返回 default（保持旧行为：缺字段回落 0.0，测试 test_malformed_body 依赖）。
+    - 字段存在但不可解析（如源返回 ``--`` / 空字符串）→ 返回 ``None``（价格缺失），
+      而非 ``0.0``。``0.0`` 会被数据质量闸门误判为「非法价格」，且前端会把缺失渲染成
+      ``0.00``；``None`` 才是正确的「无数据」语义。
+    """
+    if idx < 0 or idx >= len(parts):
+        return default
+    raw = (parts[idx] or "").strip()
+    if raw == "":
+        return default
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        return None
 
 
 def _parse_body(body: str, market: T.Market) -> T.Quote:
@@ -60,8 +71,9 @@ def _parse_body(body: str, market: T.Market) -> T.Quote:
     high = _f(parts, 33)
     low = _f(parts, 34)
 
-    # 成交量（股）
+    # 成交量（股）；量/额/换手为非价格字段，缺失时回落 0.0，避免下游算术崩溃
     vol = _f(parts, 6)
+    vol = vol if vol is not None else 0.0
     if market == T.Market.A:
         vol *= 100.0  # 手 → 股
 
@@ -70,15 +82,19 @@ def _parse_body(body: str, market: T.Market) -> T.Quote:
     if "/" in amt_raw:
         segs = amt_raw.split("/")
         amount = _f(segs, 2) if len(segs) >= 3 else 0.0
+        amount = amount if amount is not None else 0.0
         if amount == 0.0 and len(parts) > 37:
-            amount = _f(parts, 37) * (10000.0 if market == T.Market.A else 1.0)
+            a37 = _f(parts, 37)
+            amount = (a37 * (10000.0 if market == T.Market.A else 1.0)) if a37 is not None else 0.0
     else:
-        amount = _f(parts, 37)
+        a37 = _f(parts, 37)
+        amount = a37 if a37 is not None else 0.0
         if market == T.Market.A:
             amount *= 10000.0  # 万元 → 元
 
     # 换手率（%）
     turnover = _f(parts, 38)
+    turnover = turnover if turnover is not None else 0.0
 
     ts = _parse_dt(parts[30] if len(parts) > 30 else "")
 
@@ -87,6 +103,7 @@ def _parse_body(body: str, market: T.Market) -> T.Quote:
         market=market,
         name=parts[1] if len(parts) > 1 else "",
         timestamp=ts,
+        # 价格字段允许为 None（源返回 "--"/空 → 缺失），非价格字段已回落数值
         open=open_, high=high, low=low, close=last, last=last, prev_close=prev,
         volume=int(vol), amount=amount, turnover=turnover,
     )
@@ -130,6 +147,9 @@ class TencentProvider(MarketDataProvider):
 
     @staticmethod
     def _resolve_symbol(ps: str) -> str:
+        # 港股/美股指数腾讯使用 r_ 前缀（如 r_hkHSI / r_usIXIC），先剥离
+        if ps.startswith("r_"):
+            ps = ps[2:]
         code = ps[2:]
         if ps.startswith("hk"):
             return f"{code}.HK"

@@ -26,6 +26,12 @@ from .scoring import score as score_signal
 from .state_machine import SignalStateMachine
 
 
+def _price_usable(q: T.Quote) -> bool:
+    """价格字段是否可用于策略/特征计算（无 None 且为正）。"""
+    return all(p is not None and p > 0 for p in
+               (q.last, q.prev_close, q.open, q.high, q.low))
+
+
 class SignalManager:
     """信号编排器。"""
 
@@ -85,7 +91,13 @@ class SignalManager:
         self.repo.save_quote(quote)
         self._bus.publish("quote", to_jsonable(quote))
 
-        # 3) 上下文
+        # 3) 价格不可用（缺失/非正）→ 数据无效，跳过策略/评分/状态机管线。
+        #    否则下游特征/策略对 None 价格做除法/比较会抛 TypeError，且不应基于
+        #    无效行情产生信号（与 DQ 闸门 INVALID 语义一致）。
+        if not _price_usable(quote):
+            return []
+
+        # 4) 上下文
         ctx = self.engine.build(symbol, quote, bars, regime, sector, dq, self.bundle)
 
         # 4) 策略候选

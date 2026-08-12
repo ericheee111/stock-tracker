@@ -191,25 +191,31 @@
   }
 
   /* ============================================================
-   * 指数卡片（来自 /api/markets，按当前市场过滤）
+   * 指数卡片（来自 /api/markets 或 /api/overview 的 markets[market].index）
+   * 后端 markets 为 dict（{a:{...},hk:{...},us:{...},observed_age_ms}），
+   * 每个市场含单一代表性指数 index:{symbol,last,change,change_pct,data_status}。
    * ============================================================ */
   function renderIndexGrid(markets, market) {
-    if (!Array.isArray(markets) || !markets.length) {
+    if (!markets || typeof markets !== 'object') {
       return '<div class="card-empty">暂无指数数据</div>';
     }
-    const m = markets.filter(function (x) { return x.market === market; })[0] || markets[0];
-    const idx = m.indices || [];
-    if (!idx.length) return '<div class="card-empty">该市场暂无指数</div>';
-    return '<div class="index-grid">' + idx.map(function (i) {
-      const chg = F.quoteChangePct(i);
-      const sym = esc(i.symbol);
-      return '<div class="index-card" data-symbol="' + sym + '">' +
-        '<div class="index-name">' + esc(i.name || i.symbol) + '</div>' +
-        '<div class="index-value live-price" data-symbol="' + sym + '">' + F.quotePrice(i) + '</div>' +
-        '<div class="index-chg live-chg ' + F.chgClass(chg) + '" data-symbol="' + sym + '">' + F.fmtPct(chg) + '</div>' +
-        '<div class="index-status live-status" data-symbol="' + sym + '">' + F.statusBadge(i.data_status, i.observed_age_ms) + '</div>' +
-        '</div>';
-    }).join('') + '</div>';
+    const m = markets[market] || markets.a || markets.hk || markets.us;
+    if (!m) return '<div class="card-empty">暂无指数数据</div>';
+    const idx = m.index;
+    if (!idx || !idx.symbol) return '<div class="card-empty">该市场暂无指数</div>';
+    return '<div class="index-grid">' + renderIndexCard(idx) + '</div>';
+  }
+
+  /** 单张指数卡（指数 index 为单一对象，不再是需要遍历的数组） */
+  function renderIndexCard(i) {
+    const chg = F.quoteChangePct(i);
+    const sym = esc(i.symbol);
+    return '<div class="index-card" data-symbol="' + sym + '">' +
+      '<div class="index-name">' + esc(i.name || i.symbol) + '</div>' +
+      '<div class="index-value live-price" data-symbol="' + sym + '">' + F.quotePrice(i) + '</div>' +
+      '<div class="index-chg live-chg ' + F.chgClass(chg) + '" data-symbol="' + sym + '">' + F.fmtPct(chg) + '</div>' +
+      '<div class="index-status live-status" data-symbol="' + sym + '">' + F.statusBadge(i.data_status, i.observed_age_ms) + '</div>' +
+      '</div>';
   }
 
   /* ============================================================

@@ -29,7 +29,8 @@ cold_universe = [
     "300059.SZ", "002415.SZ", "600887.SH", "603259.SH",
     "688981.SH", "000651.SZ", "601166.SH", "600309.SH",
     "00700.HK", "03690.HK", "09988.HK", "01810.HK", "00939.HK",
-    "AAPL.US", "MSFT.US", "NVDA.US", "TSLA.US", "GOOGL.US", "AMZN.US"
+    "AAPL.US", "MSFT.US", "NVDA.US", "TSLA.US", "GOOGL.US", "AMZN.US",
+    "HSI.HK", "IXIC.US"        # 港/美代表性指数（经腾讯 r_ 接口拉取，补齐指数卡）
 ]
 
 [markets]

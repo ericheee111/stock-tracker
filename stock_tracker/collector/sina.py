@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Optional
 
 from ..core import types as T
 from .provider import MarketDataProvider
@@ -22,11 +23,12 @@ def _resolve_symbol(ps: str) -> str:
     return code
 
 
-def _safe_float(v: str, default: float = 0.0) -> float:
+def _safe_float(v: str, default: float = 0.0) -> Optional[float]:
+    """转 float；值缺失/不可解析（如源返回 "--"）返回 None（价格缺失），而非 0.0。"""
     try:
         return float(v)
     except (ValueError, TypeError):
-        return default
+        return None
 
 
 class SinaProvider(MarketDataProvider):
@@ -70,7 +72,7 @@ class SinaProvider(MarketDataProvider):
         last = _safe_float(parts[3])
         high = _safe_float(parts[4])
         low = _safe_float(parts[5])
-        volume = int(_safe_float(parts[8]))
+        volume = int(_safe_float(parts[8]) or 0)  # 量缺失回落 0，避免 int(None)
         amount = _safe_float(parts[9])
         date_s = parts[10].strip()
         time_s = parts[11].strip()

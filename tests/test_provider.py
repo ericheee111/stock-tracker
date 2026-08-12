@@ -131,6 +131,23 @@ class TestTencentNormalize(unittest.TestCase):
         self.assertEqual(q.volume, 0)
         self.assertEqual(q.symbol, "")
 
+    def test_last_invalid_field_is_none(self):
+        # 源返回 "--"（停牌/无成交）等不可解析字段 → 解析为 None，而非 0.0。
+        # 0.0 会被数据质量闸门误判为「非法价格」(last<=0 → INVALID)，且前端会把
+        # 缺失渲染成 "0.00"；None 才是正确的「无数据」语义（修复 Bug D）。
+        parts = ["x"] * 39
+        parts[0] = "v_sh600519"; parts[1] = "贵州茅台"
+        parts[3] = "--"; parts[4] = "100.00"; parts[5] = "101.00"
+        parts[6] = "0"; parts[30] = "20260812150000"
+        parts[33] = "106.00"; parts[34] = "95.00"
+        parts[35] = "--/0/0"; parts[37] = "0"; parts[38] = "0.0"
+        body = "~".join(parts)
+        q = _parse_body(body, T.Market.A)
+        self.assertIsNone(q.last)                       # 关键：缺失价格 → None
+        self.assertAlmostEqual(q.prev_close, 100.0, places=2)  # 有效字段仍正常
+        self.assertAlmostEqual(q.high, 106.0, places=2)
+        self.assertAlmostEqual(q.low, 95.0, places=2)
+
 
 class TestEastmoneyNormalize(unittest.TestCase):
     def setUp(self):

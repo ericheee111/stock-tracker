@@ -103,12 +103,18 @@
   }
 
   /**
-   * 从 Quote dict 抽取最新价：优先 last，回退 close。
-   * 兼容后端 serializer 可能给出的字段名。
+   * 从 Quote dict 抽取最新价：优先 last。
+   * 缺失/非法的最新价（null / undefined / 0 / 非数）→ 破折号「—」，
+   * 绝不把后端的 None（缺失）渲染成 "0.00"（修复 quote.last=0 时指数/个股显示 0.00）。
    */
   function quotePrice(q) {
     if (!q) return '—';
-    return fmtPrice(def(q.last, q.close));
+    const last = q.last;
+    if (last === undefined || last === null ||
+        !Number.isFinite(Number(last)) || Number(last) === 0) {
+      return '—';
+    }
+    return fmtPrice(last);
   }
 
   /**

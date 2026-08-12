@@ -58,7 +58,10 @@ class DataQualityGate:
                                  ["时间戳来自未来"]), T.DataStatus.UNKNOWN
 
         # ---- 2. 完整性 ----
-        if quote.last <= 0 or quote.high <= 0 or quote.low <= 0 or quote.open <= 0:
+        # 价格字段为 None（源缺失）或 <=0（非法）均判 INVALID；None 不能参与比较，先单独判。
+        if (quote.last is None or quote.high is None or quote.low is None
+                or quote.open is None or quote.last <= 0 or quote.high <= 0
+                or quote.low <= 0 or quote.open <= 0):
             return T.DataQuality(T.QualityStatus.INVALID, 0,
                                  ["必填价格字段缺失/非法"]), T.DataStatus.UNKNOWN
         if quote.timestamp.year < 2000:  # 默认时间，视为缺失

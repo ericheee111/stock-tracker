@@ -79,32 +79,42 @@ class ProviderRouter:
 
     # ---- 快照（COLD） ----
     def fetch_snapshot(self, universe: Optional[list[str]] = None) -> list[T.Quote]:
+        qs: list[T.Quote] = []
         snap_provider = self.select(None, "snapshot")
+        covered: set[T.Market] = set()
         if snap_provider is not None:
             try:
-                qs = snap_provider.fetch_snapshot()
-                if qs:
-                    self.record_outcome(snap_provider.name, True, qs[0].latency, False)
-                    return qs
-                self.record_outcome(snap_provider.name, False, snap_provider.timeout * 1000.0, False)
+                snap = snap_provider.fetch_snapshot() or []
+                if snap:
+                    self.record_outcome(snap_provider.name, True, snap[0].latency, False)
+                    qs.extend(snap)
+                    # 记录快照源已覆盖的市场（东财快照仅含 A 股）
+                    for q in snap:
+                        covered.add(q.market)
+                else:
+                    self.record_outcome(snap_provider.name, False, snap_provider.timeout * 1000.0, False)
             except Exception:
                 self.record_outcome(snap_provider.name, False, snap_provider.timeout * 1000.0, True)
-        # 回退：主报价源拉 universe（保证降级态仍有 COLD 数据）
+        # 快照源未覆盖的市场（典型：港/美指数）→ 主报价源按 universe 补齐，保证 COLD 全宇宙可达
         if universe:
-            return self.fetch_quotes(universe)
-        return []
+            missing = [s for s in universe if T.market_from_symbol(s) not in covered]
+            if missing:
+                qs.extend(self.fetch_quotes(missing))
+        return qs
 
     # ---- 跨源偏差（低频抽样） ----
     def _maybe_cross_check(self, primary: MarketDataProvider, quotes: list[T.Quote]) -> None:
         if not quotes or random.random() > self._cross_sample_prob:
             return
         sample = random.choice(quotes)
+        if sample.last is None:
+            return
         secondary = self.select(sample.market, "quote")
         if secondary is None or secondary.name == primary.name:
             return
         try:
             others = secondary.fetch_quotes([sample.symbol])
-            if others:
+            if others and others[0].last is not None:
                 dev = abs(others[0].last - sample.last) / max(sample.last, 1e-9)
                 tr = self.trackers[primary.name]
                 tr.cross_source_deviation = 0.7 * tr.cross_source_deviation + 0.3 * dev
@@ -113,6 +123,8 @@ class ProviderRouter:
 
     def cross_check(self, symbol: str, q_primary: T.Quote, q_secondary: T.Quote) -> float:
         """显式跨源偏差计算（供调度按需调用）。"""
+        if q_primary.last is None or q_secondary.last is None:
+            return 0.0
         dev = abs(q_secondary.last - q_primary.last) / max(q_primary.last, 1e-9)
         tr = self.trackers.get(q_primary.source)
         if tr is not None:
