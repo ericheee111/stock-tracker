@@ -1,0 +1,24 @@
+# 风险阈值（PRD #14 / #23 / #11.5）
+
+[overextension]
+# 现价高于近期低点超此比例 → 追高惩罚（#14.3）
+max_gain_from_low_pct = 0.30
+# 高于入场区上限超此比例 → 惩罚
+max_above_entry_pct = 0.05
+
+[reward_risk]
+# 最小 R 倍数（#14.2）
+min_r_multiple = 2.0
+
+[portfolio_heat]
+max_heat_pct = 0.30        # 组合热度上限（占总风险预算）
+max_single_pct = 0.10      # 单股集中度上限
+max_theme_pct = 0.20       # 单主题集中度上限
+
+[regime_block]
+# 禁止新增强信号的 regime（链式：市场/板块前置）
+blocked_states = ["RISK_OFF", "PANIC_REBOUND"]
+
+[data_quality]
+min_score_to_strong = 60   # 强信号最低 DQ 分
+block_if_stale = true      # STALE/INVALID 阻断强信号（§6 / §11）

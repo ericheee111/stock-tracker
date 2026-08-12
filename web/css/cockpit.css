@@ -1,0 +1,301 @@
+/* =========================================================================
+ * cockpit.css —— 交易驾驶舱布局
+ * 概览卡片网格 / 指数卡 / Regime 卡 / 强势板块卡 / 宽度条 / 风险事件 /
+ * 机会雷达分组 / 信号卡 / 四分数 / 交易计划 / Why-Not-Buy 卡 /
+ * Next-Trigger 框 / What-Changed 标签 / 持仓卡 / 数据源健康卡。
+ * 复用 base.css 的玻璃拟态深色变量与 1px 哲学。
+ * ========================================================================= */
+
+/* ============================ 指数卡片 ============================ */
+.index-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.index-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 8px;
+  text-align: center;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: background var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.index-card:hover { background: #444446; transform: translateY(-1px); }
+.index-name { font-size: 12px; color: var(--text-3); }
+.index-value { font-size: 16px; font-weight: 700; margin: 4px 0; color: var(--text); font-family: var(--font-mono); }
+.index-chg { font-size: 12px; font-weight: 700; font-family: var(--font-mono); }
+.index-status { margin-top: 6px; }
+
+/* ============================ 总览网格（Regime / 板块 / 宽度 / 风险） ============================ */
+.overview-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+/* Regime 卡 */
+.regime-card { display: flex; flex-direction: column; gap: 10px; }
+.regime-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.regime-name { font-size: 16px; font-weight: 700; color: var(--text); }
+.regime-score {
+  display: inline-flex; align-items: baseline; gap: 2px;
+  font-family: var(--font-mono); font-weight: 700; font-size: 18px;
+}
+.regime-score small { font-size: 11px; color: var(--text-3); font-weight: 600; }
+.regime-factors { display: flex; flex-wrap: wrap; gap: 6px; }
+.factor-chip {
+  font-size: 11px; color: var(--text-2);
+  background: var(--bg-surface); border: 1px solid var(--border);
+  padding: 2px 8px; border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+}
+.factor-chip b { color: var(--text); font-weight: 700; }
+
+/* 强势板块卡 */
+.sector-list { display: flex; flex-direction: column; gap: 8px; }
+.sector-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 9px 11px;
+}
+.sector-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.sector-meta { display: flex; align-items: center; gap: 8px; }
+.sector-stage {
+  font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: var(--radius-xs);
+  color: #fff; white-space: nowrap;
+}
+.sector-score { font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--text-2); min-width: 34px; text-align: right; }
+.sector-crowd { font-size: 10.5px; color: var(--text-3); font-family: var(--font-mono); }
+
+/* 宽度条（A股：涨红跌绿） */
+.breadth-bar {
+  display: flex; height: 22px; border-radius: var(--radius-sm); overflow: hidden;
+  font-size: 11px; font-weight: 700; color: #fff; font-family: var(--font-mono);
+}
+.breadth-bar .seg-up   { background: var(--up);   display: flex; align-items: center; justify-content: center; }
+.breadth-bar .seg-flat { background: rgba(255,255,255,0.12); display: flex; align-items: center; justify-content: center; color: var(--text-2); }
+.breadth-bar .seg-down { background: var(--down); display: flex; align-items: center; justify-content: center; }
+.breadth-legend { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-3); margin-top: 6px; }
+.breadth-legend .up { color: var(--up); }
+.breadth-legend .down { color: var(--down); }
+
+/* 风险事件 */
+.risk-list { display: flex; flex-direction: column; gap: 8px; }
+.risk-item {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: 13px; color: var(--text-2);
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--status-stale);
+  border-radius: var(--radius-sm); padding: 9px 11px;
+}
+
+/* Top 机会列表 */
+.top-list { display: flex; flex-direction: column; gap: 10px; }
+.opp-card {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+  cursor: pointer; transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.opp-card:hover { background: #444446; border-color: var(--border-strong); transform: translateY(-1px); }
+.opp-main { flex: 1; min-width: 0; }
+.opp-name { font-size: 15px; font-weight: 600; color: var(--text); }
+.opp-code { font-size: 11px; color: var(--text-3); margin-left: 6px; }
+.opp-plan { font-size: 11.5px; color: var(--text-3); margin-top: 3px; font-family: var(--font-mono); }
+.opp-right { text-align: right; }
+.opp-price { font-size: 15px; font-weight: 700; color: var(--text); font-family: var(--font-mono); }
+
+/* ============================ 自选 / 持仓 ============================ */
+.signal-summary {
+  background: var(--bg-mid);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  font-weight: 600;
+  margin-bottom: 14px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+}
+.signal-summary b { font-size: 22px; color: var(--accent); font-family: var(--font-mono); }
+
+.group-title { font-size: 14px; margin: 14px 2px 8px; display: flex; align-items: center; gap: 6px; color: var(--text); }
+.group-count {
+  font-size: 11px; color: var(--text-3); font-family: var(--font-mono);
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: var(--radius-xs); padding: 1px 7px; margin-left: 2px;
+}
+
+/* 自选卡 */
+.wl-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 13px;
+  margin-bottom: 12px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.wl-card:hover { background: #444446; border-color: var(--border-strong); transform: translateY(-1px); }
+.wl-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.wl-name { font-size: 15px; font-weight: 600; color: var(--text); }
+.wl-code { font-size: 11px; color: var(--text-3); }
+.wl-quote { display: flex; align-items: center; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
+.wl-quote .live-price { font-size: 17px; font-weight: 700; color: var(--text); font-family: var(--font-mono); }
+.wl-quote .live-chg { font-size: 13px; font-weight: 700; font-family: var(--font-mono); }
+
+/* 四分数网格 */
+.score-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+  margin: 10px 0;
+}
+.score-cell { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.score-circle {
+  width: 46px; height: 46px; border-radius: 50%;
+  border: 3px solid var(--sc, var(--text-3));
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-weight: 700; font-size: 15px; color: var(--text);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
+}
+.score-label { font-size: 11px; color: var(--text-3); }
+
+/* 交易计划小行 */
+.wl-plan { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 6px 0; }
+.plan-row { display: flex; align-items: baseline; gap: 5px; }
+.plan-k { font-size: 11px; color: var(--text-3); }
+.plan-v { font-size: 12.5px; color: var(--text); font-family: var(--font-mono); font-weight: 600; }
+
+/* Next Trigger 框 */
+.next-trigger {
+  margin-top: 8px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-ring);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  font-size: 12.5px;
+  color: var(--text);
+  display: flex; gap: 6px; align-items: flex-start;
+}
+.next-trigger .nt-ico { color: var(--accent); flex: 0 0 auto; margin-top: 1px; }
+
+/* What Changed 标签 */
+.wc-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.wc-tag {
+  font-size: 11px; color: var(--accent);
+  background: var(--accent-soft); border: 1px solid var(--accent-ring);
+  padding: 2px 8px; border-radius: var(--radius-xs); font-family: var(--font-sans);
+}
+
+/* 持仓卡 */
+.pos-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 13px;
+  margin-bottom: 12px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+}
+.pos-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pos-name { font-size: 15px; font-weight: 600; color: var(--text); }
+.pos-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 14px; margin-top: 10px; }
+.pos-cell { display: flex; flex-direction: column; gap: 2px; }
+.pos-k { font-size: 11px; color: var(--text-3); }
+.pos-v { font-size: 14px; font-weight: 700; color: var(--text); font-family: var(--font-mono); }
+.pos-pnl.up   { color: var(--up); }    /* 盈利 —— 红（A股） */
+.pos-pnl.down { color: var(--down); }  /* 亏损 —— 绿（A股） */
+
+/* ============================ 机会雷达分组 ============================ */
+.radar-group { margin-bottom: 16px; }
+.radar-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 12px 13px;
+  margin-bottom: 10px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.radar-card:hover { background: #444446; border-color: var(--border-strong); transform: translateY(-1px); }
+.radar-card.g-exec { border-left-color: var(--status-live); }
+.radar-card.g-watch { border-left-color: #64d2ff; }
+.radar-card.g-breakout { border-left-color: #bf5af2; }
+.radar-card.g-pullback { border-left-color: #5e5ce6; }
+.radar-card.g-overext { border-left-color: var(--status-delayed); }
+.radar-card.g-early { border-left-color: var(--text-3); }
+.radar-card.g-data { border-left-color: var(--status-stale); }
+.radar-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.radar-name { font-size: 15px; font-weight: 600; color: var(--text); }
+.radar-sub { font-size: 11.5px; color: var(--text-3); margin-top: 4px; font-family: var(--font-mono); }
+.radar-scores { display: flex; gap: 14px; margin-top: 8px; flex-wrap: wrap; }
+.radar-score { display: flex; flex-direction: column; align-items: center; }
+.radar-score .rs-num { font-family: var(--font-mono); font-weight: 700; font-size: 14px; }
+.radar-score .rs-label { font-size: 10.5px; color: var(--text-3); }
+
+/* ============================ 信号详情（sheet 内部） ============================ */
+.detail-section { margin-bottom: 14px; }
+.detail-section-title {
+  font-size: 13px; font-weight: 700; margin-bottom: 8px;
+  display: flex; align-items: center; gap: 6px; color: var(--text);
+}
+.detail-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 12px;
+  background: var(--bg-mid); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 12px;
+}
+.detail-cell { display: flex; flex-direction: column; gap: 2px; }
+.detail-k { font-size: 11px; color: var(--text-3); }
+.detail-v { font-size: 14px; font-weight: 700; color: var(--text); font-family: var(--font-mono); }
+
+/* Why-Not-Buy 卡（负面理由 / 数据异常） */
+.whynot-card {
+  background: rgba(255, 69, 58, 0.08);
+  border: 1px solid rgba(255, 69, 58, 0.35);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+}
+.reason-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+}
+.reason-item:last-child { border-bottom: none; }
+.reason-ico { width: 18px; height: 18px; display: flex; align-items: center; flex-shrink: 0; margin-top: 1px; }
+.reason-name { font-weight: 600; font-size: 13.5px; color: var(--text); }
+.reason-note { font-size: 12px; color: var(--text-3); }
+.reason-pos .reason-ico { color: var(--status-live); }
+.reason-neg .reason-ico { color: var(--status-stale); }
+
+/* ============================ 数据源健康卡 ============================ */
+.health-list { display: flex; flex-direction: column; gap: 8px; }
+.health-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 10px 12px;
+}
+.health-name { font-size: 14px; font-weight: 600; color: var(--text); text-transform: capitalize; }
+.health-meta { display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 11.5px; color: var(--text-3); }
+.circuit {
+  font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: var(--radius-xs);
+  border: 1px solid currentColor; text-transform: uppercase;
+}
+.circuit.CLOSED { color: var(--status-live); }
+.circuit.OPEN   { color: var(--status-stale); }
+.circuit.HALF_OPEN { color: var(--status-delayed); }
+
+/* ============================ 研究室占位 ============================ */
+.research-card { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.research-ico { margin-top: 6px; }
+.research-title { font-size: 17px; font-weight: 700; font-family: var(--font-serif); color: var(--text); }
+.research-desc { font-size: 13px; color: var(--text-2); line-height: 1.7; }
+.research-tags { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 6px; }
+.mini-tag {
+  font-size: 11px; color: var(--text-2);
+  background: var(--bg-mid); border: 1px solid var(--border);
+  padding: 2px 8px; border-radius: var(--radius-xs); font-family: var(--font-sans);
+}

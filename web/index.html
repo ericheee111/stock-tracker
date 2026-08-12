@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Stock Tracker · 交易驾驶舱</title>
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/cockpit.css" />
+</head>
+<body>
+  <!-- ===== 顶部：产品名 + 市场切换 + 数据模式横幅（统一 sticky 头部） ===== -->
+  <header class="topbar">
+    <div class="topbar-row">
+      <div class="brand">
+        <span class="brand-logo"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 9l10 13 10-13L12 2z"/><path d="M2 9l10 4 10-4"/><path d="M12 13v9"/></svg></span>
+        <div class="brand-text">
+          <div class="brand-name">Stock Tracker</div>
+          <div class="brand-sub">系统化股票决策 · 交易驾驶舱</div>
+        </div>
+      </div>
+      <!-- 市场 Tab 切换：A股 / 港股 / 美股 -->
+      <nav class="market-tabs" id="marketTabs">
+        <button class="market-tab active" data-market="A">A股</button>
+        <button class="market-tab" data-market="HK">港股</button>
+        <button class="market-tab" data-market="US">美股</button>
+      </nav>
+    </div>
+
+    <!-- 数据模式横幅：真实/延迟/过期/测试 可见（LIVE/DEGRADED/DEMO） -->
+    <div id="banner" class="banner" aria-live="polite">
+      <div class="banner-loading">正在连接后端，加载真实行情…</div>
+    </div>
+  </header>
+
+  <!-- ===== 主体：页面 section，靠 JS 显隐 ===== -->
+  <main class="content">
+
+    <!-- ① 市场总览 -->
+    <section class="page active" id="page-overview">
+      <h2 class="page-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg> 市场总览</h2>
+
+      <!-- 三大市场指数卡片 -->
+      <div class="index-grid" id="indexGrid"></div>
+
+      <!-- 市场状态卡：Regime + 强势板块 + 宽度 + 风险事件 -->
+      <div class="overview-grid" id="overviewGrid"></div>
+
+      <!-- Top 机会 -->
+      <div class="section-label"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> 重点机会</div>
+      <div class="top-list" id="topList"></div>
+    </section>
+
+    <!-- ② 自选 / 持仓 -->
+    <section class="page" id="page-watch">
+      <h2 class="page-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> 自选 / 持仓</h2>
+      <div class="signal-summary" id="watchSummary"></div>
+      <div id="watchGroups"></div>
+      <div class="section-label"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 9l-5 5-3-3-4 4"/></svg> 持仓</div>
+      <div id="positionList"></div>
+    </section>
+
+    <!-- ③ 机会雷达 -->
+    <section class="page" id="page-radar">
+      <h2 class="page-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg> 机会雷达</h2>
+      <div class="section-label">按信号状态分层（可执行 / 等回踩 / 等突破 / 禁止追高 / 早期观察 / 数据异常）</div>
+      <div id="radarGroups"></div>
+    </section>
+
+    <!-- ④ 信号详情：以底部弹层（sheet）呈现，非独立 tab -->
+    <!-- ⑤ 研究室（占位） -->
+    <section class="page" id="page-research">
+      <h2 class="page-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6l-4 9a2 2 0 002 3h10a2 2 0 002-3l-4-9V2"/><path d="M9 2h6"/></svg> 研究室</h2>
+      <div class="card research-card">
+        <div class="research-ico"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6l-4 9a2 2 0 002 3h10a2 2 0 002-3l-4-9V2"/><path d="M9 2h6"/></svg></div>
+        <div class="research-title">概率模型 · 回测 · 组合优化</div>
+        <div class="research-desc">研究室为 Phase 2–5 预留模块：成功概率校准模型、策略回测、组合热力与仓位优化将在此落地。当前驾驶舱聚焦 Phase 1 的真实数据骨架与信号管线。</div>
+        <div class="research-tags">
+          <span class="mini-tag">概率校准（占位）</span>
+          <span class="mini-tag">回测引擎（占位）</span>
+          <span class="mini-tag">组合优化（占位）</span>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ===== 免责声明（真实数据版） ===== -->
+  <footer class="disclaimer" id="disclaimer">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;display:inline-block;margin-right:4px"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    本页所有行情与信号均来自后端真实行情接口（腾讯 / 东财 / 新浪公开数据），经数据质量闸门校验后展示。<strong>延迟（DELAYED）/ 过期（STALE）/ 异常（UNKNOWN）数据已逐条标注</strong>，请勿将延迟数据当作实时数据使用。本系统仅作辅助参考，不构成任何投资建议。市场有风险，决策需谨慎。
+  </footer>
+
+  <!-- ===== 底部：4 个 Tab 导航 ===== -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-page="overview"><span class="nav-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></span><span>总览</span></button>
+    <button class="nav-btn" data-page="watch"><span class="nav-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span><span>自选</span></button>
+    <button class="nav-btn" data-page="radar"><span class="nav-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span><span>雷达</span></button>
+    <button class="nav-btn" data-page="research"><span class="nav-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6l-4 9a2 2 0 002 3h10a2 2 0 002-3l-4-9V2"/><path d="M9 2h6"/></svg></span><span>研究室</span></button>
+  </nav>
+
+  <!-- ===== 信号详情弹层 ===== -->
+  <div class="sheet-mask" id="sheetMask" hidden>
+    <div class="sheet" id="sheet"></div>
+  </div>
+
+  <!-- 轻提示 -->
+  <div class="toast" id="toast" hidden></div>
+
+  <!-- 脚本：先工具，后网络层，再渲染，最后启动（已废弃 mock-data.js） -->
+  <script src="js/format.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/sse.js"></script>
+  <script src="js/components.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

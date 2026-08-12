@@ -1,0 +1,375 @@
+"""REST 端点实现（§9.1）。
+
+所有函数接收 ``AppContext``，返回可 JSON 序列化的 dict。行情/信号类响应通过
+``serializers`` 强制附加 ``data_status`` 与 ``observed_age_ms``。本模块只读
+MarketStore + Repository，绝不调用上游 Provider。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Optional
+
+from ..core import types as T
+from ..core.config import ConfigBundle
+from ..core.store import MarketStore
+from ..storage.repository import Repository, to_jsonable
+from . import serializers as S
+from .sse import SSEHub
+
+
+@dataclass
+class AppContext:
+    """API 共享上下文（由 __main__ 装配）。"""
+
+    bundle: ConfigBundle
+    store: MarketStore
+    repo: Repository
+    router: Any                 # ProviderRouter
+    signal_manager: Any         # SignalManager
+    sse_hub: SSEHub
+    web_root: str = "web"
+
+
+# --------------------------------------------------------------------------- #
+# 内部工具
+# --------------------------------------------------------------------------- #
+def _best_signal_for(ctx: AppContext, symbol: str) -> Optional[dict]:
+    sigs = ctx.store.get_signals_by_symbol(symbol)
+    if not sigs:
+        return None
+    best = max(sigs, key=lambda s: (s.scores.opportunity if s.scores else 0, s.state_changed_at))
+    return S.serialize_signal(best)
+
+
+def _top_opportunities(ctx: AppContext, limit: int = 12) -> list[dict]:
+    sigs = list(ctx.store.get_signals().values())
+    sigs.sort(key=lambda s: (s.scores.opportunity if s.scores else 0), reverse=True)
+    out: list[dict] = []
+    for s in sigs[:limit]:
+        out.append({
+            "symbol": s.symbol,
+            "market": s.market.value,
+            "state": s.state.value,
+            "strategy_id": s.strategy_id,
+            "scores": S.serialize_signal(s).get("scores"),
+            "reason": s.reason,
+            "next_trigger": s.next_trigger,
+            "data_status": s.data_status.value if s.data_status else "UNKNOWN",
+        })
+    return out
+
+
+def _market_cfg(ctx: AppContext, market: T.Market):
+    """取某市场的配置（用于新鲜度阈值）。"""
+    return {"A": ctx.bundle.markets.a, "HK": ctx.bundle.markets.hk,
+            "US": ctx.bundle.markets.us}[market.value]
+
+
+def _build_breadth(ctx: AppContext) -> dict:
+    """市场宽度汇总（§9 契约：前端 UI.renderBreadthCard 依赖）。
+
+    结构：{a:{advancers,decliners,flat,ratio}, hk:{...}, us:{...}, total:{...}}。
+    ratio = 上涨家数 / (上涨 + 下跌)，无涨跌时记 0。
+    """
+    quotes = list(ctx.store.get_quotes().values())
+    out: dict[str, dict] = {}
+    adv_total = dec_total = flat_total = 0
+    for key, mk in (("a", T.Market.A), ("hk", T.Market.HK), ("us", T.Market.US)):
+        if not ctx.bundle.app.markets_enabled.get(key, False):
+            out[key] = {"enabled": False, "advancers": 0, "decliners": 0,
+                        "flat": 0, "ratio": 0.0}
+            continue
+        mq = [q for q in quotes if q.market == mk]
+        adv = sum(1 for q in mq if q.prev_close > 0 and q.last > q.prev_close)
+        dec = sum(1 for q in mq if q.prev_close > 0 and q.last < q.prev_close)
+        flat = len(mq) - adv - dec
+        denom = adv + dec
+        out[key] = {
+            "advancers": adv, "decliners": dec, "flat": flat,
+            "ratio": round(adv / denom, 4) if denom > 0 else 0.0,
+        }
+        adv_total += adv
+        dec_total += dec
+        flat_total += flat
+    denom = adv_total + dec_total
+    out["total"] = {
+        "advancers": adv_total, "decliners": dec_total, "flat": flat_total,
+        "ratio": round(adv_total / denom, 4) if denom > 0 else 0.0,
+    }
+    return out
+
+
+def _active_risk_events(ctx: AppContext) -> list[dict]:
+    """当前活跃的高风险信号（§9 契约：前端 UI.renderRiskCard 依赖）。
+
+    来源：SignalManager 维护的 store 信号中处于活跃态（WATCH/ARMED/TRIGGERED/
+    ACTIVE/TRIM/OVEREXTENDED）且风险分偏高或已标记为追高的条目。无则空数组。
+    """
+    active = ctx.store.active_signal_states()
+    events: list[dict] = []
+    for sig in ctx.store.get_signals().values():
+        if sig.state not in active:
+            continue
+        risk = sig.scores.risk if sig.scores else 0
+        level = "HIGH" if risk >= 60 else ("MEDIUM" if risk >= 35 else "LOW")
+        if risk >= 35 or sig.state == T.SignalState.OVEREXTENDED:
+            events.append({
+                "symbol": sig.symbol,
+                "market": sig.market.value,
+                "signal_id": sig.signal_id,
+                "state": sig.state.value,
+                "level": level,
+                "risk_score": risk,
+                "reason": sig.reason or "",
+            })
+    events.sort(key=lambda e: e["risk_score"], reverse=True)
+    return events
+
+
+def _response_freshness(ctx: AppContext, quotes: list) -> tuple[str, int]:
+    """聚合一组 quote 的新鲜度，供列表类端点的顶层 data_status/observed_age_ms 使用。
+
+    不伪造实时性：observed_age_ms 取各 quote 真实年龄的最大值；data_status 取
+    各 quote 按市场阈值判定后的最严重者。
+    """
+    ages = [S.recompute_age_ms(q) for q in quotes if q is not None]
+    age = max(ages) if ages else 0
+    if age <= 0:
+        return "UNKNOWN", 0
+    order = {"UNKNOWN": 0, "LIVE": 1, "DELAYED": 2, "STALE": 3}
+    worst = "LIVE"
+    for q in quotes:
+        if q is None:
+            continue
+        st = S.quote_data_status(S.recompute_age_ms(q), _market_cfg(ctx, q.market))
+        if order.get(st.value, 0) > order.get(worst, 0):
+            worst = st.value
+    return worst, age
+
+
+# --------------------------------------------------------------------------- #
+# 端点
+# --------------------------------------------------------------------------- #
+def get_overview(ctx: AppContext) -> dict:
+    healths = ctx.router.health_list()
+    meta = S.build_meta(ctx.bundle, healths, ctx.store)
+    regime = ctx.store.get_regime()
+    heat = ctx.signal_manager._portfolio_heat() if ctx.signal_manager else 0.0
+    quotes = ctx.store.get_quotes()
+    return {
+        "meta": meta,
+        "regime": to_jsonable(regime) if regime else None,
+        "portfolio_heat": round(heat, 3),
+        "top_opportunities": _top_opportunities(ctx),
+        # 宽度汇总（§9 契约：UI.renderBreadthCard 依赖）
+        "breadth": _build_breadth(ctx),
+        # 活跃风险事件（§9 契约：UI.renderRiskCard 依赖）
+        "risk_events": _active_risk_events(ctx),
+        # 顶层附带，满足「行情/信号响应必含」契约（概览层面用整体模式表达）
+        "data_status": meta["data_mode"],
+        "observed_age_ms": S.market_observed_age_ms(list(quotes.values())),
+    }
+
+
+def get_watchlist(ctx: AppContext) -> dict:
+    items = ctx.store.get_watchlist()
+    out: list[dict] = []
+    qs: list = []
+    for sym, it in items.items():
+        q = ctx.store.get_quote(sym)
+        qs.append(q)
+        entry = {
+            "symbol": sym,
+            "market": it.market.value,
+            "added_at": it.added_at.isoformat() if it.added_at else None,
+            "note": it.note,
+            "quote": S.serialize_quote(q, _market_cfg(ctx, q.market)) if q else None,
+            "signal": _best_signal_for(ctx, sym),
+        }
+        out.append(entry)
+    ds, age = _response_freshness(ctx, qs)
+    return {"watchlist": out, "count": len(out),
+            "data_status": ds, "observed_age_ms": age}
+
+
+def get_positions(ctx: AppContext) -> dict:
+    positions = ctx.store.get_positions()
+    out: list[dict] = []
+    qs: list = []
+    for pid, p in positions.items():
+        q = ctx.store.get_quote(p.symbol)
+        qs.append(q)
+        last = q.last if q else p.cost
+        pnl = (last - p.cost) * p.shares if p.shares else 0.0
+        pnl_pct = ((last / p.cost - 1.0) * 100.0) if p.cost > 0 else 0.0
+        if q is not None:
+            mc = _market_cfg(ctx, q.market)
+            pos_ds = S.quote_data_status(S.recompute_age_ms(q), mc).value
+            pos_age = S.recompute_age_ms(q)
+        else:
+            pos_ds, pos_age = "UNKNOWN", 0
+        out.append({
+            "id": pid,
+            "symbol": p.symbol,
+            "market": p.market.value,
+            "shares": p.shares,
+            "cost": p.cost,
+            "last": last,
+            "pnl": round(pnl, 2),
+            "pnl_pct": round(pnl_pct, 2),
+            "signal": _best_signal_for(ctx, p.symbol),
+            "data_status": pos_ds,
+            "observed_age_ms": pos_age,
+        })
+    ds, age = _response_freshness(ctx, qs)
+    return {"positions": out, "count": len(out),
+            "data_status": ds, "observed_age_ms": age}
+
+
+def get_radar(ctx: AppContext) -> dict:
+    sigs = list(ctx.store.get_signals().values())
+    sigs.sort(key=lambda s: (s.scores.opportunity if s.scores else 0), reverse=True)
+    signals_out = [S.serialize_signal(s) for s in sigs]
+    # 候选：有行情但尚无信号的自选标的
+    candidates: list[dict] = []
+    qs: list = []
+    wl = ctx.store.get_watchlist()
+    for sym in wl:
+        if not ctx.store.get_signals_by_symbol(sym):
+            q = ctx.store.get_quote(sym)
+            if q:
+                qs.append(q)
+                candidates.append(S.serialize_quote(q, _market_cfg(ctx, q.market)))
+    ds, age = _response_freshness(ctx, qs)
+    return {
+        "signals": signals_out,
+        "candidates": candidates,
+        "count": len(signals_out),
+        "data_status": ds, "observed_age_ms": age,
+    }
+
+
+def get_signal(ctx: AppContext, signal_id: str) -> Optional[dict]:
+    sig = ctx.store.get_signal(signal_id)
+    if sig is None:
+        return None
+    history = ctx.repo.load_signal_history(signal_id)
+    serialized = S.serialize_signal(sig)
+    serialized["history"] = history
+    serialized["why_not_buy"] = (sig.scores.negative_reasons if sig.scores else [])
+    serialized["positive_reasons"] = (sig.scores.positive_reasons if sig.scores else [])
+    return serialized
+
+
+def get_markets(ctx: AppContext) -> dict:
+    healths = {h.provider: h for h in ctx.router.health_list()}
+    out: dict[str, dict] = {}
+    quotes = ctx.store.get_quotes()
+    for key, mk in (("a", T.Market.A), ("hk", T.Market.HK), ("us", T.Market.US)):
+        if not ctx.bundle.app.markets_enabled.get(key, False):
+            out[key] = {"enabled": False, "session": "DISABLED"}
+            continue
+        mq = [q for q in quotes.values() if q.market == mk]
+        session = _session(ctx, mk)
+        if not mq:
+            out[key] = {
+                "enabled": True, "session": session, "count": 0,
+                "up": 0, "down": 0, "flat": 0, "latency_p50_ms": None,
+                "data_status": "UNKNOWN", "observed_age_ms": 0,
+            }
+            continue
+        up = sum(1 for q in mq if q.prev_close > 0 and q.last > q.prev_close)
+        down = sum(1 for q in mq if q.prev_close > 0 and q.last < q.prev_close)
+        flat = len(mq) - up - down
+        # 该市场主源延迟
+        latency = None
+        for pc in ctx.bundle.providers:
+            if pc.primary and key in pc.markets:
+                h = healths.get(pc.name)
+                if h:
+                    latency = round(h.latency_p50, 1)
+        mc = _market_cfg(ctx, mk)
+        age = S.market_observed_age_ms(mq)
+        # 新鲜度：结合「行情时段」+「真实年龄」（收盘后 EOD 绝不 LIVE）
+        out[key] = {
+            "enabled": True,
+            "session": session,
+            "count": len(mq),
+            "up": up, "down": down, "flat": flat,
+            "latency_p50_ms": latency,
+            "data_status": S.market_data_status(session, age, mc),
+            "observed_age_ms": age,
+        }
+    # 顶层 observed_age_ms：全市场真实年龄最大值（不伪造 0）
+    out["observed_age_ms"] = S.market_observed_age_ms(list(quotes.values()))
+    return out
+
+
+def _session(ctx: AppContext, market: T.Market) -> str:
+    from ..core.clock import session_of
+    return session_of(ctx.bundle, market)
+
+
+def get_provider_health(ctx: AppContext) -> dict:
+    healths = ctx.router.health_list()
+    return {
+        "providers": [S.serialize_health(h) for h in healths],
+        "data_status": "LIVE", "observed_age_ms": 0,
+    }
+
+
+def get_config(ctx: AppContext) -> dict:
+    s = ctx.bundle.strategies
+    r = ctx.bundle.risk
+    return {
+        "strategies": {
+            "s1": {"enabled": s.s1.enabled, "min_opportunity": s.s1.min_opportunity,
+                   "min_confidence": s.s1.min_confidence},
+            "s2": {"enabled": s.s2.enabled, "min_opportunity": s.s2.min_opportunity,
+                   "min_confidence": s.s2.min_confidence},
+            "s3": {"enabled": s.s3.enabled},
+        },
+        "risk": {
+            "min_r_multiple": r.min_r_multiple,
+            "overextension_max_gain_from_low_pct": r.overextension_max_gain_from_low_pct,
+            "max_heat_pct": r.max_heat_pct,
+            "regime_blocked_states": r.regime_blocked_states,
+            "dq_block_if_stale": r.dq_block_if_stale,
+            "dq_min_score_to_strong": r.dq_min_score_to_strong,
+        },
+        "data_status": "LIVE", "observed_age_ms": 0,
+    }
+
+
+def get_sectors(ctx: AppContext) -> dict:
+    sectors = ctx.store.get_sectors()
+    return {
+        "sectors": [S.serialize_sector(s) for s in sectors.values()],
+        "count": len(sectors),
+        "data_status": "LIVE", "observed_age_ms": 0,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# 写操作（POST，轻量）：自选管理 + S3 事件注入（#17.5 仅注入，不接实时北向）
+# --------------------------------------------------------------------------- #
+def post_watch_add(ctx: AppContext, symbol: str, market: Optional[str] = None) -> dict:
+    from ..core import types as T
+    mk = T.market_from_symbol(symbol) if market is None else T.Market(market.upper())
+    item = T.WatchlistItem(symbol=symbol, market=mk)
+    ctx.store.add_watch(item)
+    ctx.repo.save_watchlist(list(ctx.store.get_watchlist().values()))
+    return {"ok": True, "symbol": symbol}
+
+
+def post_watch_remove(ctx: AppContext, symbol: str) -> dict:
+    ctx.store.remove_watch(symbol)
+    ctx.repo.save_watchlist(list(ctx.store.get_watchlist().values()))
+    return {"ok": True, "symbol": symbol}
+
+
+def post_event_inject(ctx: AppContext, payload: dict) -> dict:
+    """注入 S3 占位/盘后事件（仅作弱因子，绝不进入 TRIGGERED/ACTIVE 决策）。"""
+    ctx.repo.save_event(payload)
+    return {"ok": True, "event": payload.get("event_type")}

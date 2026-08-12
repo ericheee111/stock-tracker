@@ -1,0 +1,5 @@
+# stock-tracker 运行时仅依赖 Python 3.13 标准库，无需任何第三方包。
+# 设计目标：零第三方依赖、零 pip install 即可一键启动（start.bat / python -m stock_tracker）。
+#
+# 下方保留为空依赖清单，供云平台（Render/Railway/Fly 等）识别为 Python 项目。
+# 开发期 QA / 前端 UI 自动化验证可能用到 playwright（属于开发工具，非运行时依赖）。

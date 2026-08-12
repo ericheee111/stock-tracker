@@ -2341,3 +2341,21 @@ EXIT / INVALIDATED         -> 强卖
 这才是本产品真正的核心价值：
 
 > **不是告诉用户“它会不会涨”，而是系统化回答“这个机会值不值得做、什么时候做、错了怎么办、概率和赔率是否匹配”。**
+
+---
+
+## 38. 已验证策略 / ML 库与研发分工
+
+更深入的现成算法、论文证据、开源框架、生产采用等级、模型晋级制度，以及 Codex / WorkBuddy + hy3 的任务边界，统一维护在：
+
+`docs/VALIDATED-STRATEGY-ML-LIBRARY.md`
+
+该文档是本 PRD 的算法研究附录。研发时：
+
+- **生产 Baseline / Champion**：优先 Rule + Logistic + LightGBM + time-respecting probability calibration；
+- **Challenger**：DoubleEnsemble / TRA，后期可研究 DoubleAdapt；
+- **Shadow Research**：HIST / MASTER / LSTM/Transformer / FinRL-RL；
+- 新算法不得仅因为论文指标或历史回测漂亮直接进入正式信号；
+- 所有模型必须在本项目自己的 point-in-time A/H/US 数据上通过独立 walk-forward、真实交易成本、概率校准和 shadow 新样本验证；
+- 涉及 label、point-in-time、backtest、model/calibration、market rules、核心 scoring/risk/sector algorithm 的修改必须由 Codex 主做或至少 Codex Review；
+- 规格冻结后的普通 Provider、CRUD、前端、SSE、日志、配置、批量测试和运维脚本可由 WorkBuddy + hy3 并行实现。

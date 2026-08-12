@@ -1,0 +1,22 @@
+# 策略开关与阈值（PRD #10 / #11）。Phase1 实现 S1/S2/S3（S3 占位，#17.5 禁北向实时）
+
+[s1]
+enabled = true
+min_opportunity = 60
+min_confidence = 55
+# 放量突破延续
+params = { breakout_lookback = 20, vol_ratio_min = 1.5, near_high_pct = 0.03, half_life_hours = 48 }
+
+[s2]
+enabled = true
+min_opportunity = 55
+min_confidence = 50
+# 趋势回踩
+params = { pullback_depth_pct = 0.06, ma_period = 20, support_touch_pct = 0.02, half_life_hours = 48 }
+
+[s3]
+enabled = true
+min_opportunity = 60
+min_confidence = 55
+# 事件驱动延续（Phase1 仅接受注入/占位事件，绝不使用盘中实时北向净流入）
+params = { event_min_weight = 0.30, half_life_hours = 72 }

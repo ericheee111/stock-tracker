@@ -1,0 +1,37 @@
+# 三市场参数（按市场独立配置，PRD #2 / #17 / #18 / #19）
+# trading_hours: [[开始h,开始m,结束h,结束m], ...] 为当地交易所时间（24h）
+# delayed_ms / stale_ms: 新鲜度阈值（PRD #26.10 延迟降级）
+# utc_offset_hours: 交易所相对 UTC 的偏移，用于跨市场时间对齐参考（Phase1 简化，见 core/clock.py）
+
+[a]
+prefixes = ["sh", "sz"]
+limit_up_pct = 0.10
+limit_down_pct = 0.10
+trading_hours = [[9, 30, 11, 30], [13, 0, 15, 0]]
+delayed_ms = 15000
+stale_ms = 60000
+timezone = "Asia/Shanghai"
+utc_offset_hours = 8
+
+[hk]
+prefixes = ["hk"]
+limit_up_pct = 0.0
+limit_down_pct = 0.0
+trading_hours = [[9, 30, 12, 0], [13, 0, 16, 0]]
+delayed_ms = 900000       # 免费源常标注约 15 分钟延迟（PRD #26.4）
+stale_ms = 1800000
+timezone = "Asia/Hong_Kong"
+utc_offset_hours = 8
+
+[us]
+prefixes = ["us"]
+limit_up_pct = 0.0
+limit_down_pct = 0.0
+trading_hours = [[4, 0, 9, 30], [10, 0, 16, 0]]   # 近似：盘前+常规（ET）
+delayed_ms = 900000
+stale_ms = 1800000
+timezone = "America/New_York"
+utc_offset_hours = -4
+
+[price_limit_rules]
+version = "2026-01"        # 涨跌停规则版本（PRD #17.1 配置化，不写死）

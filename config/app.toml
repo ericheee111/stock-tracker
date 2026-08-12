@@ -1,0 +1,41 @@
+# Stock Tracker · 全局配置（tomllib 只读加载，缺省值见 core/config.py）
+# 零第三方依赖：仅标准库。所有路径相对项目根目录解析。
+
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[logging]
+level = "INFO"            # DEBUG / INFO / WARNING / ERROR
+file = "data/stock_tracker.log"
+max_bytes = 5242880      # 5 MB
+backup = 3
+
+[collector]
+hot_interval_sec = 3.0    # A股 HOT 刷新间隔（秒）
+warm_interval_sec = 10.0  # WARM 刷新间隔（秒）
+cold_interval_sec = 45.0  # COLD 全市场快照间隔（秒）
+hot_pool_size = 200
+warm_pool_size = 300
+max_workers = 3
+
+# 当主批量快照源（东财）不可用时，COLD 回退拉取的标的宇宙。
+# 真实数据（经腾讯/新浪），用于保证雷达/板块/regime 在降级态仍可计算。
+cold_universe = [
+    "000001.SH", "399001.SZ", "399006.SZ", "000300.SH",
+    "600519.SH", "000858.SZ", "601318.SH", "600036.SH",
+    "300750.SZ", "002594.SZ", "600276.SH", "601012.SH",
+    "000333.SZ", "600900.SH", "601899.SH", "600030.SH",
+    "300059.SZ", "002415.SZ", "600887.SH", "603259.SH",
+    "688981.SH", "000651.SZ", "601166.SH", "600309.SH",
+    "00700.HK", "03690.HK", "09988.HK", "01810.HK", "00939.HK",
+    "AAPL.US", "MSFT.US", "NVDA.US", "TSLA.US", "GOOGL.US", "AMZN.US"
+]
+
+[markets]
+a = true
+hk = true
+us = true
+
+[store]
+sqlite_path = "data/stock_tracker.db"
