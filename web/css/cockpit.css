@@ -299,3 +299,11 @@
   background: var(--bg-mid); border: 1px solid var(--border);
   padding: 2px 8px; border-radius: var(--radius-xs); font-family: var(--font-sans);
 }
+
+/* ============================ 桌面响应式（≥1024） ============================
+ * 本文件基础规则 .index-grid/.overview-grid 未带媒体查询，会覆盖 base.css
+ * 的同名媒体查询；此处显式在 ≥1024 切换为桌面多列布局（mobile-first 保留）。 */
+@media (min-width: 1024px) {
+  .index-grid { grid-template-columns: repeat(6, 1fr); }
+  .overview-grid { grid-template-columns: repeat(3, 1fr); }
+}

@@ -298,9 +298,13 @@
   /* ============================================================
    * Top 机会列表（来自 overview.top_opportunities）
    * ============================================================ */
-  function renderTopList(signals) {
-    const list = Array.isArray(signals) ? signals : [];
-    if (!list.length) return '<div class="card-empty">暂无重点机会</div>';
+  function renderTopList(signals, market) {
+    let list = Array.isArray(signals) ? signals : [];
+    // 按当前选中市场过滤；不传 market 则全量（兼容旧调用 / 初始全量加载）
+    if (market) {
+      list = list.filter(function (s) { return s.market === market; });
+    }
+    if (!list.length) return '<div class="card-empty">该市场暂无重点机会</div>';
     return '<div class="top-list">' + list.map(function (sig) {
       const q = sig.quote || {};
       const price = F.quotePrice(q);
@@ -309,7 +313,10 @@
       const sid = esc(sig.signal_id || '');
       const plan = '入场 ' + F.fmtRange(sig.entry_low, sig.entry_high) +
         (sig.reward_risk != null ? ' · ' + F.num(sig.reward_risk).toFixed(2) + 'R' : '');
-      return '<div class="opp-card" data-symbol="' + sym + '" ' + (sid ? 'data-signal="' + sid + '"' : '') + '>' +
+      // data-signal 始终存在：优先 signal_id；但 _top_opportunities 每项必有 symbol，
+      // 故退而用 symbol 作可靠键。openSignal 兼容 symbol / signal_id。
+      const sigKey = sid || sym;
+      return '<div class="opp-card" data-symbol="' + sym + '" data-signal="' + sigKey + '">' +
         '<div class="opp-main">' +
         '<div class="opp-name">' + esc(sig.name || sig.symbol) + '<span class="opp-code">' + sym + '</span></div>' +
         '<div class="opp-plan">' + esc(plan) + '</div>' +

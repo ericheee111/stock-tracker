@@ -441,9 +441,11 @@ body {
   .card { padding: 18px; }
 }
 @media (min-width: 1024px) {
-  :root { --container: 960px; }
+  /* 桌面：放宽内容容器，消除左右大黑边（960 → 1280，贴近 1440 视口利用率） */
+  :root { --container: 1280px; }
   .index-grid { grid-template-columns: repeat(6, 1fr); }
   .overview-grid { grid-template-columns: repeat(3, 1fr); }
+  .card { padding: 18px; }
 }
 
 /* 降级：尊重 prefers-reduced-motion */

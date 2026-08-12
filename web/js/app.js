@@ -55,10 +55,11 @@
   function setMarket(m) {
     state.market = m;
     $$('.market-tab').forEach(function (t) { t.classList.toggle('active', t.dataset.market === m); });
-    // 仅重渲染受市场影响的区块
+    // 重渲染所有受市场影响的区块；重点机会 topList 按当前市场过滤
     const idx = $('#indexGrid'); if (idx) idx.innerHTML = UI.renderIndexGrid(state.markets, m);
     renderWatch();
     renderRadar(); // 雷达可按需过滤，这里不过滤保持全量；自选/持仓按市场过滤
+    renderTopList(); // 重点机会列表随市场切换刷新（按 market 过滤）
   }
 
   /* ---------------- 初始拉取 ---------------- */
@@ -122,8 +123,15 @@
       grid.innerHTML = parts.join('');
     }
 
-    const top = $('#topList');
-    if (top) top.innerHTML = UI.renderTopList((state.overview && state.overview.top_opportunities) || state.radar);
+    renderTopList();
+  }
+
+  /* ---------------- 渲染：①b 重点机会（按市场过滤） ---------------- */
+  function renderTopList() {
+    const el = $('#topList');
+    if (!el) return;
+    const items = (state.overview && state.overview.top_opportunities) || state.radar || [];
+    el.innerHTML = UI.renderTopList(items, state.market);
   }
 
   /* ---------------- 渲染：② 自选 / 持仓 ---------------- */
@@ -158,23 +166,24 @@
     const mask = $('#sheetMask');
     const sheet = $('#sheet');
     if (!mask || !sheet) return;
-    // 若本地缓存已有，先即时展示，再从 REST 取最新
-    const cached = findSignalById(id);
+    // 兼容：id 可能是 signal_id（雷达/自选/持仓卡片）或 symbol（重点机会卡片）。
+    const cached = lookupSignal(id);
     sheet.innerHTML = UI.renderSignalDetail(cached) ||
       '<div class="sheet-body"><div class="loading-box">加载信号详情…</div></div>' +
       '<div class="sheet-footer"><button class="sheet-close" id="sheetClose">关闭</button></div>';
     mask.hidden = false;
     bindSheetClose();
-    try {
-      const fresh = await API.getSignal(id);
-      if (fresh) {
-        sheet.innerHTML = UI.renderSignalDetail(fresh);
-        bindSheetClose();
+    // 缓存信号带 signal_id 时，从 REST 取最新完整详情（含入场/止损/目标/history）
+    if (cached && cached.signal_id) {
+      try {
+        const fresh = await API.getSignal(cached.signal_id);
+        if (fresh) {
+          sheet.innerHTML = UI.renderSignalDetail(fresh);
+          bindSheetClose();
+        }
+      } catch (e) {
+        // 保留缓存展示，静默失败（缓存已含基础信息）
       }
-    } catch (e) {
-      if (!cached) sheet.innerHTML = '<div class="sheet-body"><div class="card-empty">信号详情获取失败：' + F.esc(e.message) + '</div></div>' +
-        '<div class="sheet-footer"><button class="sheet-close" id="sheetClose">关闭</button></div>';
-      bindSheetClose();
     }
   }
 
@@ -182,12 +191,30 @@
     let found = null;
     (state.radar || []).forEach(function (s) { if (s.signal_id === id) found = s; });
     if (found) return found;
-    (state.watchlist || []).forEach(function (it) { if (it.signal && it.signal.signal_id === id) found = it.signal; });
-    (state.positions || []).forEach(function (p) { if (p.signal && p.signal.signal_id === id) found = p.signal; });
+    (Array.isArray(state.watchlist) ? state.watchlist : []).forEach(function (it) { if (it.signal && it.signal.signal_id === id) found = it.signal; });
+    (Array.isArray(state.positions) ? state.positions : []).forEach(function (p) { if (p.signal && p.signal.signal_id === id) found = p.signal; });
     if ((state.overview && state.overview.top_opportunities)) {
       (state.overview.top_opportunities || []).forEach(function (s) { if (s.signal_id === id) found = s; });
     }
     return found;
+  }
+
+  /** 按 signal_id 或 symbol 查找信号对象（重点机会卡片仅带 symbol）。
+   *  优先返回带 signal_id 的完整对象（来自 radar/watchlist/positions），便于后续 REST 取详情。 */
+  function lookupSignal(idOrSymbol) {
+    if (!idOrSymbol) return null;
+    const byId = findSignalById(idOrSymbol);
+    if (byId) return byId;
+    const wanted = String(idOrSymbol);
+    const cands = [];
+    (state.radar || []).forEach(function (s) { if (s.symbol === wanted) cands.push(s); });
+    (Array.isArray(state.watchlist) ? state.watchlist : []).forEach(function (it) { if (it.symbol === wanted && it.signal) cands.push(it.signal); });
+    (Array.isArray(state.positions) ? state.positions : []).forEach(function (p) { if (p.symbol === wanted && p.signal) cands.push(p.signal); });
+    if (state.overview && state.overview.top_opportunities) {
+      (state.overview.top_opportunities || []).forEach(function (s) { if (s.symbol === wanted) cands.push(s); });
+    }
+    for (let i = 0; i < cands.length; i++) { if (cands[i].signal_id) return cands[i]; }
+    return cands.length ? cands[0] : null;
   }
 
   function bindSheetClose() {
@@ -229,11 +256,11 @@
     });
     if (!replaced) state.radar = (state.radar || []).concat([sig]);
     // watchlist 中的 signal 摘要
-    (state.watchlist || []).forEach(function (it) {
+    (Array.isArray(state.watchlist) ? state.watchlist : []).forEach(function (it) {
       if (it.signal && it.signal.signal_id === sig.signal_id) it.signal = sig;
     });
     // positions 中的 signal
-    (state.positions || []).forEach(function (p) {
+    (Array.isArray(state.positions) ? state.positions : []).forEach(function (p) {
       if (p.signal && p.signal.signal_id === sig.signal_id) p.signal = sig;
     });
   }
