@@ -1,0 +1,641 @@
+{
+  "ok": true,
+  "passRate": 1,
+  "totalSteps": 88,
+  "passed": 88,
+  "failed": 0,
+  "knownIssues": [],
+  "errors": [],
+  "netRequests": [],
+  "steps": [
+    {
+      "name": "[手机390] 底色≈rgb(28,28,30)",
+      "ok": true,
+      "detail": "rgb(28, 28, 30)"
+    },
+    {
+      "name": "[手机390] 强调蓝 --accent=#0a84ff",
+      "ok": true,
+      "detail": "#0a84ff"
+    },
+    {
+      "name": "[手机390] 品牌Logo描边=强调蓝",
+      "ok": true,
+      "detail": "rgb(10, 132, 255)"
+    },
+    {
+      "name": "[手机390] 涨色 --up=#30d158",
+      "ok": true,
+      "detail": "#30d158"
+    },
+    {
+      "name": "[手机390] 跌色 --down=#ff453a",
+      "ok": true,
+      "detail": "#ff453a"
+    },
+    {
+      "name": "[手机390] 卡片无组件渐变",
+      "ok": true,
+      "detail": "none"
+    },
+    {
+      "name": "[手机390] 卡片1px边框(0.08/0.12)",
+      "ok": true,
+      "detail": "1px / rgba(255, 255, 255, 0.08)"
+    },
+    {
+      "name": "[手机390] 激活态边框=0.12",
+      "ok": true,
+      "detail": "rgba(255, 255, 255, 0.12)"
+    },
+    {
+      "name": "[手机390] 圆角≤12px且无胶囊",
+      "ok": true,
+      "detail": "max=12px pill=0"
+    },
+    {
+      "name": "[手机390] 顶栏毛玻璃blur",
+      "ok": true,
+      "detail": "blur(20px) saturate(1.6)"
+    },
+    {
+      "name": "[手机390] 底栏毛玻璃blur",
+      "ok": true,
+      "detail": "blur(20px) saturate(1.6)"
+    },
+    {
+      "name": "[手机390] 弹层毛玻璃blur",
+      "ok": true,
+      "detail": "blur(20px) saturate(1.6)"
+    },
+    {
+      "name": "[手机390] 衬线标题(Georgia/serif)",
+      "ok": true,
+      "detail": "Georgia, \"Songti SC\", STSong, SimSun, serif"
+    },
+    {
+      "name": "[手机390] 无香槟金残留",
+      "ok": true,
+      "detail": "goldFound=0 --gold=#0a84ff"
+    },
+    {
+      "name": "overview(A) 渲染",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "overview 无横向溢出",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "watch 无横向溢出",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "点行打开弹层(computed display=flex)",
+      "ok": true,
+      "detail": "flex"
+    },
+    {
+      "name": "ESC关闭弹层(computed display=none)",
+      "ok": true,
+      "detail": "none"
+    },
+    {
+      "name": "点遮罩关闭弹层(computed display=none)",
+      "ok": true,
+      "detail": "none"
+    },
+    {
+      "name": "按钮关闭弹层(computed display=none)",
+      "ok": true,
+      "detail": "none"
+    },
+    {
+      "name": "signal 无横向溢出",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reco 无横向溢出",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "标签筛选改变卡片数",
+      "ok": true,
+      "detail": "4 -> 2"
+    },
+    {
+      "name": "筛选结果均含所选标签",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "active 高亮正确",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "推荐页加入自选可切换",
+      "ok": true,
+      "detail": "+ 加入自选 -> 已加入 ⭐ -> + 加入自选"
+    },
+    {
+      "name": "加入自选触发toast",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "filter 无横向溢出",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "行业筛选改变结果",
+      "ok": true,
+      "detail": "8 -> 3"
+    },
+    {
+      "name": "筛选加入端到端反映到自选页",
+      "ok": true,
+      "detail": "code=000858"
+    },
+    {
+      "name": "免责声明存在",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "品牌Logo为SVG",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "底部导航5图标全为SVG",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "5个页面标题全为SVG",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "区块标签为SVG",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "免责声明图标为SVG",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "图标类emoji已清零",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "信号徽章badge零emoji",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "市场Tab为紧凑分段控件(gap≥4)",
+      "ok": true,
+      "detail": "4px"
+    },
+    {
+      "name": "市场Tab按钮有垂直内边距(≥8)",
+      "ok": true,
+      "detail": "8px 0px"
+    },
+    {
+      "name": "nav 触控区>=44",
+      "ok": true,
+      "detail": "57px"
+    },
+    {
+      "name": "市场Tab触控区>=40",
+      "ok": true,
+      "detail": "44px"
+    },
+    {
+      "name": "标签触控区>=36",
+      "ok": true,
+      "detail": "38px"
+    },
+    {
+      "name": "加入按钮触控区>=40",
+      "ok": true,
+      "detail": "42px"
+    },
+    {
+      "name": "容器宽度自适应[手机-小(360)]",
+      "ok": true,
+      "detail": "360≈360"
+    },
+    {
+      "name": "无横向溢出[手机-小(360)]",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "指数网格扩展[手机-小(360)]",
+      "ok": true,
+      "detail": "3=3"
+    },
+    {
+      "name": "推荐网格扩展[手机-小(360)]",
+      "ok": true,
+      "detail": "2=2"
+    },
+    {
+      "name": "容器宽度自适应[手机(390)]",
+      "ok": true,
+      "detail": "390≈390"
+    },
+    {
+      "name": "无横向溢出[手机(390)]",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "指数网格扩展[手机(390)]",
+      "ok": true,
+      "detail": "3=3"
+    },
+    {
+      "name": "推荐网格扩展[手机(390)]",
+      "ok": true,
+      "detail": "2=2"
+    },
+    {
+      "name": "容器宽度自适应[平板(768)]",
+      "ok": true,
+      "detail": "768≈768"
+    },
+    {
+      "name": "无横向溢出[平板(768)]",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "指数网格扩展[平板(768)]",
+      "ok": true,
+      "detail": "4=4"
+    },
+    {
+      "name": "推荐网格扩展[平板(768)]",
+      "ok": true,
+      "detail": "3=3"
+    },
+    {
+      "name": "桌面header行布局[平板(768)]",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "桌面品牌与Tab间距≥24px[平板(768)]",
+      "ok": true,
+      "detail": "24px"
+    },
+    {
+      "name": "桌面市场Tab分段控件(gap≥6)[平板(768)]",
+      "ok": true,
+      "detail": "6px"
+    },
+    {
+      "name": "桌面Tab内边距加大(≥10)[平板(768)]",
+      "ok": true,
+      "detail": "10px"
+    },
+    {
+      "name": "容器宽度自适应[桌面(1280)]",
+      "ok": true,
+      "detail": "960≈960"
+    },
+    {
+      "name": "无横向溢出[桌面(1280)]",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "指数网格扩展[桌面(1280)]",
+      "ok": true,
+      "detail": "6=6"
+    },
+    {
+      "name": "推荐网格扩展[桌面(1280)]",
+      "ok": true,
+      "detail": "4=4"
+    },
+    {
+      "name": "桌面header行布局[桌面(1280)]",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "桌面品牌与Tab间距≥24px[桌面(1280)]",
+      "ok": true,
+      "detail": "24px"
+    },
+    {
+      "name": "桌面市场Tab分段控件(gap≥6)[桌面(1280)]",
+      "ok": true,
+      "detail": "6px"
+    },
+    {
+      "name": "桌面Tab内边距加大(≥10)[桌面(1280)]",
+      "ok": true,
+      "detail": "10px"
+    },
+    {
+      "name": "桌面推荐页渲染",
+      "ok": true,
+      "detail": "cards=4"
+    },
+    {
+      "name": "桌面点行打开弹层(computed display=flex)",
+      "ok": true,
+      "detail": "flex"
+    },
+    {
+      "name": "桌面ESC关闭(computed display=none)",
+      "ok": true,
+      "detail": "none"
+    },
+    {
+      "name": "[桌面1280] 底色≈rgb(28,28,30)",
+      "ok": true,
+      "detail": "rgb(28, 28, 30)"
+    },
+    {
+      "name": "[桌面1280] 强调蓝 --accent=#0a84ff",
+      "ok": true,
+      "detail": "#0a84ff"
+    },
+    {
+      "name": "[桌面1280] 品牌Logo描边=强调蓝",
+      "ok": true,
+      "detail": "rgb(10, 132, 255)"
+    },
+    {
+      "name": "[桌面1280] 涨色 --up=#30d158",
+      "ok": true,
+      "detail": "#30d158"
+    },
+    {
+      "name": "[桌面1280] 跌色 --down=#ff453a",
+      "ok": true,
+      "detail": "#ff453a"
+    },
+    {
+      "name": "[桌面1280] 卡片无组件渐变",
+      "ok": true,
+      "detail": "none"
+    },
+    {
+      "name": "[桌面1280] 卡片1px边框(0.08/0.12)",
+      "ok": true,
+      "detail": "1px / rgba(255, 255, 255, 0.08)"
+    },
+    {
+      "name": "[桌面1280] 激活态边框=0.12",
+      "ok": true,
+      "detail": "rgba(255, 255, 255, 0.12)"
+    },
+    {
+      "name": "[桌面1280] 圆角≤12px且无胶囊",
+      "ok": true,
+      "detail": "max=12px pill=0"
+    },
+    {
+      "name": "[桌面1280] 顶栏毛玻璃blur",
+      "ok": true,
+      "detail": "blur(20px) saturate(1.6)"
+    },
+    {
+      "name": "[桌面1280] 底栏毛玻璃blur",
+      "ok": true,
+      "detail": "blur(20px) saturate(1.6)"
+    },
+    {
+      "name": "[桌面1280] 弹层毛玻璃blur",
+      "ok": true,
+      "detail": "blur(20px) saturate(1.6)"
+    },
+    {
+      "name": "[桌面1280] 衬线标题(Georgia/serif)",
+      "ok": true,
+      "detail": "Georgia, \"Songti SC\", STSong, SimSun, serif"
+    },
+    {
+      "name": "[桌面1280] 无香槟金残留",
+      "ok": true,
+      "detail": "goldFound=0 --gold=#0a84ff"
+    },
+    {
+      "name": "无控制台/页面报错",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "零外部网络请求(file://外)",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "asserts": [
+    {
+      "name": "[手机390] macOS Vibrancy 汇总",
+      "value": {
+        "bodyBg": "rgb(28, 28, 30)",
+        "accent": "#0a84ff",
+        "up": "#30d158",
+        "down": "#ff453a",
+        "cardBgImg": "none",
+        "cardBorderW": "1px",
+        "cardBorderColor": "rgba(255, 255, 255, 0.08)",
+        "maxRadius": 12,
+        "pill": 0,
+        "topbarBf": "blur(20px) saturate(1.6)",
+        "navBf": "blur(20px) saturate(1.6)",
+        "titleFamily": "Georgia, \"Songti SC\", STSong, SimSun, serif",
+        "goldFound": 0,
+        "goldTok": "#0a84ff"
+      }
+    },
+    {
+      "name": "指数卡片数",
+      "value": 3
+    },
+    {
+      "name": "自选股行数",
+      "value": 3
+    },
+    {
+      "name": "弹层关闭按钮在视口内",
+      "value": true
+    },
+    {
+      "name": "信号条数",
+      "value": 7
+    },
+    {
+      "name": "推荐卡片数(A股基准)",
+      "value": 4
+    },
+    {
+      "name": "推荐页市场提示",
+      "value": "当前市场：A股 · 共 4 只推荐"
+    },
+    {
+      "name": "点击刚金叉标签",
+      "value": true
+    },
+    {
+      "name": "筛选后卡片数",
+      "value": "4 -> 2"
+    },
+    {
+      "name": "筛选后卡片均含该标签",
+      "value": true
+    },
+    {
+      "name": "active高亮在所选标签",
+      "value": true
+    },
+    {
+      "name": "推荐加入自选文案",
+      "value": "+ 加入自选 -> 已加入 ⭐ -> + 加入自选"
+    },
+    {
+      "name": "加入自选后toast出现",
+      "value": true
+    },
+    {
+      "name": "筛选加入反映到自选页",
+      "value": true
+    },
+    {
+      "name": "免责声明文本",
+      "value": "本页面为内部演示 Demo，行情、买卖点信号与个股推荐均来自模拟数据，仅"
+    },
+    {
+      "name": "SVG图标总数",
+      "value": 20
+    },
+    {
+      "name": "图标类emoji残留",
+      "value": "无"
+    },
+    {
+      "name": "徽章badge emoji残留",
+      "value": "无"
+    },
+    {
+      "name": "市场Tab gap(手机/Vibrancy分段控件)",
+      "value": "4px"
+    },
+    {
+      "name": "市场Tab 内按钮padding(手机)",
+      "value": "8px 0px"
+    },
+    {
+      "name": "触控高度(手机)",
+      "value": {
+        "navBtn": 57,
+        "marketTab": 44,
+        "tagChip": 38,
+        "recoAdd": 42
+      }
+    },
+    {
+      "name": "容器宽度[手机-小(360)]",
+      "value": "360 (期望≈360)"
+    },
+    {
+      "name": "指数列数[手机-小(360)]",
+      "value": "3 (期望3)"
+    },
+    {
+      "name": "推荐列数[手机-小(360)]",
+      "value": "2 (期望2)"
+    },
+    {
+      "name": "容器宽度[手机(390)]",
+      "value": "390 (期望≈390)"
+    },
+    {
+      "name": "指数列数[手机(390)]",
+      "value": "3 (期望3)"
+    },
+    {
+      "name": "推荐列数[手机(390)]",
+      "value": "2 (期望2)"
+    },
+    {
+      "name": "容器宽度[平板(768)]",
+      "value": "768 (期望≈768)"
+    },
+    {
+      "name": "指数列数[平板(768)]",
+      "value": "4 (期望4)"
+    },
+    {
+      "name": "推荐列数[平板(768)]",
+      "value": "3 (期望3)"
+    },
+    {
+      "name": "桌面header品牌-Tab间距[平板(768)]",
+      "value": "24px"
+    },
+    {
+      "name": "桌面市场Tab gap[平板(768)]",
+      "value": "6px"
+    },
+    {
+      "name": "容器宽度[桌面(1280)]",
+      "value": "960 (期望≈960)"
+    },
+    {
+      "name": "指数列数[桌面(1280)]",
+      "value": "6 (期望6)"
+    },
+    {
+      "name": "推荐列数[桌面(1280)]",
+      "value": "4 (期望4)"
+    },
+    {
+      "name": "桌面header品牌-Tab间距[桌面(1280)]",
+      "value": "24px"
+    },
+    {
+      "name": "桌面市场Tab gap[桌面(1280)]",
+      "value": "6px"
+    },
+    {
+      "name": "[桌面1280] macOS Vibrancy 汇总",
+      "value": {
+        "bodyBg": "rgb(28, 28, 30)",
+        "accent": "#0a84ff",
+        "up": "#30d158",
+        "down": "#ff453a",
+        "cardBgImg": "none",
+        "cardBorderW": "1px",
+        "cardBorderColor": "rgba(255, 255, 255, 0.08)",
+        "maxRadius": 12,
+        "pill": 0,
+        "topbarBf": "blur(20px) saturate(1.6)",
+        "navBf": "blur(20px) saturate(1.6)",
+        "titleFamily": "Georgia, \"Songti SC\", STSong, SimSun, serif",
+        "goldFound": 0,
+        "goldTok": "#0a84ff"
+      }
+    }
+  ]
+}
