@@ -168,9 +168,14 @@
     const upd = F.fmtClock(meta.last_update);
     const mo = meta.market_open || {};
     const moText = ['a', 'hk', 'us'].map(function (m) {
-      const open = mo[m];
+      const st = String(mo[m] || '').toUpperCase();
       const lbl = { a: 'A', hk: '港', us: '美' }[m];
-      const v = open === true ? '开' : (open === false ? '休' : '?');
+      // 后端 market_open_status 返回字符串状态，需映射为中文
+      const v = st === 'TRADING' ? '开'
+        : st === 'WEEKEND' ? '周末休'
+        : st === 'CLOSED' ? '休'
+        : st === 'DISABLED' ? '停'
+        : '?';
       return lbl + ':' + v;
     }).join('  ');
 
@@ -199,8 +204,15 @@
     if (!markets || typeof markets !== 'object') {
       return '<div class="card-empty">暂无指数数据</div>';
     }
-    const m = markets[market] || markets.a || markets.hk || markets.us;
-    if (!m) return '<div class="card-empty">暂无指数数据</div>';
+    // dict 键为 lowercase（a/hk/us），tab market 为 uppercase（A/HK/US）—— 大小写不敏感匹配。
+    // 兼容 Array（/api/overview 返回 list，按 .market 字段匹配）。
+    let m = null;
+    if (Array.isArray(markets)) {
+      m = markets.find(function (x) { return x && String(x.market || '').toUpperCase() === String(market).toUpperCase(); }) || null;
+    } else {
+      m = markets[market] || markets[String(market).toLowerCase()] || markets.a || markets.hk || markets.us;
+    }
+    if (!m) return '<div class="card-empty">该市场暂无指数</div>';
     const idx = m.index;
     if (!idx || !idx.symbol) return '<div class="card-empty">该市场暂无指数</div>';
     return '<div class="index-grid">' + renderIndexCard(idx) + '</div>';

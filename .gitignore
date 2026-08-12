@@ -26,3 +26,6 @@ Thumbs.db
 
 # Node 依赖（qa/ 下的测试工具依赖，非运行时）
 node_modules/
+
+# Playwright 可视化验证截图产物（非源码）
+qa/ui/shots/
