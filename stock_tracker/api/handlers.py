@@ -17,6 +17,7 @@ from ..features import feature_snapshot as FS
 from ..storage.repository import Repository, to_jsonable
 from . import serializers as S
 from .sse import SSEHub
+from ..signals.crowding import crowding_for
 
 
 @dataclass
@@ -94,6 +95,8 @@ def _top_opportunities(ctx: AppContext, limit: int = 12) -> list[dict]:
             "next_trigger": s.next_trigger,
             "quote": quote_d,
             "indicators": indicators,
+            # §24.6 拥挤度/追高风险仪表：由已算出的展示指标派生，纯展示、不进评分。
+            "crowding": crowding_for(indicators, s),
             "data_status": (q.data_status.value if (q is not None and q.data_status)
                             else (s.data_status.value if s.data_status else "UNKNOWN")),
         })
@@ -293,6 +296,11 @@ def _active_holding_signals(ctx: AppContext) -> list[dict]:
         # 与 top_opportunities 的 name 口径一致，避免前端渲染成代码。
         q = ctx.store.get_quote(s.symbol)
         d["name"] = (q.name if (q is not None and q.name) else s.symbol)
+        # §24.6 拥挤度仪表：加载该标的展示指标并派生拥挤度（与 top_opportunities 同源）。
+        bars = _load_bars_for_indicators(ctx, s.symbol, s.market, 60)
+        ind = S.serialize_indicators(FS.build_indicators(bars, s.market)) if bars else None
+        d["indicators"] = ind
+        d["crowding"] = crowding_for(ind, s)
         out.append(d)
     return out
 

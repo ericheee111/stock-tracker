@@ -126,6 +126,29 @@
       '</span><span>' + esc(text) + '</span></div>';
   }
 
+  /** 拥挤度 / 追高风险仪表（§24.6）。数据来自后端 crowding（纯展示启发式）。
+   *  展示：档位标签 + 0—100 分 + 进度条 + 因子明细。某字段缺失则整块不渲染。 */
+  function renderCrowdingGauge(c) {
+    if (!c || typeof c !== 'object') return '';
+    const score = F.num(c.score);
+    const color = c.color || '#8e8e93';
+    const level = c.level || '—';
+    const meterW = Math.max(4, Math.min(100, score));
+    const factors = Array.isArray(c.factors) ? c.factors : [];
+    const factorHtml = factors.length
+      ? '<div class="crowd-factors">' + factors.map(function (f) {
+          return '<span class="crowd-factor">' + esc(f) + '</span>';
+        }).join('') + '</div>'
+      : '';
+    return '<div class="crowd-gauge">' +
+      '<div class="crowd-head"><span class="crowd-label">拥挤度</span>' +
+      '<span class="crowd-level" style="color:' + color + '">' + esc(level) + '</span>' +
+      '<span class="crowd-score">' + score + '</span></div>' +
+      '<div class="crowd-meter"><div class="crowd-fill" style="width:' + meterW + '%;background:' + color + '"></div></div>' +
+      factorHtml +
+      '</div>';
+  }
+
   /** 从 Signal 抽取统一评分对象（兼容 score 嵌套或顶层平铺） */
   function pickScore(sig) {
     if (sig && sig.score) return sig.score;
@@ -265,6 +288,9 @@
           (s.strategy_id ? '<span class="hl-strat">策略 ' + esc(s.strategy_id) + '</span>' : '') +
           '</div>' +
           (reason ? '<div class="hl-reason">' + reason + '</div>' : '') +
+          (s.crowding ? renderCrowdingGauge(s.crowding) : '') +
+          nextTriggerBox(s.next_trigger) +
+          renderWhatChanged(s.what_changed) +
           '</div>';
       }).join('');
       return '<div class="hl-group">' +
@@ -448,6 +474,9 @@
         '</div>' +
         stateBadge(sig.state) +
         (sig.indicators ? '<div class="opp-ind">' + renderIndicators(sig.indicators) + '</div>' : '') +
+        (sig.crowding ? renderCrowdingGauge(sig.crowding) : '') +
+        nextTriggerBox(sig.next_trigger) +
+        renderWhatChanged(sig.what_changed) +
         '</div>';
     }).join('') + '</div>';
   }
@@ -654,6 +683,7 @@
       '<div class="detail-section"><div class="detail-section-title">四分数</div>' + renderScores(sc) + '</div>' +
       '<div class="detail-section"><div class="detail-section-title">交易计划</div>' +
       '<div class="detail-grid">' + planCells + '</div></div>' +
+      (sig.crowding ? '<div class="detail-section"><div class="detail-section-title">拥挤度 / 追高风险（§24.6）</div>' + renderCrowdingGauge(sig.crowding) + '</div>' : '') +
       (sig.next_trigger ? '<div class="detail-section">' + nextTriggerBox(sig.next_trigger) + '</div>' : '') +
       renderWhatChanged(sig.what_changed) +
       '<div class="detail-section"><div class="detail-section-title">Why-Not-Buy · 为什么还不能直接买 / 风险</div>' +
@@ -707,6 +737,7 @@
     stateBadge: stateBadge, renderScores: renderScores,
     renderBanner: renderBanner, bannerModeClass: bannerModeClass,
     isAllMarketsClosed: isAllMarketsClosed, renderHoldingSignals: renderHoldingSignals,
+    renderCrowdingGauge: renderCrowdingGauge,
     renderIndexGrid: renderIndexGrid,
     renderRegimeCard: renderRegimeCard, renderSectorCard: renderSectorCard,
     renderBreadthCard: renderBreadthCard, renderRiskCard: renderRiskCard,

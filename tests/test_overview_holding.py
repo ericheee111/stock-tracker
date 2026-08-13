@@ -95,6 +95,28 @@ class TestOverviewHolding(unittest.TestCase):
         self.assertEqual(hs[0]["horizon"]["key"], "SHORT")
         self.assertTrue(hs[0].get("name"))  # 补发名称（Signal 无 name 字段）
 
+    def test_holding_signals_carry_crowding_and_indicators(self):
+        signals = [_make_signal("s1", "600519.SH", "S1", T.SignalState.ACTIVE)]
+        ov = get_overview(self._ctx(signals))
+        hs = ov["holding_signals"]
+        self.assertEqual(len(hs), 1)
+        # §24.6 拥挤度仪表已挂载（即便无 K 线退化为安全档，契约要求字段存在）
+        self.assertIn("crowding", hs[0])
+        self.assertIsInstance(hs[0]["crowding"], dict)
+        self.assertIn("score", hs[0]["crowding"])
+        self.assertIn("level_key", hs[0]["crowding"])
+        # indicators 键存在（§24.6 同源展示指标）
+        self.assertIn("indicators", hs[0])
+
+    def test_top_opportunities_carry_crowding(self):
+        signals = [_make_signal("s1", "600519.SH", "S1", T.SignalState.ACTIVE)]
+        ov = get_overview(self._ctx(signals))
+        top = ov["top_opportunities"]
+        self.assertTrue(top)
+        self.assertIn("crowding", top[0])
+        self.assertIsInstance(top[0]["crowding"], dict)
+        self.assertIn("score", top[0]["crowding"])
+
 
 if __name__ == "__main__":
     unittest.main()
