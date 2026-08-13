@@ -41,6 +41,17 @@
     PEAK: '#ffd60a', DIVERGENCE: '#ff9f0a', DECLINE: '#ff453a'
   };
 
+  /* ---------------- 枚举：风险事件等级（§9 契约 level 字段） ---------------- */
+  // 与 SECTOR_STAGE_COLORS / risk-gate 配色风格一致（玻璃拟态深色）。
+  const RISK_LEVEL_COLORS = {
+    HIGH: '#ff453a',   // 红：高风险
+    MEDIUM: '#ff9f0a', // 琥珀：中风险
+    LOW: '#8e8e93'     // 灰：低风险
+  };
+  const RISK_LEVEL_LABELS = {
+    HIGH: '高风险', MEDIUM: '中风险', LOW: '低风险'
+  };
+
   /* ---------------- 雷达分组（§4.3 六/七组分层） ---------------- */
   const RADAR_GROUP_ORDER = [
     '可执行', '等一个条件', '等突破', '等回踩', '禁止追高', '早期观察', '数据不足', '已结束'
@@ -286,12 +297,34 @@
       '<span>平 ' + flat + '</span><span class="down">跌 ' + down + '</span></div>');
   }
 
+  /**
+   * 风险事件卡（§9 契约：后端 _active_risk_events 返回结构化 dict 列表）。
+   * 按字段结构化渲染：标的 / 市场 / 风险等级 chip / 风险分 / 状态徽章 / reason。
+   * 严禁 JSON.stringify 兜底——后端已是结构化数据，回退 JSON.stringify 会把整条
+   * 对象渲染成原始字符串（本 bug 的根因）。所有动态文本经 esc() 防 XSS。
+   */
   function renderRiskCard(events) {
     const list = Array.isArray(events) ? events : [];
     if (!list.length) return card('风险事件', '<div class="risk-list"><div class="risk-item">暂无显著风险事件</div></div>');
     const items = list.map(function (e) {
-      const txt = typeof e === 'string' ? e : (e.text || e.message || JSON.stringify(e));
-      return '<div class="risk-item"><span>' + esc(txt) + '</span></div>';
+      const sym = esc(F.def(e.symbol, ''));
+      const market = esc(F.def(e.market, ''));
+      const level = F.def(e.level, 'LOW');
+      const levelColor = RISK_LEVEL_COLORS[level] || '#8e8e93';
+      const levelLabel = esc(RISK_LEVEL_LABELS[level] || level);
+      const score = F.num(e.risk_score);
+      const state = F.def(e.state, '');
+      const reason = esc(F.def(e.reason, ''));
+      return '<div class="risk-item" style="border-left-color:' + levelColor + '">' +
+        '<div class="risk-head">' +
+          '<span class="risk-sym">' + sym + '</span>' +
+          (market ? '<span class="risk-market">' + market + '</span>' : '') +
+          '<span class="risk-level-chip" style="background:' + levelColor + '">' + levelLabel + '</span>' +
+          '<span class="risk-score">风险 ' + score + '</span>' +
+          (state ? stateBadge(state) : '') +
+        '</div>' +
+        (reason ? '<div class="risk-reason">' + reason + '</div>' : '') +
+      '</div>';
     }).join('');
     return card('风险事件', '<div class="risk-list">' + items + '</div>');
   }
@@ -562,6 +595,7 @@
   global.UI = {
     STATE_LABELS: STATE_LABELS, STATE_COLORS: STATE_COLORS,
     REGIME_LABELS: REGIME_LABELS, SECTOR_STAGE_LABELS: SECTOR_STAGE_LABELS,
+    RISK_LEVEL_COLORS: RISK_LEVEL_COLORS, RISK_LEVEL_LABELS: RISK_LEVEL_LABELS,
     radarGroupOf: radarGroupOf, RADAR_GROUP_ORDER: RADAR_GROUP_ORDER,
     stateBadge: stateBadge, renderScores: renderScores,
     renderBanner: renderBanner, bannerModeClass: bannerModeClass,
