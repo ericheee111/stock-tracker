@@ -13,6 +13,7 @@ from typing import Any, Optional
 from ..core import types as T
 from ..core.config import ConfigBundle
 from ..core.store import MarketStore
+from ..features import feature_snapshot as FS
 from ..storage.repository import Repository, to_jsonable
 from . import serializers as S
 from .sse import SSEHub
@@ -42,6 +43,23 @@ def _best_signal_for(ctx: AppContext, symbol: str) -> Optional[dict]:
     return S.serialize_signal(best)
 
 
+def _load_bars_for_indicators(ctx: AppContext, symbol: str, market, n: int) -> list:
+    """Load bars only for the exact security identity requested.
+
+    A missing ``.SH`` series must never fall back to the same numeric code with
+    a ``.SZ`` suffix (or vice versa): those are distinct instruments. Identity
+    normalization belongs at the provider/ingestion boundary; the API fails
+    closed and returns no indicators when the exact series is unavailable.
+    """
+
+    bars = ctx.repo.load_recent_bars(symbol, "1d", n=n)
+    return [
+        bar
+        for bar in bars
+        if bar.symbol == symbol and bar.market is market
+    ]
+
+
 def _top_opportunities(ctx: AppContext, limit: int = 12) -> list[dict]:
     # 同一标的可能被多个策略各自产出信号；按 symbol 去重，仅保留机会分最高的一条，
     # 避免 Top 机会列表出现重复标的（例如同一只股票被两条策略同时命中）。
@@ -62,6 +80,9 @@ def _top_opportunities(ctx: AppContext, limit: int = 12) -> list[dict]:
         quote_d = S.serialize_quote(q, _market_cfg(ctx, q.market)) if q is not None else None
         # 名称来源：优先取实时报价的 name；Signal 类型本身无 name 字段，故回退用 symbol。
         name = (q.name if (q is not None and q.name) else s.symbol)
+        # 展示用技术指标（仅数值，不评分/不加权）；有 K 线即计算，无则 None（前端渲染「—」）。
+        bars = _load_bars_for_indicators(ctx, s.symbol, s.market, 60)
+        indicators = S.serialize_indicators(FS.build_indicators(bars, s.market)) if bars else None
         out.append({
             "symbol": s.symbol,
             "market": s.market.value,
@@ -72,10 +93,41 @@ def _top_opportunities(ctx: AppContext, limit: int = 12) -> list[dict]:
             "reason": s.reason,
             "next_trigger": s.next_trigger,
             "quote": quote_d,
+            "indicators": indicators,
             "data_status": (q.data_status.value if (q is not None and q.data_status)
                             else (s.data_status.value if s.data_status else "UNKNOWN")),
         })
     return out
+
+
+def get_quote_detail(ctx: AppContext, symbol: str) -> Optional[dict]:
+    """``/api/quote/{symbol}``：返回单标的详情（实时报价 + 展示指标 + 近期 K 线）。
+
+    与 overview 的 indicators 同源（``build_indicators``，纯展示数值，不评分/不加权）。
+    ``recent_bars`` 最多返回最近 30 根（展示用，避免响应体过大）。
+    """
+    if not symbol or "." not in symbol:
+        return None
+    code, suffix = symbol.rsplit(".", 1)
+    if not code or suffix not in {"SH", "SZ", "HK", "US"}:
+        return None
+    market = T.market_from_symbol(symbol)
+    q = ctx.store.get_quote(symbol)
+    quote_d = S.serialize_quote(q, _market_cfg(ctx, market)) if q is not None else None
+    name = (q.name if (q is not None and q.name) else symbol)
+    # 加载足够计算全部指标的历史（roc60/ma60 需 ~61 根）
+    recent = _load_bars_for_indicators(ctx, symbol, market, 80)
+    indicators = S.serialize_indicators(FS.build_indicators(recent, market)) if recent else None
+    recent_bars = [S.serialize_bar(b) for b in recent[-30:]] if recent else []
+    return {
+        "symbol": symbol,
+        "market": market.value,
+        "name": name,
+        "quote": quote_d,
+        "indicators": indicators,
+        "recent_bars": recent_bars,
+        "bar_count": len(recent) if recent else 0,
+    }
 
 
 def _market_cfg(ctx: AppContext, market: T.Market):

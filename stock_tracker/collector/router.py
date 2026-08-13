@@ -102,6 +102,78 @@ class ProviderRouter:
                 qs.extend(self.fetch_quotes(missing))
         return qs
 
+    # ---- 历史 K 线（低频 BAR 调度用） ----
+    def fetch_bars(self, symbol: str, market: T.Market, interval: str = "1d",
+                   start: "datetime | None" = None, end: "datetime | None" = None,
+                   adjust: str = "qfq") -> "list[T.Bar]":
+        """按市场选 supports_bars() / bars_fallback 的 provider（主 eastmoney、兜底 tencent）。
+
+        依次尝试按评分排序的候选源（主源优先，失败/熔断后自动兜底到 fallback 源），
+        返回首个成功结果；全部失败则上抛最后一个异常，由调度层（``_run_bars``）吸收并跳过本轮。
+        """
+        candidates = self._select_bars(market)
+        if not candidates:
+            raise RuntimeError(f"无可用 K 线数据源（market={market.value}）")
+        last_err: "Exception | None" = None
+        saw_empty = False
+        for provider in candidates:
+            try:
+                bars = provider.fetch_bars(symbol, market, interval, start, end, adjust)
+                if bars:
+                    self.record_outcome(
+                        provider.name,
+                        True,
+                        provider.timeout * 1000.0,
+                        False,
+                    )
+                    return bars
+                # “接口可达但该标的无数据”不是全局 Provider 故障；继续尝试兜底源，
+                # 也不要用一次 symbol-specific 空结果污染整个源的健康分。
+                saw_empty = True
+            except Exception as exc:  # noqa: BLE001  单个源失败不影响兜底源
+                self.record_outcome(provider.name, False, provider.timeout * 1000.0, True)
+                last_err = exc
+        if saw_empty:
+            return []
+        # 全部候选源均异常：上抛最后一个异常。
+        assert last_err is not None
+        raise last_err
+
+    def _select_bars(self, market: "T.Market | None") -> "list[MarketDataProvider]":
+        """选择支持 K 线（supports_bars 或 bars_fallback）且市场匹配、健康可试的 provider。
+
+        按评分降序返回候选列表（供 fetch_bars 依次尝试兜底）：
+        - 真正的 K 线源（supports_bars=True）优先（+50）；
+        - 仅作兜底的源（bars_fallback=True）次之（+0）；
+        - 主源（primary）加权（+10）。
+        东财为 designated K 线主源；腾讯 bars_fallback 仅在其不可用/熔断时兜底。
+        """
+        candidates = [
+            p for p in self.providers
+            if (p.supports_bars() or p.cfg.bars_fallback)
+            and (market is None or p.applies_to(market))
+            and self.trackers[p.name].can_try()
+        ]
+        if not candidates:
+            return []
+        scored = []
+        for p in candidates:
+            h = self.trackers[p.name].to_provider_health()
+            s = 0.0
+            if p.supports_bars():
+                s += 50.0
+            if p.cfg.bars_fallback:
+                s += 0.0
+            if p.cfg.primary:
+                s += 10.0
+            s -= h.error_rate * 8.0
+            s -= h.latency_p50 / 1000.0
+            s -= h.stale_ratio * 6.0
+            s -= h.rate_limit_hits * 0.2
+            scored.append((s, p))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [p for _, p in scored]
+
     # ---- 跨源偏差（低频抽样） ----
     def _maybe_cross_check(self, primary: MarketDataProvider, quotes: list[T.Quote]) -> None:
         if not quotes or random.random() > self._cross_sample_prob:

@@ -82,6 +82,47 @@ class MarketDataProvider(ABC):
     def supports_snapshot(self) -> bool:
         return False
 
+    def supports_bars(self) -> bool:
+        """是否支持历史 K 线采集（默认 False，子类覆盖）。"""
+        return False
+
+    def supports_raw_bars(self) -> bool:
+        """Whether exact provider bytes can be captured before normalization."""
+        return False
+
+    def fetch_bars_raw(
+        self,
+        symbol: str,
+        market: T.Market,
+        interval: str = "1d",
+        start: "datetime | None" = None,
+        end: "datetime | None" = None,
+        adjust: str = "qfq",
+    ) -> bytes:
+        """Fetch exact bar-response bytes for immutable research capture."""
+        raise NotImplementedError(f"{self.name} 不支持原始 K 线响应留存")
+
+    def parse_bars(
+        self,
+        raw: bytes,
+        symbol: str,
+        market: T.Market,
+        interval: str = "1d",
+    ) -> "list[T.Bar]":
+        """Deterministically parse exact provider bytes into normalized bars."""
+        raise NotImplementedError(f"{self.name} 不支持确定性 K 线解析")
+
+    def fetch_bars(self, symbol: str, market: T.Market, interval: str = "1d",
+                   start: "datetime | None" = None, end: "datetime | None" = None,
+                   adjust: str = "qfq") -> "list[T.Bar]":
+        """拉取历史 K 线并归一化为 ``list[Bar]``。
+
+        与 ``fetch_quotes`` 同风格：**失败直接上抛**，交由 ProviderRouter 做
+        健康统计 / 熔断 / 退避（不在 provider 内重试风暴）。默认实现不支持，
+        子类（eastmoney）覆盖为真实 HTTP 实现。
+        """
+        raise NotImplementedError(f"{self.name} 不支持历史 K 线采集")
+
     def _request(self, url: str, headers: dict | None = None) -> bytes:
         """发起 HTTP GET，返回原始字节；失败/超时直接抛异常。"""
         hdrs = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}

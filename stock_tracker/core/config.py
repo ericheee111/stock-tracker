@@ -37,6 +37,13 @@ class CollectorConfig:
     warm_pool_size: int = 300
     max_workers: int = 3
     cold_universe: list[str] = field(default_factory=list)
+    # K 线低频采集链路（BAR 守护线程）配置
+    bars_enabled: bool = True           # 总开关：false 则跳过 BAR 线程
+    bars_interval_sec: float = 21600.0  # BAR 线程循环间隔（6h，收盘后为主）
+    bar_batch_size: int = 3             # 每批处理的标的数（分批节流）
+    bar_batch_pause_sec: float = 1.5    # 批间暂停（秒）
+    bar_backfill_days: int = 400        # 首跑全量回填请求窗口（today - N 自然日）
+    bar_keep_days: int = 260            # 每标的保留最近交易日数（覆盖 MA60/ROC60/52周）
 
 
 @dataclass(slots=True)
@@ -105,6 +112,7 @@ class ProviderConfig:
     backoff_max_sec: float = 60.0
     circuit_fail_threshold: int = 5
     host: str = ""               # 可选 host 覆盖（用于故障注入/自托管，默认用源码内置 BASE）
+    bars_fallback: bool = False  # 是否作为 K 线兜底源（supports_bars=False 时仍可被 Router 选用）
 
 
 @dataclass(slots=True)
@@ -148,6 +156,14 @@ def _opt(d: dict, key: str, default: Any) -> Any:
     return d.get(key, default)
 
 
+def _expect_bool(value: object, name: str) -> bool:
+    """Require an actual TOML boolean at safety-sensitive boundaries."""
+
+    if type(value) is not bool:
+        raise ConfigError(f"{name} 必须是 TOML boolean，不能使用字符串或 0/1")
+    return value
+
+
 def load_app(path: str, root_dir: str) -> AppConfig:
     d = _read_toml(path)
     srv = ServerConfig(**_opt(d, "server", {})) if isinstance(_opt(d, "server", {}), dict) else ServerConfig()
@@ -170,12 +186,22 @@ def load_app(path: str, root_dir: str) -> AppConfig:
         warm_pool_size=_opt(col_d, "warm_pool_size", 300),
         max_workers=_opt(col_d, "max_workers", 3),
         cold_universe=_opt(col_d, "cold_universe", []),
+        bars_enabled=_expect_bool(
+            _opt(col_d, "bars_enabled", True),
+            "collector.bars_enabled",
+        ),
+        bars_interval_sec=_opt(col_d, "bars_interval_sec", 21600.0),
+        bar_batch_size=_opt(col_d, "bar_batch_size", 3),
+        bar_batch_pause_sec=_opt(col_d, "bar_batch_pause_sec", 1.5),
+        bar_backfill_days=_opt(col_d, "bar_backfill_days", 400),
+        bar_keep_days=_opt(col_d, "bar_keep_days", 260),
     )
     sto = StoreConfig(sqlite_path=_opt(d.get("store", {}), "sqlite_path", "data/stock_tracker.db"))
+    markets_d = d.get("markets", {})
     markets_enabled = {
-        "a": bool(_opt(d.get("markets", {}), "a", True)),
-        "hk": bool(_opt(d.get("markets", {}), "hk", True)),
-        "us": bool(_opt(d.get("markets", {}), "us", True)),
+        "a": _expect_bool(_opt(markets_d, "a", True), "markets.a"),
+        "hk": _expect_bool(_opt(markets_d, "hk", True), "markets.hk"),
+        "us": _expect_bool(_opt(markets_d, "us", True), "markets.us"),
     }
     return AppConfig(server=srv, logging=log, collector=col, store=sto,
                      markets_enabled=markets_enabled, root_dir=root_dir)
@@ -217,7 +243,7 @@ def load_strategies(path: str) -> StrategiesConfig:
     def mk(key: str) -> StrategyConfig:
         sd = d.get(key, {})
         return StrategyConfig(
-            enabled=_opt(sd, "enabled", True),
+            enabled=_expect_bool(_opt(sd, "enabled", True), f"{key}.enabled"),
             min_opportunity=_opt(sd, "min_opportunity", 55),
             min_confidence=_opt(sd, "min_confidence", 50),
             params=_opt(sd, "params", {}),
@@ -234,14 +260,24 @@ def load_providers(path: str) -> list[ProviderConfig]:
             name=_opt(item, "name", ""),
             cls=_opt(item, "cls", ""),
             markets=_opt(item, "markets", []),
-            primary=_opt(item, "primary", False),
-            supports_snapshot=_opt(item, "supports_snapshot", False),
+            primary=_expect_bool(
+                _opt(item, "primary", False),
+                f"providers[{_opt(item, 'name', '')}].primary",
+            ),
+            supports_snapshot=_expect_bool(
+                _opt(item, "supports_snapshot", False),
+                f"providers[{_opt(item, 'name', '')}].supports_snapshot",
+            ),
             timeout_ms=_opt(item, "timeout_ms", 3000),
             host=_opt(item, "host", ""),
             max_rps=_opt(item, "max_rps", 5.0),
             backoff_base_sec=_opt(item, "backoff_base_sec", 1.0),
             backoff_max_sec=_opt(item, "backoff_max_sec", 60.0),
             circuit_fail_threshold=_opt(item, "circuit_fail_threshold", 5),
+            bars_fallback=_expect_bool(
+                _opt(item, "bars_fallback", False),
+                f"providers[{_opt(item, 'name', '')}].bars_fallback",
+            ),
         ))
     return out
 
@@ -262,7 +298,10 @@ def load_risk(path: str) -> RiskConfig:
         max_theme_pct=_opt(ph, "max_theme_pct", 0.20),
         regime_blocked_states=_opt(rb, "blocked_states", []),
         dq_min_score_to_strong=_opt(dq, "min_score_to_strong", 60),
-        dq_block_if_stale=_opt(dq, "block_if_stale", True),
+        dq_block_if_stale=_expect_bool(
+            _opt(dq, "block_if_stale", True),
+            "data_quality.block_if_stale",
+        ),
     )
 
 

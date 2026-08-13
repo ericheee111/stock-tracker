@@ -377,6 +377,7 @@
         '<div class="live-chg ' + F.chgClass(chg) + '" data-symbol="' + sym + '" style="font-size:12px;font-weight:700;font-family:var(--font-mono)">' + F.fmtPct(chg) + '</div>' +
         '</div>' +
         stateBadge(sig.state) +
+        (sig.indicators ? '<div class="opp-ind">' + renderIndicators(sig.indicators) + '</div>' : '') +
         '</div>';
     }).join('') + '</div>';
   }
@@ -592,6 +593,42 @@
       '<div class="sheet-footer"><button class="sheet-close" id="sheetClose">知道啦</button></div>';
   }
 
+  /* ---------------- 展示用技术指标（纯数值，对齐后端 build_indicators） ----------------
+   * 仅展示 MA/MACD/RSI/量比/52周位置/振幅，不做任何评分/加权（与 scoring 解耦）。
+   * 所有动态文本经 esc() 防 XSS；数值经 F.num 防御空值。
+   */
+  function renderIndicators(ind) {
+    if (!ind || typeof ind !== 'object') {
+      return '<div class="ind-empty">暂无 K 线指标（历史数据收集中…）</div>';
+    }
+    function cell(label, val, opts) {
+      opts = opts || {};
+      const v = (val == null || (typeof val === 'number' && isNaN(val)))
+        ? '—' : (opts.pct ? F.fmtPct(val) : (opts.percent ? F.num(val).toFixed(1) + '%' : F.num(val)));
+      const cls = opts.cls ? (' ' + opts.cls) : '';
+      return '<div class="ind-cell' + cls + '">' +
+        '<span class="ind-k">' + esc(label) + '</span>' +
+        '<span class="ind-v">' + esc(String(v)) + '</span></div>';
+    }
+    // 52周位置：用进度条直观展示（0=最低，1=最高）
+    const pos = ind.pos52w;
+    const posPct = (typeof pos === 'number' && !isNaN(pos)) ? (pos * 100).toFixed(0) : null;
+    const posBar = posPct == null
+      ? ''
+      : '<div class="ind-posbar"><div class="ind-posfill" style="width:' + esc(posPct) + '%"></div>' +
+        '<span class="ind-poslabel">' + esc(posPct) + '% · 52周位置</span></div>';
+
+    return '<div class="ind-grid">' +
+      cell('MA5', ind.ma5) + cell('MA10', ind.ma10) + cell('MA20', ind.ma20) + cell('MA60', ind.ma60) +
+      cell('EMA12', ind.ema12) + cell('EMA26', ind.ema26) +
+      cell('MACD', ind.macd_dif) + cell('DEA', ind.macd_dea) + cell('MACD柱', ind.macd_hist) +
+      cell('RSI14', ind.rsi14) + cell('ATR14', ind.atr14) +
+      cell('ROC20', ind.roc20, { pct: true }) + cell('ROC60', ind.roc60, { pct: true }) +
+      cell('量比', ind.vol_ratio) + cell('振幅', ind.amplitude, { pct: true }) +
+      cell('年化波动', ind.ann_vol, { percent: true }) +
+      '</div>' + posBar;
+  }
+
   global.UI = {
     STATE_LABELS: STATE_LABELS, STATE_COLORS: STATE_COLORS,
     REGIME_LABELS: REGIME_LABELS, SECTOR_STAGE_LABELS: SECTOR_STAGE_LABELS,
@@ -608,6 +645,7 @@
     renderPositionList: renderPositionList,
     renderRadar: renderRadar, renderRadarCard: renderRadarCard,
     renderSignalDetail: renderSignalDetail,
+    renderIndicators: renderIndicators,
     loadingBox: loadingBox, card: card, esc: esc
   };
 })(window);

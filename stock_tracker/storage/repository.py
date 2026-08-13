@@ -150,7 +150,7 @@ class Repository:
         )
         conn.commit()
 
-    def load_recent_bars(self, symbol: str, interval: str = "1d", n: int = 120) -> list[T.Bar]:
+    def load_recent_bars(self, symbol: str, interval: str = "1d", n: int = 260) -> list[T.Bar]:
         conn = get_connection(self.db_path)
         rows = conn.execute(
             "SELECT * FROM bars WHERE symbol=? AND interval=? ORDER BY timestamp DESC LIMIT ?",
@@ -158,6 +158,44 @@ class Repository:
         ).fetchall()
         bars = [from_jsonable(T.Bar, dict(r)) for r in reversed(rows)]
         return [b for b in bars if b is not None]
+
+    def save_bars_batch(self, bars: list[T.Bar]) -> int:
+        """批量写入 K 线（单事务、幂等 REPLACE）。
+
+        复用 ``save_bar`` 的字段顺序；一次 ``executemany`` 提交，避免逐条 commit 的
+        IO 开销。返回实际写入条数。空列表直接跳过（不建事务）。
+        """
+        if not bars:
+            return 0
+        conn = get_connection(self.db_path)
+        rows = [
+            (bar.symbol, bar.market.value, bar.timestamp.isoformat(), bar.interval, bar.open, bar.high,
+             bar.low, bar.close, bar.volume, bar.amount, bar.turnover, bar.source,
+             bar.adjustment_factor, bar.quality_status.value)
+            for bar in bars
+        ]
+        conn.executemany(
+            "REPLACE INTO bars(symbol, market, timestamp, interval, open, high, low, close, volume, amount, turnover, source, adjustment_factor, quality_status)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+        conn.commit()
+        return len(rows)
+
+    def prune_bars(self, symbol: str, interval: str, keep: int) -> int:
+        """仅保留每标的最近 ``keep`` 根 K 线，删除更早的历史（控制表体积）。
+
+        ``keep <= 0`` 视为不裁剪。返回删除行数。
+        """
+        if keep <= 0:
+            return 0
+        conn = get_connection(self.db_path)
+        cur = conn.execute(
+            "DELETE FROM bars WHERE symbol=? AND interval=? AND timestamp < ("
+            "SELECT timestamp FROM bars WHERE symbol=? AND interval=? "
+            "ORDER BY timestamp DESC LIMIT 1 OFFSET ?)",
+            (symbol, interval, symbol, interval, max(0, keep - 1)),
+        )
+        conn.commit()
+        return cur.rowcount
 
     # ---- Watchlist ----
     def save_watchlist(self, items: list[T.WatchlistItem]) -> None:

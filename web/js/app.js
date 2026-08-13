@@ -185,6 +185,51 @@
         // 保留缓存展示，静默失败（缓存已含基础信息）
       }
     }
+    // K 线指标详情：在信号详情定稿后追加，避免被上方 innerHTML 覆盖（展示增强）
+    let qSym = (typeof id === 'string' && id.indexOf('.') >= 0) ? id : null;
+    if (!qSym && cached && cached.symbol) qSym = cached.symbol;
+    if (qSym) { try { await openQuote(qSym); } catch (e) { /* 展示增强，静默 */ } }
+  }
+
+  /** 拉取并渲染单标的 K 线指标 + 近期历史（详情面板增强，失败不影响信号详情）。 */
+  async function openQuote(symbol) {
+    if (!symbol) return;
+    const sheet = $('#sheet');
+    if (!sheet) return;
+    const box = document.createElement('div');
+    box.className = 'quote-panel';
+    box.innerHTML = '<div class="ind-empty">加载 K 线指标…</div>';
+    sheet.appendChild(box);
+    try {
+      const d = await API.getQuote(symbol);
+      if (!d) { box.remove(); return; }
+      box.innerHTML = renderQuotePanel(d);
+    } catch (e) {
+      box.innerHTML = '<div class="ind-empty">指标加载失败（展示增强，不影响信号详情）</div>';
+    }
+  }
+
+  /** 由 /api/quote/{symbol} 响应渲染指标 + 近期 K 线表（所有动态文本经 F.esc 防 XSS）。 */
+  function renderQuotePanel(d) {
+    const name = d.name || d.symbol || '—';
+    const ind = d.indicators ? UI.renderIndicators(d.indicators) : '<div class="ind-empty">暂无指标</div>';
+    const bars = Array.isArray(d.recent_bars) ? d.recent_bars : [];
+    const rows = bars.slice().reverse().map(function (b) {
+      return '<tr>' +
+        '<td>' + F.esc(b.timestamp ? String(b.timestamp).slice(0, 10) : '') + '</td>' +
+        '<td>' + F.num(b.open) + '</td>' +
+        '<td>' + F.num(b.high) + '</td>' +
+        '<td>' + F.num(b.low) + '</td>' +
+        '<td>' + F.num(b.close) + '</td>' +
+        '<td>' + F.num(b.volume) + '</td>' +
+        '</tr>';
+    }).join('');
+    return '<div class="quote-panel-head">K线指标 · ' + F.esc(name) +
+      ' <span class="quote-count">' + (d.bar_count || 0) + ' 根</span></div>' +
+      ind +
+      (rows ? '<div class="qb-scroll"><table class="qb-table"><thead><tr>' +
+        '<th>日期</th><th>开</th><th>高</th><th>低</th><th>收</th><th>量</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table></div>' : '');
   }
 
   function findSignalById(id) {

@@ -25,12 +25,156 @@ class EastmoneyProvider(MarketDataProvider):
 
     SINGLE = "https://push2.eastmoney.com/api/qt/stock/get"
     CLIST = "https://push2.eastmoney.com/api/qt/clist/get"
+    # 历史 K 线（独立域名 push2his，本环境实测正常，独立于被远端断开的 push2 实时）
+    KLINE = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
     # 沪深主板/创业板/科创板/北交所
     FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
     SNAP_FIELDS = "f12,f13,f14,f2,f3,f15,f16,f17,f18,f5,f6,f8"
 
     def supports_snapshot(self) -> bool:
         return True
+
+    KLINE_SCHEMA_VERSION = "eastmoney-kline-f51-f58-v1"
+    KLINE_ADAPTER_VERSION = "eastmoney-bars-v2-raw-split"
+
+    def supports_bars(self) -> bool:
+        """历史 K 线主源（东财 push2his 三市场 + 港股指数）。"""
+        return True
+
+    def supports_raw_bars(self) -> bool:
+        """Expose exact response bytes before normalization for research capture."""
+        return True
+
+    def _bars_url(
+        self,
+        symbol: str,
+        interval: str = "1d",
+        start: "datetime | None" = None,
+        end: "datetime | None" = None,
+        adjust: str = "qfq",
+    ) -> str:
+        if interval != "1d":
+            raise ValueError("Eastmoney raw-bar adapter currently supports interval='1d' only")
+        if adjust not in {"qfq", "hfq", "raw"}:
+            raise ValueError("adjust must be one of: qfq, hfq, raw")
+        secid = T.to_kline_secid(symbol)
+        fqt = {"qfq": 1, "hfq": 2, "raw": 0}[adjust]
+        beg = start.strftime("%Y%m%d") if start else "0"
+        end_s = end.strftime("%Y%m%d") if end else "20500101"
+        return (
+            f"{self.KLINE}?secid={secid}"
+            f"&fields1=f1,f2,f3,f4,f5,f6"
+            f"&fields2=f51,f52,f53,f54,f55,f56,f57,f58"
+            f"&klt=101&fqt={fqt}&beg={beg}&end={end_s}"
+        )
+
+    def fetch_bars_raw(
+        self,
+        symbol: str,
+        market: T.Market,
+        interval: str = "1d",
+        start: "datetime | None" = None,
+        end: "datetime | None" = None,
+        adjust: str = "qfq",
+    ) -> bytes:
+        """Fetch exact provider bytes; parsing is deliberately separate."""
+        if not self.applies_to(market):
+            raise ValueError(f"{self.name} is not configured for market {market.value}")
+        self._rl.acquire()
+        return self._request(self._bars_url(symbol, interval, start, end, adjust))
+
+    def _parse_bars(
+        self,
+        raw: bytes,
+        symbol: str,
+        market: T.Market,
+        interval: str,
+        *,
+        strict: bool,
+    ) -> "list[T.Bar]":
+        if type(strict) is not bool:
+            raise TypeError("strict must be a boolean")
+        if not isinstance(raw, bytes) or not raw:
+            raise ValueError("raw K-line response must be non-empty bytes")
+        payload = json.loads(raw.decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError("Eastmoney K-line response must be a JSON object")
+        rc = payload.get("rc", 0)
+        data = payload.get("data")
+        if rc != 0 or not isinstance(data, dict) or not data.get("klines"):
+            return []
+        klines = data["klines"]
+        if not isinstance(klines, list):
+            raise ValueError("Eastmoney data.klines must be a JSON array")
+
+        scale = 100 if market == T.Market.A else 1
+        bars: list[T.Bar] = []
+        for index, line in enumerate(klines):
+            if not isinstance(line, str):
+                if strict:
+                    raise ValueError(f"Eastmoney K-line row {index} must be a string")
+                continue
+            parts = line.split(",")
+            if len(parts) < 8:
+                if strict:
+                    raise ValueError(f"Eastmoney K-line row {index} has fewer than 8 fields")
+                continue
+            date_s, o, c, h, l, vol, amt, turnover = parts[:8]
+            try:
+                bars.append(
+                    T.Bar(
+                        symbol=symbol,
+                        market=market,
+                        timestamp=datetime.strptime(date_s, "%Y-%m-%d"),
+                        interval=interval,
+                        open=float(o),
+                        high=float(h),
+                        low=float(l),
+                        close=float(c),
+                        volume=int(round(float(vol) * scale)),
+                        amount=float(amt) if amt else 0.0,
+                        turnover=float(turnover) if turnover else 0.0,
+                        source=self.name,
+                        adjustment_factor=1.0,
+                    )
+                )
+            except (ValueError, TypeError) as exc:
+                if strict:
+                    raise ValueError(f"Eastmoney K-line row {index} is invalid") from exc
+        return bars
+
+    def parse_bars(
+        self,
+        raw: bytes,
+        symbol: str,
+        market: T.Market,
+        interval: str = "1d",
+    ) -> "list[T.Bar]":
+        """Operational parser: deterministic, but tolerant of isolated bad rows."""
+        return self._parse_bars(raw, symbol, market, interval, strict=False)
+
+    def parse_bars_strict(
+        self,
+        raw: bytes,
+        symbol: str,
+        market: T.Market,
+        interval: str = "1d",
+    ) -> "list[T.Bar]":
+        """Research parser: reject the complete capture if any row is malformed."""
+        return self._parse_bars(raw, symbol, market, interval, strict=True)
+
+    # ---- 历史 K 线 ----
+    def fetch_bars(
+        self,
+        symbol: str,
+        market: T.Market,
+        interval: str = "1d",
+        start: "datetime | None" = None,
+        end: "datetime | None" = None,
+        adjust: str = "qfq",
+    ) -> "list[T.Bar]":
+        raw = self.fetch_bars_raw(symbol, market, interval, start, end, adjust)
+        return self.parse_bars(raw, symbol, market, interval)
 
     # ---- 单票 ----
     def _raw_quotes(self, symbols: list[str]) -> list[tuple[T.Market, dict]]:

@@ -13,11 +13,12 @@ backoff_base_sec = 1.0
 backoff_max_sec = 60.0
 circuit_fail_threshold = 5
 host = ""
+bars_fallback = true        # K 线兜底源：eastmoney 主源不可用/熔断时由其补齐（supports_bars 仍为 False）
 
 [[providers]]
 name = "eastmoney"
 cls = "EastmoneyProvider"
-markets = ["a"]
+markets = ["a", "hk", "us"]   # hk/us 仅用于 K 线(bars)路由；quote 主源仍是 tencent
 primary = false
 supports_snapshot = true
 timeout_ms = 3000

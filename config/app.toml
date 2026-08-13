@@ -18,6 +18,13 @@ cold_interval_sec = 45.0  # COLD 全市场快照间隔（秒）
 hot_pool_size = 200
 warm_pool_size = 300
 max_workers = 3
+# K 线低频采集链路（BAR 守护线程）
+bars_enabled = true       # 总开关：false 则跳过 BAR 线程
+bars_interval_sec = 21600  # BAR 线程循环间隔（6h，收盘后为主）
+bar_batch_size = 3        # 每批处理的标的数（分批节流）
+bar_batch_pause_sec = 1.5 # 批间暂停（秒）
+bar_backfill_days = 400   # 首跑全量回填请求窗口（today - N 自然日）
+bar_keep_days = 260       # 每标的保留最近交易日数（覆盖 MA60/ROC60/52周）
 
 # 当主批量快照源（东财）不可用时，COLD 回退拉取的标的宇宙。
 # 真实数据（经腾讯/新浪），用于保证雷达/板块/regime 在降级态仍可计算。

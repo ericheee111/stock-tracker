@@ -9,9 +9,11 @@
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 from typing import Optional
+from urllib.parse import quote
 
 from ..core import types as T
 from .provider import MarketDataProvider
@@ -161,3 +163,73 @@ class TencentProvider(MarketDataProvider):
         if ps.startswith("sz"):
             return f"{code}.SZ"
         return code
+
+    # ---- 历史 K 线（腾讯 web.ifzq.gtimg.cn 兜底源，本环境实测可达） ----
+    def supports_bars(self) -> bool:
+        """腾讯 K 线作为「兜底源」，默认不声明为主 K 线源（``supports_bars=False``）。
+
+        Router 通过独立的 ``bars_fallback`` 配置标记将其纳入 K 线候选（仅在 eastmoney
+        主源不可用/熔断时兜底）。这样既保留「腾讯默认 OFF」的契约（``supports_bars=False``），
+        又提供 K 线韧性，不改动既有单测断言。
+        """
+        return False
+
+    def fetch_bars(self, symbol: str, market: T.Market, interval: str = "1d",
+                   start: "datetime | None" = None, end: "datetime | None" = None,
+                   adjust: str = "qfq") -> "list[T.Bar]":
+        """腾讯历史 K 线（兜底源）：``web.ifzq.gtimg.cn/appstock/app/fqkline/get``。
+
+        响应 ``data[prov_sym][qfqday]`` 为**列表**数组，每行：
+        ``[日期, 开, 收, 高, 低, 成交量(, 成交额)]``（注意：收在开后、高/低之前）。
+        - A 股 prov_sym=``sh/sz``+code；港股=``hk``+code；美股=``us``+CODE``.OQ``
+          （腾讯美股 K 线需交易所后缀，NASDAQ 为 ``.OQ``）。
+        - A 股成交量单位为「手」需 ×100 → 股；HK/US 已是股。
+        - 空 / 无数据 → 返回 ``[]``（不抛、不阻塞，交由 Router 兜底或调度跳过）。
+        """
+        if interval != "1d":
+            raise ValueError("Tencent fallback currently supports interval='1d' only")
+        if adjust != "qfq":
+            raise ValueError("Tencent fallback currently supports adjust='qfq' only")
+        self._rl.acquire()
+        prov_sym = self._kline_symbol(symbol, market)
+        start_s = start.strftime("%Y-%m-%d") if start else ""
+        end_s = end.strftime("%Y-%m-%d") if end else ""
+        count = 320  # 覆盖约 1.3 年日 K（满足 MA60/ROC60/52 周所需窗口）
+        param = f"{prov_sym},day,{start_s},{end_s},{count},qfq"
+        url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={quote(param)}"
+        raw = self._request(url).decode("utf-8", "ignore")
+        payload = json.loads(raw)
+        node = (payload.get("data") or {}).get(prov_sym, {})
+        key = "qfqday" if adjust in ("qfq", "") else "day"
+        rows = node.get(key) or node.get("day") or []
+        scale = 100 if market == T.Market.A else 1  # A 股手→股
+        bars: list[T.Bar] = []
+        for r in rows:
+            # 腾讯返回为列表：[日期, 开, 收, 高, 低, 成交量(, 成交额?)]
+            if not isinstance(r, (list, tuple)) or len(r) < 6:
+                continue
+            try:
+                ts = datetime.strptime(str(r[0]), "%Y-%m-%d")
+                bar = T.Bar(
+                    symbol=symbol, market=market, timestamp=ts, interval=interval,
+                    open=float(r[1]), high=float(r[3]), low=float(r[4]), close=float(r[2]),
+                    volume=int(round(float(r[5]) * scale)),
+                    amount=(float(r[6]) if len(r) > 6 and r[6] not in ("", None) else 0.0),
+                    turnover=0.0,
+                    source="tencent", adjustment_factor=1.0,
+                )
+                bars.append(bar)
+            except (ValueError, TypeError):
+                continue
+        return bars
+
+    @staticmethod
+    def _kline_symbol(symbol: str, market: T.Market) -> str:
+        """腾讯 K 线查询码：A 用 sh/sz 前缀；港股 hk；美股 us+CODE.OQ（交易所后缀）。"""
+        code = symbol.split(".", 1)[0]
+        if market == T.Market.HK:
+            return ("r_hk" if T.is_index_symbol(symbol) else "hk") + code
+        if market == T.Market.US:
+            return ("r_us" if T.is_index_symbol(symbol) else "us") + code.upper() + ".OQ"
+        mk = symbol.rsplit(".", 1)[-1].upper()
+        return ("sh" if mk == "SH" else "sz") + code

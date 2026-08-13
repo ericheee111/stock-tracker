@@ -18,6 +18,7 @@ MarketStore + Repository。
 from __future__ import annotations
 
 import threading
+from datetime import datetime, timedelta
 from typing import Optional
 
 from ..core import types as T
@@ -77,11 +78,28 @@ class Scheduler:
         radar = self._cold_universe[: self.bundle.app.collector.warm_pool_size]
         self._warm_pool = list(dict.fromkeys(wl + radar))
 
+    def _bar_universe(self) -> list[str]:
+        """Return the bounded EOD-bar universe without losing user-critical symbols."""
+
+        watchlist = list(self.store.get_watchlist().keys())
+        positions = list(self.store.get_positions().keys())
+        active_states = self.store.active_signal_states()
+        active_signals = [
+            signal.symbol
+            for signal in self.store.get_signals().values()
+            if signal.state in active_states
+        ]
+        return list(
+            dict.fromkeys(
+                [*self._cold_universe, *watchlist, *positions, *active_signals]
+            )
+        )
+
     # ------------------------------------------------------------------ #
     # 生命周期
     # ------------------------------------------------------------------ #
     def start(self) -> None:
-        """启动三线程；先同步做一次 COLD 预热以尽快填充 MarketStore。"""
+        """启动四线程；先同步做一次 COLD 预热以尽快填充 MarketStore。"""
         # 预热：先拉一次快照，避免 HOT/WARM 在 regime 为空时首扫质量下降
         try:
             self._run_cold()
@@ -92,11 +110,16 @@ class Scheduler:
             (self._warm_loop, "WARM"),
             (self._hot_loop, "HOT"),
         ]
+        # BAR：低频 K 线采集线程（首跑全量回填 + 增量追加）；总开关可关闭
+        if getattr(self.bundle.app.collector, "bars_enabled", False):
+            loops.append((self._run_bars, "BAR"))
         for target, name in loops:
             t = threading.Thread(target=target, name=f"sched-{name}", daemon=True)
             t.start()
             self._threads.append(t)
-        self.log.info("Scheduler 已启动 %d 个守护线程（HOT/WARM/COLD）", len(self._threads))
+        total = len(self._threads)
+        self.log.info("Scheduler 已启动 %d 个守护线程（HOT/WARM/COLD%s）",
+                      total, "/BAR" if total > 3 else "")
 
     def stop(self) -> None:
         self._stop.set()
@@ -201,6 +224,119 @@ class Scheduler:
         # scan_pool 内部完成 DQ → store → 入库 → publish(quote) → 策略/评分/闸门/状态机
         self.signal_manager.scan_pool(quotes, bars_map, regime, sectors)
         self.log.info("%s：扫描 %d 标的完成", name, len(quotes))
+
+    # ------------------------------------------------------------------ #
+    # BAR：低频 K 线采集（首跑全量回填 + 增量追加）
+    # ------------------------------------------------------------------ #
+    def _run_bars(self) -> None:
+        """BAR 守护线程入口：首跑全量回填，随后按 bars_interval_sec 周期性增量追加。
+
+        设计要点：
+        - 复用 ProviderRouter.fetch_bars（健康检查 / 熔断 / 退避）。
+        - 源失败（抛异常）由本层捕获并跳过该标的，不阻塞其余；整轮失败仅记日志。
+        - 分批（bar_batch_size）节流 + 批间暂停（bar_batch_pause_sec），避免触发源限频。
+        - 每标的仅保留最近 bar_keep_days 根（prune_bars），控制表体积。
+        """
+        cfg = self.bundle.app.collector
+        if not getattr(cfg, "bars_enabled", False):
+            self.log.info("BAR：bars_enabled=false，跳过 K 线采集线程")
+            return
+        # 首跑：全量回填（today - bar_backfill_days 起）
+        try:
+            self._backfill_bars(cfg)
+        except Exception:
+            self.log.exception("BAR 首跑全量回填异常（后台循环将重试）")
+        # 增量循环
+        interval = float(getattr(cfg, "bars_interval_sec", 21600.0))
+        while not self._stop.is_set():
+            try:
+                self._incremental_bars(cfg)
+            except Exception:
+                self.log.exception("BAR 增量 tick 异常")
+            self._stop.wait(interval)
+
+    def _backfill_bars(self, cfg) -> None:
+        """首跑全量回填：对每个 universe 标的请求历史 K 线并入库（限制窗口 bar_backfill_days）。"""
+        syms = self._bar_universe()
+        if not syms:
+            return
+        start = datetime.now() - timedelta(days=int(getattr(cfg, "bar_backfill_days", 400)))
+        batch_size = max(1, int(getattr(cfg, "bar_batch_size", 3)))
+        pause = float(getattr(cfg, "bar_batch_pause_sec", 1.5))
+        keep = int(getattr(cfg, "bar_keep_days", 260))
+        done = 0
+        for i in range(0, len(syms), batch_size):
+            if self._stop.is_set():
+                break
+            batch = syms[i:i + batch_size]
+            for sym in batch:
+                bars = self._fetch_and_store(sym, "1d", start=start, keep=keep)
+                done += 1 if bars else 0
+            self._stop.wait(pause)
+        self.log.info("BAR：首跑全量回填完成（成功 %d/%d 标的）", done, len(syms))
+
+    def _incremental_bars(self, cfg) -> None:
+        """增量追加：仅对「最新 K 线日期 < 今日」的标的追加新交易日（避免重复全量拉取）。"""
+        syms = self._bar_universe()
+        if not syms:
+            return
+        batch_size = max(1, int(getattr(cfg, "bar_batch_size", 3)))
+        pause = float(getattr(cfg, "bar_batch_pause_sec", 1.5))
+        keep = int(getattr(cfg, "bar_keep_days", 260))
+        today = datetime.now().date()
+        done = 0
+        for i in range(0, len(syms), batch_size):
+            if self._stop.is_set():
+                break
+            batch = syms[i:i + batch_size]
+            for sym in batch:
+                # 已是最新（最新 K 线日期 == 今日）→ 跳过
+                last = self.repo.load_recent_bars(sym, "1d", n=1)
+                if last and last[0].timestamp.date() >= today:
+                    continue
+                start = (last[0].timestamp if last else None)
+                bars = self._fetch_and_store(sym, "1d", start=start, keep=keep)
+                done += 1 if bars else 0
+            self._stop.wait(pause)
+        if done:
+            self.log.info("BAR：增量追加完成（更新 %d 标的）", done)
+
+    def _fetch_and_store(self, symbol: str, interval: str, start=None, keep: int = 260) -> int:
+        """拉取单标的 K 线 → DQ 过滤 → 入库（保留最近 keep 根）。
+
+        返回本次新写入的 K 线根数。源失败 / 空数据返回 0（不抛、不阻塞其余标的）。
+        """
+        mkt = T.market_from_symbol(symbol)
+        try:
+            bars = self.router.fetch_bars(symbol, mkt, interval=interval, start=start)
+        except Exception as exc:  # 源不可用：跳过该标的，由 Router 健康/熔断吸收
+            self.log.warning("BAR：%s 拉取失败，跳过：%s", symbol, exc)
+            return 0
+        if not bars:
+            return 0
+        kept = self._validate_and_keep(bars, keep)
+        if not kept:
+            return 0
+        written = self.repo.save_bars_batch(kept)
+        self.repo.prune_bars(symbol, interval, keep)
+        return written
+
+    def _validate_and_keep(self, bars: list[T.Bar], keep: int) -> list[T.Bar]:
+        """DQ 过滤 + 仅保留最近 keep 根。
+
+        - future-leak（INVALID）直接丢弃；
+        - DEGRADED（字段不完整）保留但降权；
+        - 按时间升序后取末尾 keep 根。
+        """
+        ok: list[T.Bar] = []
+        for b in bars:
+            dq, data_status = self.gate.evaluate_bar(b)
+            if dq.status == T.QualityStatus.INVALID:
+                continue
+            b.quality_status = data_status
+            ok.append(b)
+        ok.sort(key=lambda x: x.timestamp)
+        return ok[-max(1, keep):]
 
     # ------------------------------------------------------------------ #
     # 健康发布

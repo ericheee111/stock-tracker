@@ -119,3 +119,33 @@ class DataQualityGate:
         order = {T.QualityStatus.VALID: 0, T.QualityStatus.DEGRADED: 1,
                  T.QualityStatus.STALE: 2, T.QualityStatus.INVALID: 3}
         return a if order[a] >= order[b] else b
+
+    def evaluate_bar(self, bar: T.Bar) -> tuple[T.DataQuality, T.DataStatus]:
+        """评估单根历史 K 线（入库前 DQ，独立于实时 Quote 的 ``evaluate``）。
+
+        规则（仅两条，刻意从简，与实时 Quote 的七类规则解耦）：
+        - **future-leak 硬阻断**：``bar.timestamp`` 显著领先当前时刻（> now + _FUTURE_DRIFT）
+          判定为未来泄漏，返回 ``(INVALID, UNKNOWN)``，理由 ``future-leak``，调度层直接丢弃该根。
+        - **完整性（非严格）**：``open/high/low/close`` 任一缺失(None)或 ≤0，或 ``volume<0``，
+          判 ``(DEGRADED, STALE)``——历史 K 线偶发缺字段允许入库展示但降权，不阻断其余根。
+        - 其余正常：``(VALID, DELAYED)``。日线是已完成的 EOD 数据，不得伪装成盘中 LIVE。
+
+        注意：返回类型与 ``evaluate`` 一致（``(DataQuality, DataStatus)``），便于调度层统一处理。
+        """
+        now = datetime.now()
+        # 1) future-leak 硬阻断（容忍正常时钟漂移 _FUTURE_DRIFT）
+        if bar.timestamp > now + _FUTURE_DRIFT:
+            return (
+                T.DataQuality(T.QualityStatus.INVALID, 0,
+                              ["future-leak: K线时间戳来自未来"]),
+                T.DataStatus.UNKNOWN,
+            )
+        # 2) 完整性（DEGRADED，不严格阻断）
+        prices = (bar.open, bar.high, bar.low, bar.close)
+        if any(p is None or p <= 0 for p in prices) or (bar.volume is not None and bar.volume < 0):
+            return (
+                T.DataQuality(T.QualityStatus.DEGRADED, 60,
+                              ["K线字段不完整（价格缺失/非法或成交量为负）"]),
+                T.DataStatus.STALE,
+            )
+        return T.DataQuality(T.QualityStatus.VALID, 100, []), T.DataStatus.DELAYED

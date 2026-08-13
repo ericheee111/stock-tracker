@@ -131,6 +131,36 @@ def serialize_health(h: T.ProviderHealth) -> dict:
     return d
 
 
+def serialize_indicators(ind: dict) -> dict:
+    """指标快照 → dict（已是 ``dict[str, float|None]``，直接透传）。
+
+    仅做 JSON 安全化：None 保持 None，其余转为 float（指标均为标量）。
+    """
+    if not ind:
+        return {}
+    return {k: (None if v is None else float(v)) for k, v in ind.items()}
+
+
+def serialize_bar(bar: T.Bar) -> dict:
+    """精简 Bar → dict（详情面板历史 K 线展示用，仅保留数值字段）。"""
+    return {
+        "symbol": bar.symbol,
+        "market": bar.market.value,
+        "timestamp": bar.timestamp.isoformat() if bar.timestamp else None,
+        "interval": bar.interval,
+        "open": bar.open,
+        "high": bar.high,
+        "low": bar.low,
+        "close": bar.close,
+        "volume": bar.volume,
+        "amount": bar.amount,
+        "turnover": bar.turnover,
+        "source": bar.source,
+        "adjustment_factor": bar.adjustment_factor,
+        "quality_status": bar.quality_status.value,
+    }
+
+
 def build_meta(bundle: ConfigBundle, healths: list[T.ProviderHealth], store: "object",
                last_data_at: Optional[datetime] = None) -> dict:
     """构造 overview 顶层 meta（data_mode / providers / last_update / market_open）。

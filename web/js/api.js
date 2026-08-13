@@ -66,6 +66,10 @@
     getSignal: function (id) {
       return fetchJSON('/api/signal/' + encodeURIComponent(id));
     },
+    /** 单标的详情（实时报价 + 展示指标 + 近期 K 线）：/api/quote/{symbol} */
+    getQuote: function (symbol) {
+      return fetchJSON('/api/quote/' + encodeURIComponent(symbol));
+    },
     getMarkets: function () {
       return fetchJSON('/api/markets').then(function (d) { return unwrap(d, 'markets') || unwrap(d, 'items') || (Array.isArray(d) ? d : []); });
     },

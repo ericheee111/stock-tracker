@@ -37,6 +37,7 @@ _GET_ROUTES: list[tuple[str, Any]] = [
 ]
 
 _SIGNAL_RE = re.compile(r"^/api/signal/([^/]+)$")
+_QUOTE_RE = re.compile(r"^/api/quote/([^/]+)$")
 
 
 class APIHandler(BaseHTTPRequestHandler):
@@ -97,6 +98,16 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "signal not found"}, status=404)
             else:
                 self._send_json(sig)
+            return
+
+        # 单标的详情：/api/quote/{symbol}
+        m = _QUOTE_RE.match(path)
+        if m:
+            detail = H.get_quote_detail(ctx, m.group(1))
+            if detail is None:
+                self._send_json({"error": "invalid symbol"}, status=400)
+            else:
+                self._send_json(detail)
             return
 
         # 静态文件

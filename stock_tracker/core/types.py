@@ -341,6 +341,25 @@ def to_provider_symbol(symbol: str, provider: str) -> str:
     return symbol
 
 
+def to_kline_secid(symbol: str) -> str:
+    """K 线历史接口（东财 ``push2his``）所需的 secid。
+
+    - 指数（``is_index_symbol`` 为真）须用 ``100.`` 前缀：港/美指数东财以
+      ``100.HSI`` / ``100.IXIC`` 暴露；A 股指数沿用 ``1.`` / ``0.`` 前缀
+      （``to_provider_symbol`` 已处理）。
+    - 个股沿用 eastmoney provider 符号（``market.code``：A ``1.600519`` /
+      ``0.xxx``、HK ``116.xxx``、US ``105.xxx``）。
+    """
+    if is_index_symbol(symbol):
+        mk = market_from_symbol(symbol)
+        code = symbol.split(".", 1)[0]
+        # 港/美指数东财须用 100. 前缀；A 股指数沿用 1./0. 前缀。
+        if mk in (Market.HK, Market.US):
+            return "100." + code
+        return to_provider_symbol(symbol, "eastmoney")
+    return to_provider_symbol(symbol, "eastmoney")
+
+
 def clamp(value: float, low: float, high: float) -> float:
     """裁剪到 [low, high]。"""
     return max(low, min(high, value))
