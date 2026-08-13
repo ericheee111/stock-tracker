@@ -275,6 +275,28 @@ def _active_risk_events(ctx: AppContext) -> list[dict]:
     return events
 
 
+def _active_holding_signals(ctx: AppContext) -> list[dict]:
+    """收市态面板用的「中长线持仓信号」。
+
+    来源：store 中处于活跃态（WATCH/ARMED/TRIGGERED/ACTIVE/TRIM/OVEREXTENDED）
+    的全部信号（**不取前 12**，与 top_opportunities 的去重截断不同——收市面板
+    要呈现完整持仓跨度，按 state_changed_at 降序）。每项经 serialize_signal
+    已含 ``horizon``（几天/几周/几个月~几年）维度，供前端分组展示。
+    """
+    active = ctx.store.active_signal_states()
+    sigs = [s for s in ctx.store.get_signals().values() if s.state in active]
+    sigs.sort(key=lambda s: s.state_changed_at, reverse=True)
+    out: list[dict] = []
+    for s in sigs:
+        d = S.serialize_signal(s)
+        # Signal 类型无 name 字段：补发名称（优先实时报价 name，回退 symbol），
+        # 与 top_opportunities 的 name 口径一致，避免前端渲染成代码。
+        q = ctx.store.get_quote(s.symbol)
+        d["name"] = (q.name if (q is not None and q.name) else s.symbol)
+        out.append(d)
+    return out
+
+
 def _response_freshness(ctx: AppContext, quotes: list) -> tuple[str, int]:
     """聚合一组 quote 的新鲜度，供列表类端点的顶层 data_status/observed_age_ms 使用。
 
@@ -310,6 +332,8 @@ def get_overview(ctx: AppContext) -> dict:
         "regime": to_jsonable(regime) if regime else None,
         "portfolio_heat": round(heat, 3),
         "top_opportunities": _top_opportunities(ctx),
+        # 收市态面板：全量活跃信号（含 horizon 维度），不取前 12（展示完整持仓跨度）。
+        "holding_signals": _active_holding_signals(ctx),
         # 宽度汇总（§9 契约：UI.renderBreadthCard 依赖）
         "breadth": _build_breadth(ctx),
         # 活跃风险事件（§9 契约：UI.renderRiskCard 依赖）

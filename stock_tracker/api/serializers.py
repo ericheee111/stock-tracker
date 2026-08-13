@@ -111,11 +111,17 @@ def serialize_quote(q: T.Quote, market_cfg: "object" = None) -> dict:
 
 
 def serialize_signal(sig: T.Signal) -> dict:
-    """Signal → dict，强制附加 data_status + observed_age_ms。"""
+    """Signal → dict，强制附加 data_status + observed_age_ms + horizon。
+
+    ``horizon`` 为展示用持仓周期维度（几天/几周/几个月~几年），由普通层
+    ``signals.horizon`` 从 strategy_id 派生，不引用 quant、不改 schema。
+    """
     d = to_jsonable(sig)
     d["data_status"] = sig.data_status.value if sig.data_status else T.DataStatus.UNKNOWN.value
     # 信号本身无观察年龄概念，置 0 以满足契约（前端据此区分行情/信号）。
     d["observed_age_ms"] = 0
+    from ..signals.horizon import horizon_for_signal
+    d["horizon"] = horizon_for_signal(sig)
     return d
 
 

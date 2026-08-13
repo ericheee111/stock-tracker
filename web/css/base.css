@@ -258,6 +258,10 @@ body {
 .banner.error   { background: rgba(255, 69, 58, 0.12); border-bottom-color: rgba(255,69,58,0.35); }
 .banner.error   .banner-dot { background: var(--status-stale); }
 .banner.error   .banner-mode { color: var(--status-stale); }
+/* 收市态：夜色基调，明确「已收市」语义（区别于交易时段的绿色 LIVE 条） */
+.banner.closed  { background: linear-gradient(90deg, rgba(94,92,230,0.16), rgba(48,49,75,0.22)); border-bottom-color: rgba(94,92,230,0.40); }
+.banner.closed  .banner-dot { background: #5e5ce6; }
+.banner.closed  .banner-mode { color: #8e8bff; }
 
 /* ============================ 涨跌色（A股：涨红跌绿） ============================ */
 .up   { color: var(--up); }    /* 涨 —— 红 */

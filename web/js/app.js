@@ -83,6 +83,7 @@
 
     // 横幅：真实/降级/演示/失败 可见
     renderBanner();
+    renderHolding();
     if (!state.meta && !state.markets.length) {
       const banner = $('#banner');
       banner.className = 'banner error';
@@ -100,8 +101,27 @@
   function renderBanner() {
     const banner = $('#banner');
     if (!banner) return;
-    banner.className = 'banner ' + UI.bannerModeClass(state.meta);
+    const closed = UI.isAllMarketsClosed(state.meta);
+    banner.className = 'banner ' + UI.bannerModeClass(state.meta) + (closed ? ' closed' : '');
     banner.innerHTML = UI.renderBanner(state.meta, state.providers);
+  }
+
+  /* ---------------- 渲染：收市态中长线持仓信号面板 ---------------- */
+  function renderHolding() {
+    const panel = $('#holdingPanel');
+    if (!panel) return;
+    const closed = UI.isAllMarketsClosed(state.meta);
+    if (!closed) {
+      // 交易时段：隐藏收市面板，避免与实时机会列表重复。
+      panel.hidden = true;
+      panel.innerHTML = '';
+      return;
+    }
+    panel.hidden = false;
+    const sigs = (state.overview && state.overview.holding_signals) || [];
+    panel.innerHTML =
+      '<div class="closed-banner">🌙 已收市 · 中长线持仓信号</div>' +
+      '<div class="hl-wrap">' + UI.renderHoldingSignals(sigs) + '</div>';
   }
 
   /* ---------------- 渲染：① 市场总览 ---------------- */
@@ -124,6 +144,7 @@
     }
 
     renderTopList();
+    renderHolding();
   }
 
   /* ---------------- 渲染：①b 重点机会（按市场过滤） ---------------- */

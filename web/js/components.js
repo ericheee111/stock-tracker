@@ -181,11 +181,11 @@
     const moText = ['a', 'hk', 'us'].map(function (m) {
       const st = String(mo[m] || '').toUpperCase();
       const lbl = { a: 'A', hk: '港', us: '美' }[m];
-      // 后端 market_open_status 返回字符串状态，需映射为中文
-      const v = st === 'TRADING' ? '开'
-        : st === 'WEEKEND' ? '周末休'
-        : st === 'CLOSED' ? '休'
-        : st === 'DISABLED' ? '停'
+      // 后端 market_open_status 返回字符串状态，需映射为中文（收市态明确标注）
+      const v = st === 'TRADING' ? '交易中'
+        : st === 'WEEKEND' ? '周末休市'
+        : st === 'CLOSED' ? '已收市'
+        : st === 'DISABLED' ? '已停用'
         : '?';
       return lbl + ':' + v;
     }).join('  ');
@@ -204,6 +204,76 @@
     if (mode === 'DEGRADED') return 'degraded';
     if (mode === 'DEMO') return 'demo';
     return 'unknown';
+  }
+
+  /**
+   * 判断是否「全部已收市」：三市场（A/港/美）均 CLOSED 或 WEEKEND，且至少
+   * 有一个启用市场。DISABLED 市场不参与判定。用于收市态面板与横幅「已收市」样式。
+   */
+  function isAllMarketsClosed(meta) {
+    if (!meta) return false;
+    const mo = meta.market_open || {};
+    const keys = ['a', 'hk', 'us'];
+    const enabled = keys.filter(function (m) {
+      return String(mo[m] || '').toUpperCase() !== 'DISABLED';
+    });
+    if (!enabled.length) return false;
+    return enabled.every(function (m) {
+      const st = String(mo[m] || '').toUpperCase();
+      return st === 'CLOSED' || st === 'WEEKEND';
+    });
+  }
+
+  /* ============================================================
+   * 收市态面板：中长线持仓信号（按持仓周期维度分组）
+   * 数据来自 overview.holding_signals（全量活跃信号，含 horizon 维度）。
+   * 按 horizon.order 升序分桶：短线(几天) → 中线(几周) → 长线(几个月~几年)，
+   * 每个桶头明确标注「持仓周期」跨度，便于用户了解各类中长线持仓的时间跨度。
+   * ============================================================ */
+  function renderHoldingSignals(signals) {
+    const list = Array.isArray(signals) ? signals : [];
+    if (!list.length) return '<div class="card-empty">当前无活跃的中长线持仓信号</div>';
+    // 按 horizon 分桶（key 兜底 MEDIUM）
+    const buckets = {};
+    list.forEach(function (s) {
+      const h = s.horizon || { key: 'MEDIUM', label: '中线', span: '几周', order: 2 };
+      const k = h.key || 'MEDIUM';
+      if (!buckets[k]) {
+        buckets[k] = { label: h.label || '中线', span: h.span || '几周', order: h.order || 2, items: [] };
+      }
+      buckets[k].items.push(s);
+    });
+    const keys = Object.keys(buckets).sort(function (a, b) {
+      return buckets[a].order - buckets[b].order;
+    });
+    return keys.map(function (k) {
+      const b = buckets[k];
+      const cards = b.items.map(function (s) {
+        const sym = esc(s.symbol);
+        const name = esc(s.name || s.symbol);
+        const opp = (s.scores && s.scores.opportunity != null) ? F.num(s.scores.opportunity) : '—';
+        const reason = esc(F.def(s.reason, ''));
+        // 收市态强调「持仓周期」跨度标签
+        const periodTag = '<span class="hl-period" style="background:var(--accent)">' + esc(b.span) + '</span>';
+        return '<div class="hl-card" data-symbol="' + sym + '" ' +
+          (s.signal_id ? 'data-signal="' + esc(s.signal_id) + '"' : '') + '>' +
+          '<div class="hl-head"><div class="hl-name">' + name +
+          ' <span class="hl-code">' + sym + '</span></div>' +
+          (s.state ? stateBadge(s.state) : '') + '</div>' +
+          '<div class="hl-meta">' + periodTag +
+          '<span class="hl-opp">机会 ' + opp + '</span>' +
+          (s.strategy_id ? '<span class="hl-strat">策略 ' + esc(s.strategy_id) + '</span>' : '') +
+          '</div>' +
+          (reason ? '<div class="hl-reason">' + reason + '</div>' : '') +
+          '</div>';
+      }).join('');
+      return '<div class="hl-group">' +
+        '<div class="group-title">' + esc(b.label) +
+        ' <span class="hl-span">持仓周期 · ' + esc(b.span) + '</span>' +
+        '<span class="group-count">' + b.items.length + '</span></div>' +
+        cards +
+        '</div>';
+    }).join('');
   }
 
   /* ============================================================
@@ -636,6 +706,7 @@
     radarGroupOf: radarGroupOf, RADAR_GROUP_ORDER: RADAR_GROUP_ORDER,
     stateBadge: stateBadge, renderScores: renderScores,
     renderBanner: renderBanner, bannerModeClass: bannerModeClass,
+    isAllMarketsClosed: isAllMarketsClosed, renderHoldingSignals: renderHoldingSignals,
     renderIndexGrid: renderIndexGrid,
     renderRegimeCard: renderRegimeCard, renderSectorCard: renderSectorCard,
     renderBreadthCard: renderBreadthCard, renderRiskCard: renderRiskCard,
