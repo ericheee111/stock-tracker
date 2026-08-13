@@ -50,9 +50,11 @@ class DataQualityGate:
         now = datetime.now()
 
         # ---- 1. future-leak 硬阻断（PRD #5.4） ----
-        if quote.computed_at < quote.timestamp:
+        # 容忍正常时钟偏差（_FUTURE_DRIFT）：源时间戳偶尔比本机时钟快数秒属正常漂移，
+        # 仅当 computed_at 显著早于 timestamp 才判未来泄漏，避免误杀真实新鲜报价。
+        if quote.computed_at < quote.timestamp - _FUTURE_DRIFT:
             return T.DataQuality(T.QualityStatus.INVALID, 0,
-                                 ["future-leak: computed_at < timestamp"]), T.DataStatus.UNKNOWN
+                                 ["future-leak: computed_at 显著早于 timestamp"]), T.DataStatus.UNKNOWN
         if quote.timestamp > now + _FUTURE_DRIFT:
             return T.DataQuality(T.QualityStatus.INVALID, 0,
                                  ["时间戳来自未来"]), T.DataStatus.UNKNOWN

@@ -93,14 +93,25 @@ class TestInvalidHardBlock(unittest.TestCase):
         self.gate = DataQualityGate(_bundle())
 
     def test_future_leak_hard_block(self):
-        # computed_at 早于源时间戳 → 未来数据泄漏，硬阻断
+        # computed_at 显著早于源时间戳（> _FUTURE_DRIFT 容忍）→ 真实未来数据泄漏，硬阻断。
+        # 注：普通时钟漂移（数秒）已在 gate.evaluate 内被 _FUTURE_DRIFT 容忍，不再误杀。
         ts = datetime.now()
-        q = _quote(timestamp=ts, computed_at=ts - timedelta(seconds=10))
+        q = _quote(timestamp=ts, computed_at=ts - timedelta(seconds=600))  # 10 分钟，远超 120s 容忍
         dq, ds = self.gate.evaluate(q)
         self.assertEqual(dq.status, T.QualityStatus.INVALID)
         self.assertEqual(dq.score, 0)
         self.assertEqual(ds, T.DataStatus.UNKNOWN)
         self.assertTrue(any("future-leak" in r for r in dq.reasons))
+
+    def test_future_leak_within_drift_tolerated(self):
+        # 普通时钟漂移（源时间戳比本机快数秒）属正常，不应被 future-leak 硬阻断误杀。
+        # 修复后仅在 computed_at 显著早于 timestamp（超出 _FUTURE_DRIFT 容忍）才判未来泄漏。
+        ts = datetime.now()
+        q = _quote(timestamp=ts + timedelta(seconds=9), computed_at=ts)  # 源快 9 秒
+        dq, ds = self.gate.evaluate(q)
+        self.assertEqual(dq.status, T.QualityStatus.VALID)
+        self.assertEqual(ds, T.DataStatus.LIVE)
+        self.assertFalse(any("future-leak" in r for r in dq.reasons))
 
     def test_future_timestamp_invalid(self):
         # computed_at 足够靠后，确保命中「时间戳来自未来」分支（而非 future-leak 分支）

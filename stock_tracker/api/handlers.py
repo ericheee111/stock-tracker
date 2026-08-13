@@ -47,15 +47,24 @@ def _top_opportunities(ctx: AppContext, limit: int = 12) -> list[dict]:
     sigs.sort(key=lambda s: (s.scores.opportunity if s.scores else 0), reverse=True)
     out: list[dict] = []
     for s in sigs[:limit]:
+        # 补发实时报价与名称：与 get_watchlist/get_positions 的 quote 字段保持一致，
+        # 否则前端机会列表无法渲染价格（sig.quote 为 undefined → 渲染成 "—"）。
+        q = ctx.store.get_quote(s.symbol)
+        quote_d = S.serialize_quote(q, _market_cfg(ctx, q.market)) if q is not None else None
+        # 名称来源：优先取实时报价的 name；Signal 类型本身无 name 字段，故回退用 symbol。
+        name = (q.name if (q is not None and q.name) else s.symbol)
         out.append({
             "symbol": s.symbol,
             "market": s.market.value,
             "state": s.state.value,
             "strategy_id": s.strategy_id,
+            "name": name,
             "scores": S.serialize_signal(s).get("scores"),
             "reason": s.reason,
             "next_trigger": s.next_trigger,
-            "data_status": s.data_status.value if s.data_status else "UNKNOWN",
+            "quote": quote_d,
+            "data_status": (q.data_status.value if (q is not None and q.data_status)
+                            else (s.data_status.value if s.data_status else "UNKNOWN")),
         })
     return out
 

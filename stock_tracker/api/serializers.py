@@ -36,9 +36,13 @@ def recompute_age_ms(q: T.Quote, now: Optional[datetime] = None) -> int:
 
 
 def quote_data_status(age_ms: int, market_cfg: "object" = None) -> T.DataStatus:
-    """按年龄阈值映射 freshness（PRD #26.10）。时间戳不可靠 → UNKNOWN。"""
+    """按年龄阈值映射 freshness（PRD #26.10）。
+
+    年龄 <= 0 表示「刚接收 / 时钟偏差导致无法判定精确源时间戳」——此类 quote 已通过
+    DQ 闸门且 last>0，是真实实时报价，视为新鲜（LIVE），而非 UNKNOWN。
+    """
     if age_ms <= 0:
-        return T.DataStatus.UNKNOWN
+        return T.DataStatus.LIVE
     if market_cfg is not None:
         stale = getattr(market_cfg, "stale_ms", 0) or 0
         delayed = getattr(market_cfg, "delayed_ms", 0) or 0
@@ -78,7 +82,7 @@ def market_data_status(session: str, age_ms: int, market_cfg: "object" = None) -
     delayed = getattr(market_cfg, "delayed_ms", 0) or 0
     closed = session in ("CLOSED", "WEEKEND")
     if age_ms <= 0:
-        return (T.DataStatus.DELAYED if closed else T.DataStatus.UNKNOWN).value
+        return (T.DataStatus.DELAYED if closed else T.DataStatus.LIVE).value
     if stale and age_ms > stale:
         return T.DataStatus.STALE.value
     if delayed and age_ms > delayed:

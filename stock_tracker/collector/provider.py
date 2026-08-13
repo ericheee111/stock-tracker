@@ -109,7 +109,7 @@ class MarketDataProvider(ABC):
                 q.received_at = received_at
                 q.computed_at = datetime.now()
                 q.latency = latency_ms
-                q.observed_age_ms = int((q.received_at - q.timestamp).total_seconds() * 1000)
+                q.observed_age_ms = max(0, int((q.received_at - q.timestamp).total_seconds() * 1000))
                 out.append(q)
             except Exception:
                 # 单条解析失败不影响其他标的
@@ -132,7 +132,7 @@ class MarketDataProvider(ABC):
                 q.received_at = received_at
                 q.computed_at = datetime.now()
                 q.latency = latency_ms
-                q.observed_age_ms = int((q.received_at - q.timestamp).total_seconds() * 1000)
+                q.observed_age_ms = max(0, int((q.received_at - q.timestamp).total_seconds() * 1000))
                 out.append(q)
             except Exception:
                 continue
