@@ -16,13 +16,13 @@
     COLD: '暂无机会', WATCH: '值得观察', ARMED_BREAKOUT: '等突破',
     ARMED_PULLBACK: '等回踩确认', TRIGGERED: '已触发可执行', ACTIVE: '持有逻辑仍在',
     TRIM: '考虑减仓', EXIT: '退出/逻辑失效', OVEREXTENDED: '强势但禁止追高',
-    INVALIDATED: '计划失效', DATA_INVALID: '数据异常不给信号', EXPIRED: '已过期'
+    INVALIDATED: '计划失效', DATA_INVALID: '数据不足暂不发信号', EXPIRED: '已过期'
   };
   const STATE_COLORS = {
     COLD: '#8e8e93', WATCH: '#64d2ff', ARMED_BREAKOUT: '#bf5af2',
     ARMED_PULLBACK: '#5e5ce6', TRIGGERED: '#30d158', ACTIVE: '#30d158',
     TRIM: '#ffd60a', EXIT: '#ff453a', OVEREXTENDED: '#ff9f0a',
-    INVALIDATED: '#ff453a', DATA_INVALID: '#ff453a', EXPIRED: '#8e8e93'
+    INVALIDATED: '#ff453a', DATA_INVALID: '#ff9f0a', EXPIRED: '#8e8e93'
   };
 
   /* ---------------- 枚举：市场 Regime 五态（§3.1 / §8） ---------------- */
@@ -43,7 +43,7 @@
 
   /* ---------------- 雷达分组（§4.3 六/七组分层） ---------------- */
   const RADAR_GROUP_ORDER = [
-    '可执行', '等一个条件', '等突破', '等回踩', '禁止追高', '早期观察', '风险数据异常', '已结束'
+    '可执行', '等一个条件', '等突破', '等回踩', '禁止追高', '早期观察', '数据不足', '已结束'
   ];
   function radarGroupOf(state) {
     switch (state) {
@@ -53,7 +53,7 @@
       case 'ARMED_PULLBACK': return '等回踩';
       case 'OVEREXTENDED': return '禁止追高';
       case 'COLD': return '早期观察';
-      case 'DATA_INVALID': return '风险数据异常';
+      case 'DATA_INVALID': return '数据不足';
       default: return '已结束'; // INVALIDATED / EXIT / TRIM / EXPIRED
     }
   }
@@ -65,7 +65,7 @@
       case '等回踩': return 'g-pullback';
       case '禁止追高': return 'g-overext';
       case '早期观察': return 'g-early';
-      case '风险数据异常': return 'g-data';
+      case '数据不足': return 'g-data';
       default: return '';
     }
   }

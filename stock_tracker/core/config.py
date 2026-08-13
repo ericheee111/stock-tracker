@@ -129,15 +129,19 @@ class ConfigBundle:
     risk: RiskConfig
 
 
+class ConfigError(Exception):
+    """配置解析/加载失败。"""
+
+
 def _read_toml(path: str) -> dict:
-    """安全读取 TOML；缺失返回空 dict。"""
+    """读取 TOML；文件缺失返回空 dict，解析失败抛 ConfigError。"""
     try:
         with open(path, "rb") as fh:
             return tomllib.load(fh)
     except FileNotFoundError:
         return {}
-    except Exception:  # 解析失败也兜底，避免崩溃
-        return {}
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"TOML 解析失败: {path} -> {exc}") from exc
 
 
 def _opt(d: dict, key: str, default: Any) -> Any:
