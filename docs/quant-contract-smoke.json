@@ -1,0 +1,62 @@
+{
+  "calendar_horizon": {
+    "calendar_aware_label": "TIMEOUT",
+    "calendar_fix_prevents_horizon_drift": true,
+    "calendar_snapshot_id": "6d06dea74399dfd6dcf26bc3c795876789feac5c75ca8bc502f8cdcd624b53c1",
+    "placeholder_dates": [
+      "2025-01-05"
+    ],
+    "session_dates": [
+      "2025-01-02",
+      "2025-01-05",
+      "2025-01-06"
+    ],
+    "status_snapshot_id": "51ab567dbb5b9f836a94611ad036e8479ccbe2b202a7e859829631e4adfa5610",
+    "unsafe_raw_bar_label": "TP_FIRST"
+  },
+  "config_hash": "c6155793354eea31f8c828402e8cc40647bddb6f0746b3e62a361302dc766723",
+  "governance": {
+    "future_feature_brier": 1.0000000000000008e-06,
+    "future_feature_flagged": true,
+    "high_probability_bypasses_risk_gate": false,
+    "risk_gate_reasons": [
+      "RISK_GATE_BLOCKED"
+    ],
+    "suspicious_advantage_detected": true
+  },
+  "investment_performance_claim": false,
+  "manifest": {
+    "artifact_id": "d4cacedf863303fbb8e7b73ba0608cc9e096fd19ef4afb744b8cb90658ba3395",
+    "round_trip_verified": true,
+    "same_size_tamper": true,
+    "snapshot_id": "12f18c2c2f97be1925154da95ab4f25409651da2654210b039828665cb040d6c",
+    "tamper_detected": true
+  },
+  "migrations": {
+    "database_created": true,
+    "migration_count": 2,
+    "pending_count": 0,
+    "production_database_modified": false,
+    "versions": [
+      1,
+      2
+    ]
+  },
+  "passed": true,
+  "qlib_audit": {
+    "audit_id": "9cfbd180d6ccc904b366b77998990ec1e49beede86823a349dec1beae556d1f7",
+    "blockers": [
+      "Corporate-action golden mapping",
+      "Exact Qlib revision pinned",
+      "Golden-data numerical equivalence"
+    ],
+    "may_claim_numerical_equivalence": false
+  },
+  "safety": {
+    "auto_apply_sql": false,
+    "auto_promote_models": false,
+    "probability_advisory_only": true
+  },
+  "schema": "stock-tracker-quant-contract-smoke-v1",
+  "synthetic_fixture_only": true
+}

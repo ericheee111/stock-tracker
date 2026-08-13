@@ -1,0 +1,112 @@
+{
+  "challenger": {
+    "calibration_id": "011e057773be6bfdf1592c2745831cd491d896a801e9e1c8133564ef114c1942",
+    "feature_count": 8,
+    "max_drawdown": 0.046652558381522935,
+    "metrics": {
+      "brier": 0.20293940236357655,
+      "ece": 0.13840399431471234,
+      "logloss": 0.590635996404215,
+      "precision_at_k": 0.7,
+      "top_k_net_expectancy_r": 0.6354518280816293
+    },
+    "model_id": "c3b38a110c4cc21576de15b59c9eee907aa78722f8e2978339a53abf9fd56e3e",
+    "name": "interaction-logistic-governance-fixture",
+    "regime_expectancies_r": [
+      0.7392028552166122,
+      0.8336021801595541
+    ],
+    "score_bucket_rates": [
+      0.10714285714285714,
+      0.3103448275862069,
+      0.41379310344827586,
+      0.6896551724137931,
+      0.6896551724137931
+    ],
+    "time_expectancies_r": [
+      0.8195839528476205,
+      0.5742330093901195,
+      0.25311526968119974,
+      0.6154067348531214
+    ]
+  },
+  "champion": {
+    "calibration_id": "56dbbebdf9bba79453e121b8800883cc1bb2bc48f78064d9192c464dfce9315e",
+    "feature_count": 5,
+    "max_drawdown": 0.0673563631703854,
+    "metrics": {
+      "brier": 0.2352618849511131,
+      "ece": 0.10968927283394739,
+      "logloss": 0.663848808721037,
+      "precision_at_k": 0.5666666666666667,
+      "top_k_net_expectancy_r": 0.3383443212986108
+    },
+    "model_id": "3e705d6a580803020402754605b84e1526eaabff160b1f30cc4938f3cfa614e0",
+    "name": "logistic-base-features",
+    "regime_expectancies_r": [
+      0.16821603957433676,
+      0.36402756656589774
+    ],
+    "score_bucket_rates": [
+      0.10714285714285714,
+      0.4827586206896552,
+      0.41379310344827586,
+      0.6551724137931034,
+      0.5517241379310345
+    ],
+    "time_expectancies_r": [
+      0.7907651749551646,
+      0.24153602762025578,
+      -0.1880724585328116,
+      -0.0472302965945823
+    ]
+  },
+  "comparison_identity": {
+    "calibration_dataset_id": "3d0fa829ebceb4eb73743f2853ef65c56255d22698a35add125a7163ed42181d",
+    "calibration_definition": "PLATT_PER_MODEL_COMPLETED_LABELS_ONLY",
+    "comparison_id": "d00c0aab50f43b2c14cab88051f3e97a7c61ab359c5f87253670d4cf42e083bd",
+    "top_k_definition": "validation-probability-descending-net-of-0.03R",
+    "train_dataset_id": "d5bf7d40082b3a1b785d0c32e3cefb8f61efb7a275a139866ba7fe2ef53d0813",
+    "validation_dataset_id": "13d4059208ed61217df9c111044724246c609d8981669dcf44c504ff49cdfc62"
+  },
+  "investment_performance_claim": false,
+  "negative_controls": {
+    "baseline_brier": 0.2352618849511131,
+    "future_feature_brier": 1.0000000000000008e-06,
+    "future_feature_flagged": true,
+    "random_feature_brier": 0.35122923684473034,
+    "randomized_label_brier": 0.2469135802469136,
+    "suspicious_advantage_detected": true
+  },
+  "optional_lightgbm": {
+    "available": false,
+    "evaluated": false,
+    "reason": "This environment does not provide lightgbm."
+  },
+  "promotion_gate": {
+    "config": {
+      "maximum_drawdown_regression": 0.0,
+      "maximum_ece_regression": 0.0,
+      "maximum_precision_regression": 0.0,
+      "maximum_regime_range": 0.5,
+      "maximum_time_range": 0.5,
+      "minimum_brier_improvement": 0.001,
+      "minimum_expectancy_improvement": 0.0,
+      "minimum_logloss_improvement": 0.001
+    },
+    "decision_id": "21c3dbc05fa866652e4020fa6b9614d2ad2f43038ff99373363a585c359c5633",
+    "promoted": false,
+    "reasons": [
+      "ECE_REGRESSED",
+      "TIME_INSTABILITY"
+    ]
+  },
+  "sample_counts": {
+    "calibration": 144,
+    "train": 432,
+    "validation": 144
+  },
+  "schema": "stock-tracker-quant-synthetic-fixture-v1",
+  "seed": 20260813,
+  "synthetic_fixture_only": true
+}

@@ -1,0 +1,68 @@
+classDiagram
+    class Bar {
+        +str symbol
+        +Market market
+        +datetime timestamp
+        +str interval
+        +float open
+        +float high
+        +float low
+        +float close
+        +int volume
+        +float amount
+        +float turnover
+        +str source
+        +float adjustment_factor
+        +DataStatus quality_status
+    }
+    class MarketDataProvider {
+        <<abstract>>
+        +fetch_quotes(symbols) list~Quote~
+        +fetch_snapshot() list~Quote~
+        +fetch_bars(symbol, market, interval, start, end, adjust) list~Bar~
+        +supports_bars() bool
+    }
+    class EastmoneyProvider {
+        +fetch_bars(...) list~Bar~
+        +supports_bars() bool = True
+    }
+    class TencentProvider {
+        +fetch_bars(...) list~Bar~  (默认关闭)
+        +supports_bars() bool = False
+    }
+    class ProviderRouter {
+        +fetch_quotes(symbols) list~Quote~
+        +fetch_bars(symbol, market, ...) list~Bar~
+        -select(market, op) Provider
+    }
+    class Scheduler {
+        -_run_bars()
+        -_seed_bar_universe() list~str~
+        -_run_pool(name, pool, size)
+    }
+    class Repository {
+        +save_bar(bar)
+        +save_bars_batch(bars)
+        +load_recent_bars(symbol, interval, n) list~Bar~
+    }
+    class DataQualityGate {
+        +evaluate(quote, prev) tuple
+        +evaluate_bar(bar) tuple
+    }
+    class FeatureSnapshot {
+        +build_indicators(bars, market) dict
+    }
+    class ScanContext {
+        +list~Bar~ recent_bars
+    }
+    MarketDataProvider <|-- EastmoneyProvider
+    MarketDataProvider <|-- TencentProvider
+    ProviderRouter o-- MarketDataProvider
+    Scheduler --> ProviderRouter : fetch_bars
+    Scheduler --> Repository : save_bars_batch / load
+    Scheduler --> DataQualityGate : evaluate_bar
+    Repository --> Bar
+    FeatureSnapshot ..> Bar : 输入
+    ScanContext o-- Bar
+    note for FeatureSnapshot "仅透明计算+展示，禁区外"
+    note for ScanContext "recent_bars 由 scheduler 注入，策略未来可取用"

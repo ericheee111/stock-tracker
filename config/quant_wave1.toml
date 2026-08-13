@@ -1,0 +1,43 @@
+schema_version = "1.0"
+foundation_version = "wave1"
+
+[safety]
+require_aware_timestamps = true
+require_verified_data = true
+require_complete_date_coverage = true
+require_explicit_no_bar_status = true
+require_calendar_snapshot_for_market_data = true
+require_universe_snapshot_for_market_data = true
+verify_sha256_before_use = true
+reject_symlink_artifacts = true
+enable_labeling_without_calendar_alignment = false
+enable_training_without_verified_manifest = false
+probability_advisory_only = true
+auto_apply_sql = false
+auto_promote_models = false
+allow_best_case_same_bar = false
+allow_random_kfold = false
+allow_unverified_rules = false
+allow_unverified_costs = false
+
+[labels]
+definition = "target-before-stop-v1"
+entry_price = "next-executable-price"
+same_bar_default = "MARK_AMBIGUOUS"
+blocked_barrier_policy = "preserve-first-barrier"
+
+[evaluation]
+validation = "purged-walk-forward"
+calibration_boundary = "label_end_time"
+frozen_holdout = true
+negative_controls = true
+
+[models]
+champion = "logistic-regression"
+challenger = "lightgbm-meta-label"
+challenger_optional = true
+probability_requires_calibration = true
+
+[storage]
+migration_mode = "explicit"
+production_database_default = ""

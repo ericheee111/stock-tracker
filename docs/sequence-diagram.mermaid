@@ -1,0 +1,30 @@
+sequenceDiagram
+    participant SCH as Scheduler(_run_bars)
+    participant RT as ProviderRouter
+    participant EM as EastmoneyProvider
+    participant GATE as DataQualityGate
+    participant REPO as Repository
+    participant API as handlers
+    participant FS as FeatureSnapshot
+
+    Note over SCH: 低频 BAR 线程（首跑全量 / 后续增量）
+    SCH->>SCH: 取 bar_universe（cold_universe + 自选 + 持仓）
+    loop 分批（bars_batch_size=2~4，间隔 bars_batch_sleep_sec）
+        SCH->>RT: fetch_bars(symbol, market, adjust="qfq")
+        RT->>EM: fetch_bars(...)
+        EM->>EM: HTTP kline → 解析(按市场换算量) → list[Bar]
+        EM-->>RT: bars
+        RT-->>SCH: bars
+        loop 每根 bar
+            SCH->>GATE: evaluate_bar(bar)
+            GATE-->>SCH: (DataQuality, DataStatus)
+        end
+        SCH->>REPO: save_bars_batch(通过DQ的bars)
+    end
+
+    Note over API: GET /api/overview
+    API->>REPO: load_recent_bars(symbol, "1d", 260)
+    REPO-->>API: bars (或 [])
+    API->>FS: build_indicators(bars, market)
+    FS-->>API: indicators dict (None 安全)
+    API-->>API: 附到 top_opportunities[i].indicators

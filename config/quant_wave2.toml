@@ -1,0 +1,49 @@
+schema_version = "2.0"
+foundation_version = "wave2a"
+
+[safety]
+require_aware_timestamps = true
+require_verified_data = true
+require_complete_date_coverage = true
+require_explicit_no_bar_status = true
+require_calendar_snapshot_for_market_data = true
+require_universe_snapshot_for_market_data = true
+verify_sha256_before_use = true
+reject_symlink_artifacts = true
+enable_labeling_without_calendar_alignment = false
+enable_training_without_verified_manifest = false
+probability_advisory_only = true
+auto_apply_sql = false
+auto_promote_models = false
+allow_best_case_same_bar = false
+allow_random_kfold = false
+allow_unverified_rules = false
+allow_unverified_costs = false
+
+[calendar]
+unknown_missing_bar_policy = "FAIL_CLOSED"
+require_exchange_local_timezone = true
+require_every_civil_date = true
+require_one_source_and_version = true
+placeholder_volume = 0
+placeholder_observable = false
+
+[manifest]
+require_structured_row_count = true
+require_retrieved_before_snapshot_creation = true
+require_canonical_posix_storage_key = true
+reject_absolute_paths = true
+reject_parent_traversal = true
+reject_urls_and_credentials = true
+atomic_json_write = true
+
+[sql]
+auto_apply = false
+append_only = true
+revision_encoding = "INTEGER_OR_STRING_V1"
+
+[qlib]
+claim_numerical_equivalence = false
+corporate_action_golden_mapping = "BLOCKER"
+exact_revision_pinned = "BLOCKER"
+golden_data_equivalence = "BLOCKER"
