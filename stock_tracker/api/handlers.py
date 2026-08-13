@@ -43,8 +43,17 @@ def _best_signal_for(ctx: AppContext, symbol: str) -> Optional[dict]:
 
 
 def _top_opportunities(ctx: AppContext, limit: int = 12) -> list[dict]:
-    sigs = list(ctx.store.get_signals().values())
-    sigs.sort(key=lambda s: (s.scores.opportunity if s.scores else 0), reverse=True)
+    # 同一标的可能被多个策略各自产出信号；按 symbol 去重，仅保留机会分最高的一条，
+    # 避免 Top 机会列表出现重复标的（例如同一只股票被两条策略同时命中）。
+    best_by_symbol: dict[str, Any] = {}
+    for s in ctx.store.get_signals().values():
+        score = s.scores.opportunity if s.scores else 0
+        prev = best_by_symbol.get(s.symbol)
+        prev_score = prev.scores.opportunity if (prev is not None and prev.scores) else 0
+        if prev is None or score > prev_score:
+            best_by_symbol[s.symbol] = s
+    sigs = sorted(best_by_symbol.values(),
+                  key=lambda s: (s.scores.opportunity if s.scores else 0), reverse=True)
     out: list[dict] = []
     for s in sigs[:limit]:
         # 补发实时报价与名称：与 get_watchlist/get_positions 的 quote 字段保持一致，
