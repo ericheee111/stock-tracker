@@ -38,6 +38,7 @@ stock-tracker 已实现为一个**零第三方依赖的 Python 标准库后端 +
 | G12 regime 指数集混入个股 300750.SZ | `stock_tracker/features/regime.py` | `e59ef30` | `test_regime` 7/7 通过 |
 | **真实数据展示（用户验收项）**：机会列表/指数卡补发实时 `quote` 与 `name`；DQ 时钟偏差容忍（future-leak 120s 漂移窗）；`observed_age_ms` 夹 0；`age<=0` 视为 LIVE | `stock_tracker/api/{handlers,serializers}.py`、`stock_tracker/data_quality/gate.py`、`stock_tracker/collector/provider.py` | `aebfb48` | 活体 curl `/api/overview` 含真实 `quote`（中芯 132.48 / 茅台 1356.31…）；Playwright 12 卡真实价格、三市场指数真实、徽章无「未知/数据不足」 |
 | **机会列表按 symbol 去重**：同一股票被多策略命中时不再重复展示 | `stock_tracker/api/handlers.py` (`_top_opportunities`) | `9e850b2` | 活体 `/api/overview` 去重后 `duplicates=[]`；145 测试全绿 |
+| **风险事件卡渲染原始 JSON → 结构化展示**：`renderRiskCard` 移除 `JSON.stringify` 兜底，按 symbol/市场/风险等级(HIGH红·MEDIUM琥珀·LOW灰)/风险分/状态徽章/完整 reason 渲染 | `web/js/components.js` (`renderRiskCard` + `RISK_LEVEL_COLORS/LABELS`)、`web/css/cockpit.css` (.risk-* 子类) | `6caeae7` | QA 独立回归全 PASS：源码无 JSON.stringify、`esc()` 全覆盖、7 字段契约对齐、空态保留、CSS 作用域隔离、Playwright `hasRawJSON=false` + 截图无 `{` `}`；145 测试全绿 |
 
 ---
 
