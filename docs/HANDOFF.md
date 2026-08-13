@@ -36,12 +36,14 @@ stock-tracker 已实现为一个**零第三方依赖的 Python 标准库后端 +
 | Bug2 Sina/Eastmoney 丢失股票名 | `stock_tracker/collector/{eastmoney,sina}.py` | 源码已修 | 143 测试全绿；`test_provider.test_csv_mapping` 由 fail 转 ok |
 | G10 腾讯源被指回 `127.0.0.1:9`（真实数据阻断） | `config/providers.toml` | `e59ef30` | TOML 解析通过；host 置空后用内置 `qt.gtimg.cn` |
 | G12 regime 指数集混入个股 300750.SZ | `stock_tracker/features/regime.py` | `e59ef30` | `test_regime` 7/7 通过 |
+| **真实数据展示（用户验收项）**：机会列表/指数卡补发实时 `quote` 与 `name`；DQ 时钟偏差容忍（future-leak 120s 漂移窗）；`observed_age_ms` 夹 0；`age<=0` 视为 LIVE | `stock_tracker/api/{handlers,serializers}.py`、`stock_tracker/data_quality/gate.py`、`stock_tracker/collector/provider.py` | `aebfb48` | 活体 curl `/api/overview` 含真实 `quote`（中芯 132.48 / 茅台 1356.31…）；Playwright 12 卡真实价格、三市场指数真实、徽章无「未知/数据不足」 |
+| **机会列表按 symbol 去重**：同一股票被多策略命中时不再重复展示 | `stock_tracker/api/handlers.py` (`_top_opportunities`) | `9e850b2` | 活体 `/api/overview` 去重后 `duplicates=[]`；145 测试全绿 |
 
 ---
 
 ## 3. 测试与验证结果
 
-- **143 用例 → 全部通过（0 fail / 0 error）**（此前 2 个源码缺陷已修复）。
+- **145 用例 → 全部通过（0 fail / 0 error）**（含 `aebfb48` 真实数据展示修复与 `9e850b2` 去重修复后的回归）。
 - **关键验证点（均 ok）**：
   - future-leak 硬阻断：`computed_at < timestamp` → INVALID、分数 0。
   - 风险闸门：`DQ=STALE/INVALID/DEGRADED` 全阻断强信号；`VALID` 放行。
