@@ -1,7 +1,7 @@
 # stock-tracker 交接文档（HANDOFF）
 
 > 主理人：齐活林（Delivery Director）｜团队：许清楚(PM) / 高见远(Architect) / 寇豆码(Engineer) / 严过关(QA)
-> 对应 PRD：`docs/PRD-股票辅助判断与交易参考网站.md`（v0.3，47 节，2361 行）
+> 对应 PRD：`docs/PRD-股票辅助判断与交易参考网站.md`（v0.4；可信数据双车道 + 工程验收版）
 > 日期：2026-08-13
 > 用途：供其他 agent / 开发者接续 Phase 2–5 工作。
 
@@ -9,7 +9,19 @@
 
 ## 0. TL;DR
 
-stock-tracker 已实现为一个**零第三方依赖的 Python 标准库后端 + 静态前端**的真实可运行系统，并通过 **143 个单元/集成测试（0 fail / 0 error）**。本会话完成了全部 P0 部署与真实数据阻断项修复（见 §2）。PRD 47 节中**核心架构已实现且经测试验证**；剩余为历史 K 线、回测/校准、市场独立配置、退出引擎等增强项（见 §5 路线图），作为明确的接续任务。
+stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + 独立 Quant Foundation** 的真实可运行系统。`main` 上的量化基线为 `93e1c94`；PRD 已升级到 v0.4，将运行缓存与研究训练数据明确分车道。历史 K 线的运行采集/UI 链路已经接通，Quant 的 PIT、执行、标签、校准和治理合同也已存在；当前最高优先级不再是继续堆模型，而是完成 G0 源码分发门禁和 Wave 2B 可信原始数据、日历、历史 Universe、证券状态与公司行为绑定。测试数量会随阶段增长，接续时以当前 commit 的自动化输出为准，不再在 TL;DR 固定一个很快过时的数字。
+
+### 0.1 v0.4 当前状态覆盖说明
+
+本节优先级高于下文保留的历史会话记录：
+
+- 根 `.gitignore` 的 `data/` 曾误排除 `stock_tracker/quant/data/`；现已改为 `/data/`，并增加关键源码 `git ls-files` 回归测试；
+- Eastmoney 日 K 已拆分为 `fetch_bars_raw()` 与 `parse_bars()`，可在解析前保存 exact raw bytes；
+- 新增 `RawDataArtifact + Trust Tier + request_parameters + normalized_dataset_id + capture_id` 的内容寻址捕获与重放合同；descriptor 绑定端点、复权模式、请求起止范围和 parser version；
+- 新增 `scripts/capture_quant_bars.py`，默认只生成 `BEST_EFFORT` Artifact，不修改生产 SQLite，也不能自我升级为 `RESEARCH_GRADE`；
+- Scheduler 的重复 BAR 方法定义已收敛为一套；BAR Universe 覆盖 radar、自选、持仓和活跃信号；
+- 日线有效数据标记为 `DELAYED` 而不是 `LIVE`，避免把 EOD 数据伪装成盘中实时；
+- 下一阶段：A/HK/US golden raw payload、跨源 reconciliation、覆盖缺口报告，然后组装带 Calendar/Status/Universe/Corporate Action 的 T3 Snapshot。
 
 ---
 
@@ -69,7 +81,7 @@ stock-tracker 已实现为一个**零第三方依赖的 Python 标准库后端 +
 按优先级排序，每一项均可直接转交工程师（含 file:line 提示）。
 
 ### P0
-- **T1 历史 K 线采集链路**：`repository.save_bar` 无调用方、`scheduler.load_recent_bars` 永远返回 `[]`。各 Provider 需实现日 K / 分钟 K 拉取并 `repo.save_bar`；scheduler `_run_cold` 接线。影响：`MA/MACD/RSI/ATR` 当前仅用当日涨跌兜底，特征失真。→ 最高杠杆修复。
+- **T1 历史 K 线运行链路【已实现，待正式合并证据】**：Eastmoney 日 K、Router、BAR Scheduler、批量入库/裁剪、指标 API/UI 和回归测试已接通；EOD 明确标 `DELAYED`。研究侧 Wave 2B.1a 也已增加 raw/parse 分离与不可变 Artifact，但仍是 `BEST_EFFORT`，不能替代 T3 Snapshot。
 - **T2 腾讯 host 配置**（本会话已完成）：production `host=""`（用内置 `qt.gtimg.cn`）。
 
 ### P1
@@ -77,7 +89,7 @@ stock-tracker 已实现为一个**零第三方依赖的 Python 标准库后端 +
 - **T4 市场独立配置**：`strategies.toml` 全局权重、S4/S5/S6 缺失、`applies_to` 通吃三市场。按市场选权重（美股中线不同）。
 - **T5 OverextensionPenalty 维度补全**：PRD #14.3 要求 distance_to_MA20/ATR、涨幅分位、跳空/ATR、换手极值、板块 PEAK。
 - **T6 行业/概念真实化**：`features/sector.py` 硬编码 ~35 标的 → 其余归 `BROAD` 兜底。需真实行业 / 概念数据源。
-- **T7 walk-forward 回测 + 概率校准**：`ScoreSet.success_probability` 恒 `None`（正确占位），需 `research/backtest.py` + `research/calibration.py` + model_registry（依赖 T1/T4）。这是 PRD #11.5 硬性要求。
+- **T7 真实 walk-forward + 概率展示【合同已实现，真实证据待完成】**：Quant 已有 purged walk-forward、Logistic、Platt/Isotonic、Frozen Holdout、Model Registry 和 promotion gate；但当前只有合成 fixture。`success_probability` 继续保持 `None`，直到 T3 数据、独立 OOT 样本和 v0.4 §11.6 显示门槛全部通过。
 - **T8 复权 / 公司行为**：`Bar.adjustment_factor` 占位 1.0，无复权价序列。
 - **T9 HOT/WARM 按市场分频**：HK/US 不应高频伪装（虽 `data_status` 标 DELAYED，但轮询浪费、Timing/Confidence 未自动打折）。
 
@@ -158,7 +170,7 @@ stock-tracker 已实现为一个**零第三方依赖的 Python 标准库后端 +
 
 - **N1 favicon 404**：未提供 `web/favicon.ico`，浏览器请求 404。建议放一个 1x1 或品牌图标。
 - **N2 收盘后信号态 `DATA_INVALID` 文案偏 alarmist**：收盘后 `last=None` → 信号引擎将 A 股机会标 `DATA_INVALID` 态（显示"数据异常不给信号"）。此为信号状态机（12 态之一）在缺实时价时**主动 withholding 信号**的正确行为，**非新鲜度 bug**（新鲜度 `data_status` 为 `STALE`，`INVALID` 数量=0）。UX 上"数据异常"易误读为系统故障，建议接入 T1 历史收盘价后改为"休市无实时价"之类的温和文案。
-- **N3 `_read_toml` 静默吞异常（设计缺陷，高风险）**：`stock_tracker/core/config.py::_read_toml` 用 `try/except` 吞掉 `TOMLDecodeError` 返回 `{}`，导致配置错误（如重复 `[index]` 节）被**完全掩盖**——本次 `markets.toml` 重复节就曾让整份配置静默回退默认值、指数卡全空。建议改为：解析失败时**抛错或至少 warn 日志 + 字段级校验**，避免"配置错了但服务照常起、界面静默空白"的排查地狱。**强烈建议列入 P0 修复。**
+- **N3 `_read_toml` 静默吞异常【已修复，待正式合并证据】**：文件缺失仍可按明确缺省策略返回空配置；文件存在但 `TOMLDecodeError` 时现在抛 `ConfigError`，并有“故意写坏 TOML 必须失败”的回归测试。后续仍需补更完整的字段类型/范围校验。
 
 ### 9.4 接续建议（可视化方向）
 

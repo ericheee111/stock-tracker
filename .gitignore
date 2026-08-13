@@ -1,5 +1,6 @@
-# 运行时生成：SQLite 数据库 + 日志（不入库，部署时运行时重建）
-data/
+# 运行时生成：仅忽略仓库根目录的 SQLite 数据库 + 日志。
+# 必须锚定为 /data/，否则会误伤 stock_tracker/**/data 等源码包。
+/data/
 
 # Python 缓存
 __pycache__/
@@ -17,6 +18,9 @@ venv/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Windows 保留设备名，某些工具会把它误显示为未跟踪路径
+/nul
 
 # 安装器下载的浏览器（Playwright 开发期依赖，非运行时）
 .playwright/

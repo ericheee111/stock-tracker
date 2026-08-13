@@ -1,16 +1,31 @@
 # 产品需求与交易决策引擎设计书（PRD）｜股票辅助判断与交易参考网站
 
-> 文档版本：v0.3（决策引擎 + 近零成本低延迟版）  
-> 产品经理：许清楚（Xu）  
-> 覆盖市场：A股 / 港股 / 美股  
-> 定位：个人 + 小团队内部使用的系统化交易辅助工具，不对外、不商业化、不直接下单  
-> 当前约束：**0 成本或接近 0 成本优先，在此前提下尽可能降低延迟**；免费公开数据优先、免登录、站内提醒优先  
-> 当前视觉：夜航玻璃拟态 / 深色交易驾驶舱，移动端优先、桌面端增强  
-> 核心交易周期：A股/港股以 1—20 个交易日短线与短波段为主；美股以 4—12 周中线为主，可延长至 3—6 个月  
+> 文档版本：v0.4（可信数据双车道 + 工程验收版）
+>
+> 产品经理：许清楚（Xu）
+>
+> 覆盖市场：A股 / 港股 / 美股
+>
+> 定位：个人 + 小团队内部使用的系统化交易辅助工具，不对外、不商业化、不直接下单
+>
+> 当前约束：**0 成本或接近 0 成本优先，在此前提下尽可能降低延迟**；免费公开数据优先、免登录、站内提醒优先
+>
+> 当前视觉：夜航玻璃拟态 / 深色交易驾驶舱，移动端优先、桌面端增强
+>
+> 核心交易周期：A股/港股以 1—20 个交易日短线与短波段为主；美股以 4—12 周中线为主，可延长至 3—6 个月
 
 ---
 
-## 0. 本次 v0.3 升级摘要
+## 0. 本次 v0.4 升级摘要
+
+v0.4 不改变“先过滤、再评分、再预测、最后过风险闸门”的产品方向，而是根据 Wave 1 / Wave 2A 已经落地的工程基础，重新划清**已实现合同、尚未具备的真实数据证据、线上展示链路和研究训练链路**。
+
+本次新增四项硬约束：
+
+1. **运行数据与研究数据分车道**：低成本公开行情可以服务页面展示和候选发现，但只有经过原始字节留存、SHA-256 Manifest、交易日历、历史证券状态、历史 Universe 与公司行为绑定的数据，才允许进入正式回测、校准和模型晋级。
+2. **概率展示必须满足最低证据门槛**：没有足够的独立样本、时间外校准和分数桶稳定性时，只显示规则分数与“证据不足”，不得输出伪成功率。
+3. **Fresh clone / source distribution 是发布门禁**：关键源码、迁移、配置和测试必须真实进入 Git；不能出现“本机因被 `.gitignore` 忽略仍可运行，远端仓库却缺模块”的情况。
+4. **工程状态与路线图动态同步**：Point-in-Time、日历合同、Manifest、执行模拟、Triple Barrier、Logistic、概率校准、walk-forward、Frozen Holdout 和 Champion/Challenger 治理底座已经存在；下一阶段重点不是继续堆模型，而是打通可信原始数据和真实样本外验证。
 
 v0.2 已经把产品从简单指标共振升级为系统化决策引擎；v0.3 在保留全部算法设计的基础上，新增硬约束：**0 成本或接近 0 成本优先，并在此前提下尽可能压低数据与信号延迟。**
 
@@ -322,6 +337,52 @@ usable_from = 最早可以用于交易决策的时间
 ```
 
 例如收盘后发布的公告，不能用于当天收盘前的回测信号。
+
+### 5.5 数据信任等级 Data Trust Tier
+
+“接口能返回数据”不等于“数据可以训练模型”。每个 Dataset Snapshot 必须声明用途等级：
+
+| 等级 | 最低合同 | 允许用途 | 禁止用途 |
+|---|---|---|---|
+| T0 `UNKNOWN` | 来源或时间语义不完整 | 故障排查 | UI 实时标识、信号、回测、训练 |
+| T1 `BEST_EFFORT` | 有来源、抓取时间、基本字段校验 | 页面展示、候选发现、运行监控 | 正式收益结论、模型晋级 |
+| T2 `OPERATIONAL_VERIFIED` | 多源/收盘核对、完整 DQ、新鲜度和市场状态 | 规则信号、Timing 降级、Paper/Shadow | 正式训练集、Frozen Holdout |
+| T3 `RESEARCH_GRADE` | 原始字节不可变留存、SHA-256 Manifest、解析器版本、交易日历、PIT Universe、证券状态、公司行为和成本版本绑定 | 标签、回测、walk-forward、校准、真实 Logistic/Tree 研究 | 未封存区间上的最终晋级结论 |
+| T4 `FROZEN_HOLDOUT` | T3 全合同 + 首次暴露前封存身份 + 不可逆暴露记录 | Champion/Challenger 最终验收 | 看结果后继续调参并重复称为 holdout |
+
+等级只能通过新增证据升级，不能由调用方传一个布尔参数自行“信任”。第三方公开源即使运行稳定，也默认从 T1 开始；是否能升级到 T2/T3 取决于实际留存、核验和历史覆盖合同。
+
+### 5.6 运行与研究双车道
+
+```mermaid
+flowchart LR
+    A[公开/免费行情] --> B[运行采集车道]
+    B --> C[DQ + 新鲜度 + Provider Health]
+    C --> D[页面展示 / 候选发现 / 规则信号]
+
+    A --> E[原始字节留存车道]
+    E --> F[Raw Artifact + SHA-256 Manifest]
+    F --> G[Calendar / Status / Universe / Corporate Action]
+    G --> H[Deterministic Parser + PIT Snapshot]
+    H --> I[Label / Backtest / Calibration / Model Registry]
+
+    D -. 不得自动回流为训练集 .-> I
+```
+
+关键规则：
+
+- 页面 SQLite `bars` 表是运行缓存，不自动等于研究数据集；
+- Provider 内存中解析出的 `Bar` 不能绕过 Raw Artifact 直接成为正式训练样本；
+- 同一原始 Artifact 必须能由固定解析器版本重建相同 Dataset Fingerprint；
+- 正式研究输出必须记录 `raw_snapshot_id / calendar_snapshot_id / universe_snapshot_id / corporate_action_snapshot_id / market_rule_id / cost_schedule_id`；
+- T1/T2 数据可以帮助产品尽快可用，但不得被包装成“模型已经在真实历史上验证”。
+
+### 5.7 配置与源码失败关闭
+
+- TOML 文件缺失可按明确的可选策略使用缺省值；**文件存在但语法错误必须启动失败**，不能静默回退；
+- 安全布尔字段必须是实际 `bool`，不接受 `0/1` 或 `"true"/"false"`；
+- 关键源码、迁移、配置和测试必须通过 fresh-clone 检查，禁止被宽泛 `.gitignore` 规则意外排除；
+- 发布证据必须来自当前 commit 的干净或明确列出残余改动的工作树，不能引用另一个环境的历史 PASS 代替本次验证。
 
 ---
 
@@ -802,6 +863,31 @@ P_target_before_stop = 0..1
 必须经过历史样本概率校准后才能展示为百分比。
 
 **不要把 Opportunity Score 直接除以 100 当成功概率。**
+
+### 11.6 概率冷启动与显示门槛
+
+模型代码存在、合成 fixture 通过或单次回测漂亮，都不构成产品展示概率的充分条件。每个 `(market, strategy_id, horizon, model_version)` 必须独立满足：
+
+```text
+DataTrustTier >= RESEARCH_GRADE
+out_of_time_sample_count >= configured_minimum
+calibration_sample_count >= configured_minimum
+score_bucket_min_count >= configured_minimum
+Brier / LogLoss / ECE within policy
+high-to-low score buckets show acceptable monotonicity
+regime/time stability gates pass
+model registry status in {CHAMPION, APPROVED_SHADOW}
+```
+
+在门槛未通过时：
+
+- `success_probability = null`；
+- UI 显示“真实样本不足，暂不展示概率”；
+- 排序不得把空概率偷偷替换为 `Opportunity/100`；
+- 可以保留规则先验和 Model Score，但必须与校准概率分栏展示；
+- 不同市场、策略和周期不能共享一个笼统样本数来绕过门槛。
+
+最低样本阈值必须配置化，并由研究证据决定；PRD 不预设一个看似精确但未经验证的固定数字。
 
 ---
 
@@ -1964,44 +2050,63 @@ status: challenger|champion|retired
 
 ---
 
-## 30. 技术实现优先级
+## 30. 技术实现优先级（v0.4 实际状态版）
 
-### P0：先把“不会骗人”的基础打牢
+### 30.1 已落地的工程底座
 
-1. 三市场独立交易日历与开休市判断；
-2. 数据质量闸门；
-3. 复权与时间点对齐；
-4. 市场 Regime；
-5. 板块强度与相对强弱；
-6. 独立证据族评分；
-7. 3—5 个明确策略扫描器；
-8. Opportunity / Timing / Risk / Confidence 分离；
-9. 入场、失效、目标与 R 倍数；
-10. 信号状态机和“禁止追高”；
-11. 可复现的信号记录；
-12. walk-forward 回测框架。
+以下能力已经存在代码与合成合同测试，但**不等于已经获得真实投资表现证据**：
 
-### P1：提高短线实用度
+- 运行链路：Provider Health Router、HOT/WARM/COLD、DQ、Regime、Sector、独立证据族、S1/S2/S3、四分数、Risk Gate、信号状态机、Next Trigger 与反追高；
+- 量化合同：严格时间语义、PIT Fact/Snapshot、完整交易日历、证券状态占位、版本化 Market Rule/Cost Schedule、next executable price、T+1、停牌/涨跌停、Triple Barrier；
+- 研究治理：Logistic baseline、可选 LightGBM 接口、Platt/Isotonic、purged walk-forward、Frozen Holdout、Model Registry、Experiment Ledger、Champion/Challenger Gate、负面对照；
+- 当前证据只证明工程合同和失败关闭行为；合成 fixture 的指标不得当成真实胜率或收益率。
 
-1. 官方公告/财报事件引擎；
-2. 板块生命周期；
-3. What Changed；
-4. Next Trigger；
-5. 策略战绩卡；
-6. 持仓/组合风险；
-7. 事件日历；
-8. 策略失败自动归因；
-9. Top K 推荐与板块多样性。
+### G0：源码与发布完整性【立即门禁】
 
-### P2：从规则评分进化到概率模型
+1. 根运行目录忽略规则必须锚定，不能误排除 `stock_tracker/**/data` 等源码包；
+2. `stock_tracker.quant.data`、迁移、配置和关键测试必须出现在 `git ls-files`；
+3. Fresh clone 必须通过 import、compile、legacy tests、quant tests、contract smoke 和 migration dry-run；
+4. 同一 class 不得存在被后定义静默覆盖的重复核心方法；
+5. 配置存在但无法解析时必须失败关闭；
+6. 验证生产数据库前后 SHA-256 不变；
+7. GitHub `main` 的 commit 必须与验证 commit 一致。
 
-1. Triple-barrier / target-before-stop 标签；
-2. Logistic baseline；
-3. Gradient Boosting meta-label；
-4. 概率校准；
-5. Champion / Challenger；
-6. 影子策略；
-7. 多重试验与过拟合治理。
+### Wave 2B.1：可信原始 K 线与 Manifest【第一切片已落地】
+
+1. Provider 增加“获取原始响应”与“确定性解析”两个独立接口；
+2. 在解析前保存 exact raw bytes，不把重新序列化的对象冒充原始响应；
+3. 生成 `RawDataArtifact`：Provider/Schema/Adapter 版本、请求端点、复权模式、请求起止范围、storage key、SHA-256、字节数、内容范围、retrieved_at、known-at/revision policy；
+4. 原子写入 Artifact 和 descriptor，已有同 key 不同内容时失败关闭；
+5. 解析器从 Artifact 重建 Bar，并验证同一 Artifact + parser version 得到相同 Dataset Fingerprint；
+6. 运行缓存与研究存储分离：页面 `bars` 可以继续近零成本更新，但不能自动升级为训练数据；
+7. 增加 A/HK/US 固定 golden payload，覆盖字段顺序、成交量单位、空数据、错误码和篡改检测。
+
+### Wave 2B.2：市场事实与历史身份
+
+1. 权威/可核验的三市场交易日历及修订历史；
+2. 停牌、Halt、VCM、退市和特殊上市阶段；
+3. PIT Universe、行业/主题成分和退市样本；
+4. Corporate Action 与 raw/adjusted price 双序列；
+5. Market Rule、Cost Schedule 和数据 Snapshot 的完整绑定；
+6. A/HK/US golden cases 与跨源 reconciliation。
+
+### Wave 2C：真实 Baseline 与 Frozen Holdout
+
+1. 只使用 T3 `RESEARCH_GRADE` Dataset；
+2. 运行真实候选生成、Triple Barrier 标签和 purged walk-forward；
+3. Logistic baseline + 时间外 calibration + 负面对照；
+4. 封存首次 Frozen Holdout；
+5. 达到概率显示门槛后才填充 `success_probability`；
+6. 最后评估 LightGBM Challenger 和 Shadow/Paper Execution。
+
+### 产品 P1：可与 Wave 2B 并行，但不能绕过数据门禁
+
+1. Exit Engine / TRIM / EXPIRED 完整生命周期；
+2. A/HK/US 独立策略配置与扫描频率；
+3. What Changed、策略战绩卡、失败归因；
+4. 持仓风险、Portfolio Heat、主题集中度；
+5. RankScore、Top-K 多样性和概率为空时的安全排序；
+6. 官方公告/财报事件引擎和事件日历。
 
 ### P3：高级研究功能
 
@@ -2010,7 +2115,8 @@ status: challenger|champion|retired
 3. Replay；
 4. Counterfactual；
 5. 更高级的组合优化；
-6. 用户行为个性化，但不得为了“用户喜欢”而牺牲真实信号质量。
+6. DoubleEnsemble / TRA / DoubleAdapt 及图模型研究；
+7. 用户行为个性化，但不得为了“用户喜欢”而牺牲真实信号质量。
 
 ---
 
@@ -2241,9 +2347,21 @@ EXIT / INVALIDATED         -> 强卖
 
 ## 35. 研发验收标准
 
-一个“可用”的信号引擎必须满足：
+一个“可用”的信号引擎必须满足。以下产品能力清单是目标验收项；只有当前 commit 的机器证据通过后才能勾选，不能凭“代码看起来已经有”更新状态。
 
-### 数据
+### 35.1 每次合并/发布的硬门禁
+
+- [ ] `git diff --check` 通过，且关键源码没有被 `.gitignore` 排除；
+- [ ] 在 fresh clone 中成功导入 `stock_tracker` 与 `stock_tracker.quant.data`；
+- [ ] `python -m compileall -q stock_tracker tests tests_quant scripts` 通过；
+- [ ] legacy tests 与 quant tests 全部通过；
+- [ ] Quant contract smoke 通过，证据标明 `synthetic_fixture_only` 与 `investment_performance_claim=false`；
+- [ ] migration 只做 dry-run，生产数据库前后 SHA-256 一致；
+- [ ] 生成证据的 commit SHA 与将要合并/部署的 SHA 相同；
+- [ ] 工作树若存在并行改动，提交清单必须明确区分，禁止误带入；
+- [ ] 模型/策略报告明确 Data Trust Tier，T1/T2 数据不得产出正式收益或晋级结论。
+
+### 35.2 数据
 
 - [ ] 三市场独立开休市判断；
 - [ ] 数据新鲜度可见；
@@ -2257,7 +2375,7 @@ EXIT / INVALIDATED         -> 强卖
 - [ ] 公告按真实发布时间参与计算；
 - [ ] 数据异常自动阻断信号。
 
-### 算法
+### 35.3 算法
 
 - [ ] MA/MACD/RSI 不重复当独立共振；
 - [ ] 有 Market Regime；
@@ -2269,7 +2387,7 @@ EXIT / INVALIDATED         -> 强卖
 - [ ] Entry / Exit 独立；
 - [ ] 信号有生命周期。
 
-### 回测
+### 35.4 回测
 
 - [ ] 无随机时间泄漏；
 - [ ] 使用下一可执行价格；
@@ -2279,7 +2397,7 @@ EXIT / INVALIDATED         -> 强卖
 - [ ] 记录所有参数试验；
 - [ ] 有独立样本与概率校准。
 
-### 产品
+### 35.5 产品
 
 - [ ] 每个信号告诉用户“为什么”；
 - [ ] 每个信号告诉用户“为什么不能买”；

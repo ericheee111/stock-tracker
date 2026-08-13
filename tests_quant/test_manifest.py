@@ -6,7 +6,7 @@ import unittest
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from _helpers import utc_datetime
 
@@ -222,6 +222,37 @@ class TestRawDataArtifact(ManifestFixture):
         ):
             RawDataArtifact.from_dict(value)
 
+    def test_numeric_fields_do_not_accept_json_strings_or_booleans(self) -> None:
+        invalid = (
+            ("byte_size", "12", "byte_size must be an integer"),
+            ("row_count", "2", "row_count must be an integer"),
+            ("row_count", True, "row_count must be an integer"),
+        )
+        for name, replacement, message in invalid:
+            with self.subTest(name=name, replacement=replacement):
+                value = self.artifact().as_dict()
+                value[name] = replacement
+                value["artifact_id"] = _recompute_artifact_id(value)
+                with self.assertRaisesRegex(ManifestContractError, message):
+                    RawDataArtifact.from_dict(value)
+
+    def test_datetime_fields_require_iso_strings(self) -> None:
+        value = self.artifact().as_dict()
+        value["retrieved_at"] = 123
+        with self.assertRaisesRegex(ManifestContractError, "retrieved_at must be"):
+            RawDataArtifact.from_dict(value)
+
+    def test_unknown_fields_rejected_even_with_recomputed_identity(self) -> None:
+        value = self.artifact().as_dict()
+        value["unexpected"] = "payload"
+        value["artifact_id"] = _recompute_artifact_id(value)
+        with self.assertRaisesRegex(ManifestContractError, "unknown fields"):
+            RawDataArtifact.from_dict(value)
+
+    def test_direct_constructor_rejects_wrong_runtime_types(self) -> None:
+        with self.assertRaisesRegex(ManifestContractError, "byte_size must be an integer"):
+            replace(self.artifact(), byte_size=cast(int, "12"))
+
     def test_unverified_artifact_with_empty_source_note_round_trips(self) -> None:
         artifact = self.artifact(verified=False)
         self.assertEqual(artifact.source_note, "")
@@ -305,6 +336,24 @@ class TestDataSnapshotManifest(ManifestFixture):
                         f"{name} must be a boolean",
                     ):
                         DataSnapshotManifest.read_json(path)
+
+    def test_manifest_datetime_and_unknown_fields_fail_closed(self) -> None:
+        manifest = self.snapshot((self.artifact(),))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+
+            invalid_time = manifest.as_dict()
+            invalid_time["as_of"] = 123
+            path.write_text(json.dumps(invalid_time), encoding="utf-8")
+            with self.assertRaisesRegex(ManifestContractError, "as_of must be"):
+                DataSnapshotManifest.read_json(path)
+
+            unknown = manifest.as_dict()
+            unknown["unexpected"] = "payload"
+            unknown["snapshot_id"] = _recompute_snapshot_id(unknown)
+            path.write_text(json.dumps(unknown), encoding="utf-8")
+            with self.assertRaisesRegex(ManifestContractError, "unknown fields"):
+                DataSnapshotManifest.read_json(path)
 
     def test_atomic_write_leaves_no_temporary_file(self) -> None:
         manifest = self.snapshot((self.artifact(),))

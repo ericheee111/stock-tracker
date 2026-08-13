@@ -55,11 +55,15 @@ def make_bars(n: int = 25, start: float = 100.0, step: float = 1.0,
     base = datetime.now()
     for i in range(n):
         c = start + i * step
+        open_price = c - step * 0.5
+        half_range = abs(step) * 0.5
         bars.append(T.Bar(
             symbol=symbol, market=market,
             timestamp=base - timedelta(days=n - i),
-            interval="1d", open=c - step * 0.5, high=c + step * 0.5,
-            low=c - step, close=c, volume=1_000_000, amount=1e9,
+            interval="1d", open=open_price,
+            high=max(open_price, c) + half_range,
+            low=min(open_price, c) - half_range,
+            close=c, volume=1_000_000, amount=1e9,
             turnover=2.0, source="tencent",
             adjustment_factor=1.0, quality_status=T.DataStatus.UNKNOWN,
         ))

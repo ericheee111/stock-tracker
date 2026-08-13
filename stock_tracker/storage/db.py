@@ -37,11 +37,17 @@ def _init(db_path: str) -> sqlite3.Connection:
 
 
 def get_connection(db_path: str) -> sqlite3.Connection:
-    """获取当前线程专属连接（惰性创建并建表）。"""
-    if not hasattr(_local, "conn") or _local.path != db_path:
-        os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
-        _local.conn = _init(db_path)
-        _local.path = db_path
+    """获取当前线程专属连接；切换数据库时先关闭旧连接。"""
+
+    normalized = os.path.abspath(db_path)
+    current = getattr(_local, "conn", None)
+    current_path = getattr(_local, "path", None)
+    if current is None or current_path != normalized:
+        if current is not None:
+            current.close()
+        os.makedirs(os.path.dirname(normalized) or ".", exist_ok=True)
+        _local.conn = _init(normalized)
+        _local.path = normalized
     return _local.conn
 
 

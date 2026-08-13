@@ -1,23 +1,30 @@
 # stock-tracker Quant Foundation 本机集成报告
 
-> 日期：2026-08-13  
-> 工作区：`D:\Projects\stock-tracker`  
-> 分支：`main`（未提交、未 push、未部署）  
-> 状态：本机真实集成与回归完成
+> 日期：2026-08-13
+>
+> 工作区：`D:\Projects\stock-tracker`
+>
+> 分支：`main`
+>
+> Quant Foundation 基线：`93e1c94`
+>
+> 状态：v0.4 PRD 对齐；G0 source-distribution 修复；Wave 2B.1 第一切片实施中
 
 ## 1. 执行结论
 
-本轮已在真实本机工作区中完成 Quant Foundation 的工程集成，而不再是脱离项目的补丁包演练。
+Wave 1 / Wave 2A 已在真实本机工作区完成工程集成，并于 commit `93e1c94` 进入 `main`。其能力仍是量化合同与合成 fixture 证据，不代表真实投资表现。
 
-新增实现被隔离在 `stock_tracker.quant` 命名空间，并增加独立配置、显式数据库迁移、研究脚本、证据文件与 `tests_quant`。现有 Provider、Scheduler、API、SSE、信号状态机、Web 前端和生产存储代码未被量化实现覆盖或改写。
+后续 fresh-clone 审计发现：根 `.gitignore` 使用未锚定的 `data/`，误排除了 `stock_tracker/quant/data/`，使本机可以导入 Manifest、远端源码却缺包。v0.4 将此类问题升级为 G0 发布阻断项，并新增关键源码 `git ls-files` 回归门禁。
 
-本轮没有：
+Wave 2B.1 第一切片继续保持运行缓存与研究存储隔离：Eastmoney K 线适配器拆分为 exact raw bytes 获取与确定性解析；原始响应先内容寻址落盘，再生成 `RawDataArtifact`、Trust Tier、normalized dataset fingerprint 和可重放 descriptor。该路径不会自动升级为 `RESEARCH_GRADE`，也不会修改生产 SQLite。
 
-- 对 `data/stock_tracker.db` 应用量化迁移；
-- 自动部署或重启服务；
-- 创建 commit、push 或 PR；
+当前仍然禁止：
+
+- 对 `data/stock_tracker.db` 自动应用量化迁移；
+- 把页面 `bars` 缓存直接当作研究训练集；
 - 接入自动下单；
-- 声称任何真实胜率、收益率、Sharpe 或最大回撤。
+- 用合成 fixture 声称任何真实胜率、收益率、Sharpe 或最大回撤；
+- 仅通过修改 Trust Tier 或重算 descriptor ID 将单个公开源捕获自我升级为研究级数据。
 
 ## 2. 需求基准与交付包限制
 
@@ -52,6 +59,7 @@ stock_tracker/quant/
 │   ├── reproducibility.py
 │   └── time.py
 ├── data/
+│   ├── bar_artifact.py
 │   └── manifest.py
 ├── evaluation/
 │   ├── calibration.py
@@ -93,6 +101,7 @@ stock_tracker/quant/
 ```text
 config/quant_wave1.toml
 config/quant_wave2.toml
+scripts/capture_quant_bars.py
 scripts/quant_migrate.py
 scripts/run_quant_contract_smoke.py
 scripts/run_quant_fixture_benchmark.py
@@ -381,18 +390,31 @@ Authoritative Provider
   -> Shadow / Paper Execution
 ```
 
-推荐顺序：
+实施状态与推荐顺序：
 
-1. 接通 T1 历史 K 线 Provider，但先落 Raw Artifact 和 Manifest；
-2. 同步接入交易日历、停牌状态、历史 Universe 和公司行为；
-3. 建立 A/HK/US Golden Cases；
-4. 运行真实 Logistic 基线与负面对照；
-5. 首次封存 Frozen Holdout；
-6. 最后才评估 LightGBM 和 Shadow/Paper Execution。
+1. **Wave 2B.1a 已实现**：Eastmoney Provider 的 exact raw fetch / deterministic parse 分离；内容寻址 Raw Artifact；descriptor 绑定端点、复权模式、请求起止范围和 parser version；Trust Tier；重放与篡改检测；独立捕获 CLI。当前默认等级仍是 `BEST_EFFORT`；
+2. **Wave 2B.1b 待完成**：为 A/HK/US 建立版本化 golden raw payload、跨源 reconciliation 和抓取覆盖率/缺口报告；
+3. **Wave 2B.2 待完成**：接入交易日历、停牌状态、历史 Universe 和公司行为，并组装真正的 `RESEARCH_GRADE` Snapshot；
+4. 建立 A/HK/US 市场规则与公司行为 Golden Cases；
+5. 运行真实 Logistic 基线与负面对照；
+6. 首次封存 Frozen Holdout；
+7. 最后才评估 LightGBM 和 Shadow/Paper Execution。
 
-在这之前，任何真实收益或成功率结论都不具备足够的数据证据。
+单个公开源响应即使已有 SHA-256，也不能自行获得 `RESEARCH_GRADE`；在完整 Snapshot 合同和真实时间外证据之前，任何真实收益或成功率结论都不具备足够的数据证据。
 
 ## 11. 常用命令
+
+捕获一份 `BEST_EFFORT` 原始 K 线 Artifact（不会修改生产数据库）：
+
+```powershell
+python .\scripts\capture_quant_bars.py `
+  --symbol 600519.SH `
+  --market A `
+  --start 2024-01-01 `
+  --end 2024-12-31 `
+  --adjust qfq `
+  --output-root .\data\quant-artifacts
+```
 
 量化迁移 dry-run：
 

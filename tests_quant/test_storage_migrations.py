@@ -39,8 +39,7 @@ class TestMigrationDiscovery(unittest.TestCase):
     def test_existing_database_dry_plan_is_read_only(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "existing.db"
-            with sqlite3.connect(path):
-                pass
+            sqlite3.connect(path).close()
             before_stat = path.stat()
             before_entries = tuple(sorted(item.name for item in path.parent.iterdir()))
             plan = plan_database(path)

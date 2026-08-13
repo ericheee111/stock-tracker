@@ -9,26 +9,25 @@
 
 ## 0. 边界声明（重要）
 
-本文件只描述**数据基建车道**交付的内容。**严格未触碰**以下 Quant 边界（PRD §38 研发分工）：
+`c8f0ece` 只描述**数据基建车道**的原始交付，当时未触碰以下 Quant 边界：
 
 - `stock_tracker/quant/`（point-in-time / triple-barrier / backtest / model / calibration / market rules / 核心 scoring / risk / sector）
-- `stock_tracker/storage/db.py`（Codex 的线程本地连接切换）
-- `scripts/capture_quant_bars.py`、`tests_quant/*`、`.gitignore`、`docs/CODEX-QUANT*`、`docs/PRD*`(v0.4)、`docs/HANDOFF.md`(v0.4)
+- `scripts/capture_quant_bars.py`、`tests_quant/*`、`.gitignore`、`docs/CODEX-QUANT*`、PRD v0.4
 
-`stock_tracker/quant` 由 ChatGPT/Codex 负责，本车道只在其上方提供**可被消费的 K 线 + 指标数据**，不依赖其代码。
+后续 Codex hardening 在独立提交中增加了 `stock_tracker/quant/data/`、raw Artifact 捕获、source-distribution 门禁，并修复 `stock_tracker/storage/db.py` 的线程本地连接切换生命周期。运行态 K 线可用于展示、候选发现和规则信号，但**不得直接冒充 T3 研究训练集**。
 
 ---
 
 ## 1. 交付清单（c8f0ece，30 文件 +2324/−11）
 
 ### 采集层（Collector）
-- `stock_tracker/collector/provider.py`：基类，新增 `supports_bars()` / `fetch_bars()` 契约
-- `stock_tracker/collector/eastmoney.py`：**`supports_bars()→True`**，东财 `push2his.eastmoney.com` 日 K 端点（独立域名，本环境实测可达，覆盖 A/HK/US + 港股指数）
-- `stock_tracker/collector/tencent.py`：`supports_bars()→False`（默认 OFF，本环境腾讯 K 线持续 `bad params`）
-- `stock_tracker/collector/router.py`：`fetch_bars` / `_select_bars` 只选 `supports_bars()` 的源
+- `stock_tracker/collector/provider.py`：基类新增 `supports_bars()` / `fetch_bars()`；研究捕获边界另有 `supports_raw_bars()` / `fetch_bars_raw()` / `parse_bars()`
+- `stock_tracker/collector/eastmoney.py`：**`supports_bars()→True`**，东财 `push2his.eastmoney.com` 日 K；运行解析可跳过孤立坏行，研究解析 `parse_bars_strict()` 对任一坏行失败关闭
+- `stock_tracker/collector/tencent.py`：`supports_bars()→False`，仅在配置 `bars_fallback=true` 时作为显式兜底；当前只接受 `1d + qfq`
+- `stock_tracker/collector/router.py`：主源异常或单标的空结果时继续尝试 fallback；symbol-specific 空结果不会污染 Provider 全局健康度
 
 ### 入库 / 调度 / 质量
-- `stock_tracker/core/config.py`：`CollectorConfig` 接线 `bars_backfill_days / bars_max_per_symbol / bars_prune_days / bars_min_bars`
+- `stock_tracker/core/config.py`：`CollectorConfig` 接线 `bars_enabled / bars_interval_sec / bar_batch_size / bar_batch_pause_sec / bar_backfill_days / bar_keep_days`，安全布尔字段要求真实 TOML boolean
 - `stock_tracker/storage/repository.py`：`save_bars_batch`（单事务 REPLACE）、`prune_bars`、`load_recent_bars`（默认 260）
 - `stock_tracker/data_quality/gate.py`：`evaluate_bar`（future-leak 硬阻断 + 完整性校验）
 - `stock_tracker/collector/scheduler.py`：第 4 个守护线程 `_run_bars`（首跑全量回填 `_backfill_bars` + 增量 `_incremental_bars`）
@@ -43,8 +42,8 @@
 - `web/js/api.js`（`getQuote`）、`web/js/components.js`（`renderIndicators`，纯展示、与 scoring 解耦）、`web/js/app.js`（行情面板）、`web/css/cockpit.css`（`.ind-*`/`.quote-panel`/`.qb-table`）
 
 ### 测试
-- 13 个新增测试文件（`test_api_indicators` / `test_bar_dq` / `test_bars_gate` / `test_bars_provider` / `test_bars_repository` / `test_config_contract` / `test_feature_snapshot` / `test_provider_bars` / `test_quote_api` / `test_scheduler_bars` / `test_tencent_bars` 等）
-- 全量 `python -m unittest discover`：**220 用例通过，0 fail，1 skipped**
+- 覆盖 API 指标、Bar DQ、Provider/Router fallback、Repository、严格配置、Scheduler、前端消费契约和数据库连接生命周期
+- 测试数量会随 hardening 增长；交接与发布必须引用当前 commit 的自动化输出，不再把 `c8f0ece` 当时的固定计数作为最新结论
 
 ---
 
@@ -60,7 +59,7 @@
                     "atr14": 14.2, "roc20": -8.97, "roc60": -20.18,
                     "pos52w": 0.013, "ann_vol": 37.0, "vol_ratio": 3.10,
                     "amplitude": 2.73, "last_close": 466.0, "bar_count": 30 },
-    "recent_bars": [ { "date": "...", "open": ..., "close": ..., "high": ..., "low": ..., "volume": ... }, ... ],
+    "recent_bars": [ { "timestamp": "...", "open": ..., "close": ..., "high": ..., "low": ..., "volume": ..., "source": "eastmoney", "adjustment_factor": 1.0, "quality_status": "DELAYED" }, ... ],
     "bar_count": 9110
   }
   ```
@@ -70,14 +69,13 @@
 
 ### 2.2 本地 Python 复用
 - `from stock_tracker.features.feature_snapshot import build_indicators`
-  - 入参：`bars`（list of dict，含 date/open/close/high/low/volume）、`market`（`"A"|"HK"|"US"`）
+  - 入参：`list[Bar]` 与 `Market`；按整根 Bar 对齐校验，避免 OHLC/volume 分别过滤后跨日期错位
   - 出参：dict，字段见 `serialize_indicators`；空/短输入返回全 `None` 壳
-- `from stock_tracker.storage.repository import load_recent_bars`
-  - `load_recent_bars(symbol, market, limit=260)` 取最近 N 根日 K
+- `Repository(db_path).load_recent_bars(symbol, interval="1d", n=260)` 取最近 N 根日 K
 
 ### 2.3 SQLite 存储
-- 表 `bars`：列 `symbol, market, date, open, high, low, close, volume, amount, turnover, status, created_at`
-- `status` 取值：`VALID`/`DELAYED`/`DEGRADED`/`STALE`/`INVALID`/`UNKNOWN`（由 `evaluate_bar` 判定；日线 EOD 为 `DELAYED` 不伪装 `LIVE`）
+- 表 `bars`：主键为 `symbol + timestamp + interval`，保存 `market, OHLC, volume, amount, turnover, source, adjustment_factor, quality_status`
+- `quality_status` 使用 `DataStatus`：运行态有效日线为 `DELAYED`，字段不完整为 `STALE`，future-leak 为 `UNKNOWN` 且被 Scheduler 丢弃；不得把 EOD 伪装成 `LIVE`
 
 ---
 
@@ -87,7 +85,7 @@
 - 均线：`ma5 / ma10 / ma20 / ma60`；EMA：`ema12 / ema26`；MACD：`dif / dea / hist`
 - `rsi14`（Wilder）、`atr14`（True Range 14）、`roc20 / roc60`
 - `ann_vol` = `stdev(日收益) * sqrt(交易日) * 100`，`_TRADING_DAYS = {"A":242,"HK":244,"US":252}`
-- `pos52w` = **分位排名** `sorted(w).index(closes[-1]) / (len(w)-1)`（非 rolling_percentile）
+- `pos52w` = **分位排名**；重复价格取并列名次中点，完全平盘序列取 `0.5`
 - `vol_ratio`（量比）、`amplitude`（当日振幅）
 
 > 如需修改口径，请在本文件车道内改 `feature_snapshot.py`，**不要**在 Quant 侧另写一套，避免口径漂移。
@@ -114,6 +112,7 @@
 
 ## 6. 下一步（建议 Quant 车道接续）
 
-1. Quant 评分 / 信号可直接消费 `/api/quote/{symbol}.indicators` 与 `bars` 表，无需重建指标。
-2. 把本车道的 `bars`（运行态原始日 K）与 Quant 的 `stock_tracker/quant/data/*`（研究态 PIT 数据集）按 T3 Snapshot 合同对接（见 `docs/HANDOFF.md` v0.4 §0.1）。
-3. 港/美信号需要在对应市场**交易时段**才有 `LIVE` 报价支撑；验收时按交易时段复核。
+1. 运行态规则评分 / 页面展示可消费精确 symbol 的指标与 `bars` 缓存；缺数据时返回空，不做 SH/SZ 等跨证券身份猜测。
+2. 正式标签、回测、校准和模型晋级必须通过 `scripts/capture_quant_bars.py` 的 exact raw Artifact 入口，并继续绑定 Calendar/Status/Universe/Corporate Action 后才能形成 T3 Snapshot；不得把 SQLite 运行缓存直接回流为训练集。
+3. 下一阶段建立 A/HK/US 版本化 golden raw payload、跨源 reconciliation 与覆盖缺口报告。
+4. 港/美信号需要在对应市场**交易时段**才有 `LIVE` 报价支撑；验收时按交易时段复核。
