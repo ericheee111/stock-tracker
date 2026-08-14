@@ -13,7 +13,251 @@ from typing import Optional
 
 from ..core import types as T
 from ..core.config import ConfigBundle
+from ..decision.runtime import RuntimeDecisionRecord
+from ..decision.types import (
+    ActionState,
+    DecisionBlocker,
+    PlanVariant,
+    PositionSizeResult,
+    TradePlan,
+)
 from ..storage.repository import to_jsonable
+
+
+def serialize_portfolio_profile(profile: object) -> dict:
+    return to_jsonable(profile)
+
+
+def serialize_position(position: T.Position) -> dict:
+    return {
+        "id": position.id,
+        "symbol": position.symbol,
+        "market": position.market.value,
+        "shares": position.shares,
+        "average_cost": position.cost,
+        "added_at": position.added_at.isoformat(),
+        "closed_at": position.closed_at.isoformat() if position.closed_at else None,
+    }
+
+
+_ACTION_LABELS = {
+    ActionState.WATCH: "值得观察",
+    ActionState.WAIT_PULLBACK: "等回踩确认",
+    ActionState.WAIT_BREAKOUT: "等突破确认",
+    ActionState.EXECUTABLE: "当前具备执行条件",
+    ActionState.HOLD: "继续持有",
+    ActionState.WARNING: "风险上升，密切观察",
+    ActionState.TRIM: "建议降低仓位",
+    ActionState.PARTIAL_TAKE_PROFIT: "建议部分止盈",
+    ActionState.TREND_RUNNER: "保留趋势仓",
+    ActionState.EXIT: "原逻辑失效，建议退出",
+    ActionState.AVOID: "当前不值得参与",
+    ActionState.DATA_BLOCKED: "数据或决策证据不足",
+}
+
+
+def serialize_decision_blocker(blocker: DecisionBlocker) -> dict:
+    return {
+        "code": blocker.code,
+        "message": blocker.message,
+        "severity": blocker.severity.value,
+        "recoverable": blocker.recoverable,
+    }
+
+
+def serialize_plan_variant(variant: PlanVariant | None) -> Optional[dict]:
+    if variant is None:
+        return None
+    return {
+        "name": variant.name,
+        "action_state": variant.action.value,
+        "action_label": _ACTION_LABELS[variant.action],
+        "risk_budget_multiplier": variant.risk_budget_multiplier,
+        "note": variant.note,
+    }
+
+
+def serialize_position_size(result: PositionSizeResult | None) -> Optional[dict]:
+    if result is None:
+        return None
+    return {
+        "allowed": result.allowed,
+        "shares": result.shares,
+        "lot_size": result.lot_size,
+        "entry_price": result.entry_price,
+        "invalidation_price": result.invalidation_price,
+        "risk_per_share": result.risk_per_share,
+        "risk_budget_amount": result.risk_budget_amount,
+        "actual_risk_amount": result.actual_risk_amount,
+        "actual_risk_pct": result.actual_risk_pct,
+        "position_value": result.position_value,
+        "position_pct": result.position_pct,
+        "limiting_factors": list(result.limiting_factors),
+        "blockers": [serialize_decision_blocker(item) for item in result.blockers],
+    }
+
+
+def serialize_trade_plan(plan: TradePlan | None) -> Optional[dict]:
+    if plan is None:
+        return None
+    position_size = serialize_position_size(plan.position_size)
+    suggested_position_pct = None
+    suggested_shares = None
+    risk_budget_amount = None
+    actual_risk_amount = None
+    position_message = "请先设置账户净值、可用现金和风险参数"
+    if position_size is None and plan.hard_blockers:
+        position_message = "；".join(
+            blocker.message for blocker in plan.hard_blockers
+        )
+    if position_size is not None:
+        risk_budget_amount = position_size["risk_budget_amount"]
+        actual_risk_amount = position_size["actual_risk_amount"]
+        if position_size["allowed"]:
+            suggested_position_pct = position_size["position_pct"]
+            suggested_shares = position_size["shares"]
+            position_message = "已按风险、现金、集中度和交易单位取最小值"
+        else:
+            messages = [item["message"] for item in position_size["blockers"]]
+            position_message = "；".join(messages) or "当前账户约束不允许新开仓"
+    return {
+        "entry_low": plan.entry_low,
+        "entry_high": plan.entry_high,
+        "trigger_price": plan.trigger_price,
+        "no_chase_above": plan.no_chase_above,
+        "invalidation_price": plan.invalidation_price,
+        "target_1": plan.target_1,
+        "target_2": plan.target_2,
+        "reward_risk": plan.reward_risk,
+        "next_trigger": plan.next_trigger,
+        "suggested_position_pct": suggested_position_pct,
+        "suggested_shares": suggested_shares,
+        "risk_budget_amount": risk_budget_amount,
+        "actual_risk_amount": actual_risk_amount,
+        "position_message": position_message,
+        "balanced_plan": serialize_plan_variant(plan.balanced_plan),
+        "aggressive_plan": serialize_plan_variant(plan.aggressive_plan),
+        "position_size": position_size,
+        "calibrated_probability": plan.calibrated_probability,
+        "probability_evidence_level": plan.probability_evidence_level.value,
+        "as_of": plan.as_of.isoformat(),
+        "data_status": plan.data_status.value,
+    }
+
+
+def _opportunity_grade(opportunity: int) -> str:
+    if opportunity >= 80:
+        return "A"
+    if opportunity >= 70:
+        return "B"
+    if opportunity >= 60:
+        return "C"
+    return "X"
+
+
+def _model_tendency(opportunity: int, confidence: int) -> str:
+    if opportunity >= 75 and confidence >= 60:
+        return "STRONG"
+    if opportunity >= 55:
+        return "NEUTRAL"
+    return "WEAK"
+
+
+def serialize_runtime_opportunity(record: RuntimeDecisionRecord) -> dict:
+    action = record.action
+    signal = record.signal
+    scores = signal.scores if signal is not None else None
+    plan = serialize_trade_plan(action.trade_plan)
+    probability_level = (
+        action.trade_plan.probability_evidence_level.value
+        if action.trade_plan is not None
+        else "INSUFFICIENT"
+    )
+    calibrated_probability = (
+        action.trade_plan.calibrated_probability
+        if action.trade_plan is not None
+        else None
+    )
+    return {
+        "symbol": action.symbol,
+        "market": action.market.value,
+        "name": record.name,
+        "action_state": action.action.value,
+        "action_label": _ACTION_LABELS[action.action],
+        "opportunity_grade": _opportunity_grade(action.opportunity),
+        "strategy_id": action.strategy_id,
+        "strategy_version": "runtime-v1",
+        "scores": {
+            "opportunity": action.opportunity,
+            "timing": action.timing,
+            "risk": action.risk,
+            "confidence": action.confidence,
+        },
+        "model": {
+            "tendency": _model_tendency(action.opportunity, action.confidence),
+            "score": None,
+            "calibrated_probability": calibrated_probability,
+            "probability_evidence_level": probability_level,
+            "message": (
+                "真实样本或校准证据不足，暂不展示概率"
+                if calibrated_probability is None
+                else "概率来自已校准模型"
+            ),
+        },
+        "trade_plan": plan,
+        "next_trigger": signal.next_trigger if signal is not None else "",
+        "positive_reasons": list(scores.positive_reasons) if scores is not None else [],
+        "negative_reasons": list(scores.negative_reasons) if scores is not None else [],
+        "hard_blockers": [serialize_decision_blocker(item) for item in record.hard_blockers],
+        "soft_blockers": [serialize_decision_blocker(item) for item in record.soft_blockers],
+        "data_status": action.data_status.value,
+        "freshness": action.freshness,
+        "evidence_id": None,
+    }
+
+
+def serialize_runtime_holding(
+    record: RuntimeDecisionRecord,
+    position: T.Position,
+) -> dict:
+    action = record.action
+    quote = record.quote
+    last: float | None = None
+    if quote is not None and type(quote.last) in (int, float):
+        candidate = float(quote.last)
+        if candidate > 0:
+            last = candidate
+    pnl = None
+    pnl_pct = None
+    if last is not None and position.cost > 0:
+        pnl = round((last - position.cost) * position.shares, 2)
+        pnl_pct = round((last / position.cost - 1.0) * 100.0, 2)
+    invalidation = None
+    if record.signal is not None and record.signal.invalidation_price > 0:
+        invalidation = record.signal.invalidation_price
+    distance = None
+    if last is not None and invalidation is not None:
+        distance = round((last - invalidation) / last * 100.0, 2)
+    return {
+        "position_id": position.id,
+        "symbol": position.symbol,
+        "market": position.market.value,
+        "name": record.name,
+        "shares": position.shares,
+        "average_cost": position.cost,
+        "last": last,
+        "pnl": pnl,
+        "pnl_pct": pnl_pct,
+        "action_state": action.action.value,
+        "action_label": _ACTION_LABELS[action.action],
+        "reason": action.reason,
+        "strategy_id": action.strategy_id,
+        "invalidation_price": invalidation,
+        "distance_to_invalidation_pct": distance,
+        "hard_blockers": [serialize_decision_blocker(item) for item in record.hard_blockers],
+        "soft_blockers": [serialize_decision_blocker(item) for item in record.soft_blockers],
+        "data_status": action.data_status.value,
+    }
 
 
 def _quote_age_ms(q: T.Quote, now: datetime) -> int:

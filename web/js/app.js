@@ -12,11 +12,12 @@
   const API = window.API;
   const SSE = window.SSE;
 
-  const PAGES = ['overview', 'watch', 'radar', 'research'];
+  const PAGES = ['today', 'overview', 'watch', 'radar', 'research'];
 
   const state = {
     market: 'A',
     meta: null,
+    brief: null,
     overview: null,
     markets: [],
     watchlist: [],
@@ -67,17 +68,18 @@
 
   async function loadInitial() {
     const results = await Promise.allSettled([
-      API.getOverview(), API.getMarkets(), API.getWatchlist(),
+      API.getBriefToday(), API.getOverview(), API.getMarkets(), API.getWatchlist(),
       API.getPositions(), API.getRadar(), API.getSectors(), API.getProviderHealth(), API.getConfig()
     ]);
-    state.overview = ok(results[0]);
-    state.markets = ok(results[1]) || [];
-    state.watchlist = ok(results[2]) || [];
-    state.positions = ok(results[3]) || [];
-    state.radar = ok(results[4]) || [];
-    state.sectors = ok(results[5]) || [];
-    state.providers = ok(results[6]) || [];
-    state.config = ok(results[7]) || {};
+    state.brief = ok(results[0]);
+    state.overview = ok(results[1]);
+    state.markets = ok(results[2]) || [];
+    state.watchlist = ok(results[3]) || [];
+    state.positions = ok(results[4]) || [];
+    state.radar = ok(results[5]) || [];
+    state.sectors = ok(results[6]) || [];
+    state.providers = ok(results[7]) || [];
+    state.config = ok(results[8]) || {};
 
     if (state.overview) state.meta = state.overview.meta || null;
 
@@ -92,9 +94,26 @@
     }
 
     // 渲染全部页面（切换 tab 即时显示）
+    renderToday();
     renderOverview();
     renderWatch();
     renderRadar();
+  }
+
+  /* ---------------- 渲染：⓪ 今日作战简报（Stage 1 Lane D） ---------------- */
+  function renderToday() {
+    const el = $('#todayBrief');
+    if (!el) return;
+    const T = window.Today;
+    if (!T) { el.innerHTML = UI.loadingBox('今日简报模块未加载'); return; }
+    if (state.brief) {
+      el.innerHTML = T.render(state.brief);
+    } else if (state.overview) {
+      // 兼容降级：旧 /api/overview 合同，明确标旧，不生成新字段
+      el.innerHTML = T.renderLegacy(state.overview);
+    } else {
+      el.innerHTML = UI.loadingBox('今日作战简报加载失败：/api/brief/today 与 /api/overview 均不可用。');
+    }
   }
 
   /* ---------------- 渲染：横幅 ---------------- */
@@ -176,7 +195,8 @@
     const active = $$('.page.active')[0];
     if (!active) return;
     const id = active.id;
-    if (id === 'page-overview') renderOverview();
+    if (id === 'page-today') renderToday();
+    else if (id === 'page-overview') renderOverview();
     else if (id === 'page-watch') renderWatch();
     else if (id === 'page-radar') renderRadar();
   }
@@ -379,6 +399,7 @@
   function init() {
     bindEvents();
     // 先渲染占位加载态，避免白屏
+    const tb = $('#todayBrief'); if (tb) tb.innerHTML = UI.loadingBox('加载今日作战简报…');
     const idx = $('#indexGrid'); if (idx) idx.innerHTML = UI.loadingBox('加载指数中…');
     const grid = $('#overviewGrid'); if (grid) grid.innerHTML = UI.loadingBox('加载市场状态中…');
     const top = $('#topList'); if (top) top.innerHTML = UI.loadingBox('加载机会中…');

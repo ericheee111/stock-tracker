@@ -33,3 +33,6 @@ node_modules/
 
 # Playwright 可视化验证截图产物（非源码）
 qa/ui/shots/
+/qa/shots/today-*.png
+/qa/shots/page-*.png
+/qa/shots/today-shot-report.json

@@ -8,13 +8,34 @@ MarketStore + Repository，绝不调用上游 Provider。
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+import math
 from typing import Any, Optional
 
 from ..core import types as T
 from ..core.config import ConfigBundle
 from ..core.store import MarketStore
 from ..features import feature_snapshot as FS
-from ..storage.repository import Repository, to_jsonable
+from ..storage.repository import (
+    Repository,
+    RepositoryConflictError,
+    RepositoryValidationError,
+    to_jsonable,
+)
+from ..decision.brief import build_decision_brief, sort_holding_actions
+from ..decision.runtime import (
+    RuntimeDecisionRecord,
+    build_signal_record,
+    build_unbound_position_record,
+)
+from ..decision.types import (
+    ActionState,
+    BlockerSeverity,
+    DecisionBlocker,
+    DecisionContractError,
+    RiskMode,
+    UserPortfolioProfile,
+)
 from . import serializers as S
 from .sse import SSEHub
 from ..signals.crowding import crowding_for
@@ -31,6 +52,96 @@ class AppContext:
     signal_manager: Any         # SignalManager
     sse_hub: SSEHub
     web_root: str = "web"
+
+
+class APIError(ValueError):
+    def __init__(self, status: int, code: str, message: str, field: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.status = status
+        self.code = code
+        self.message = message
+        self.field = field
+
+    def response(self) -> dict:
+        error = {"code": self.code, "message": self.message}
+        if self.field is not None:
+            error["field"] = self.field
+        return {"error": error}
+
+
+_PROFILE_FIELDS = {
+    "account_equity",
+    "available_cash",
+    "risk_mode",
+    "per_trade_risk_pct",
+    "max_position_pct",
+    "max_portfolio_heat_pct",
+    "max_sector_pct",
+    "max_theme_pct",
+}
+_POSITION_CREATE_FIELDS = {"symbol", "market", "shares", "average_cost", "added_at"}
+_POSITION_PATCH_FIELDS = {"shares", "average_cost"}
+
+
+def _require_fields(payload: dict, allowed: set[str], required: set[str]) -> None:
+    unknown = set(payload) - allowed
+    if unknown:
+        field = sorted(unknown)[0]
+        raise APIError(400, "UNKNOWN_FIELD", f"unknown field: {field}", field)
+    missing = required - set(payload)
+    if missing:
+        field = sorted(missing)[0]
+        raise APIError(400, "MISSING_FIELD", f"missing required field: {field}", field)
+
+
+def _finite_number(payload: dict, field: str, *, positive: bool = False, minimum: float = 0.0) -> float:
+    value = payload[field]
+    if type(value) not in (int, float) or not math.isfinite(float(value)):
+        raise APIError(400, "INVALID_NUMBER", f"{field} must be a finite number", field)
+    number = float(value)
+    if (positive and number <= 0) or (not positive and number < minimum):
+        qualifier = "greater than zero" if positive else f">= {minimum:g}"
+        raise APIError(400, "INVALID_NUMBER", f"{field} must be {qualifier}", field)
+    return number
+
+
+def _positive_integer(payload: dict, field: str) -> int:
+    value = payload[field]
+    if type(value) is not int or value <= 0:
+        raise APIError(400, "INVALID_INTEGER", f"{field} must be a positive integer", field)
+    return value
+
+
+def _market_symbol(payload: dict) -> tuple[T.Market, str]:
+    market_value = payload["market"]
+    if type(market_value) is not str:
+        raise APIError(400, "INVALID_MARKET", "market must be A, HK, or US", "market")
+    try:
+        market = T.Market(market_value.upper())
+    except ValueError as exc:
+        raise APIError(400, "INVALID_MARKET", "market must be A, HK, or US", "market") from exc
+    symbol_value = payload["symbol"]
+    if type(symbol_value) is not str or not symbol_value.strip():
+        raise APIError(400, "INVALID_SYMBOL", "symbol must not be empty", "symbol")
+    symbol = symbol_value.strip().upper()
+    suffix = symbol.rsplit(".", 1)[-1] if "." in symbol else ""
+    valid_suffixes = {T.Market.A: {"SH", "SZ"}, T.Market.HK: {"HK"}, T.Market.US: {"US"}}
+    if suffix not in valid_suffixes[market] or not symbol.rsplit(".", 1)[0]:
+        raise APIError(400, "INVALID_SYMBOL", "symbol suffix does not match market", "symbol")
+    return market, symbol
+
+
+def _aware_datetime(payload: dict, field: str) -> datetime:
+    value = payload[field]
+    if type(value) is not str:
+        raise APIError(400, "INVALID_DATETIME", f"{field} must be an ISO 8601 datetime", field)
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise APIError(400, "INVALID_DATETIME", f"{field} must be an ISO 8601 datetime", field) from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise APIError(400, "INVALID_DATETIME", f"{field} must include a timezone", field)
+    return parsed
 
 
 # --------------------------------------------------------------------------- #
@@ -326,6 +437,392 @@ def _response_freshness(ctx: AppContext, quotes: list) -> tuple[str, int]:
     return worst, age
 
 
+_STATUS_SEVERITY = {
+    T.DataStatus.LIVE: 0,
+    T.DataStatus.DELAYED: 1,
+    T.DataStatus.STALE: 2,
+    T.DataStatus.UNKNOWN: 3,
+}
+_HOLDING_ACTION_PRIORITY = {
+    ActionState.EXIT: 0,
+    ActionState.TRIM: 1,
+    ActionState.WARNING: 2,
+    ActionState.HOLD: 3,
+    ActionState.DATA_BLOCKED: 4,
+    ActionState.PARTIAL_TAKE_PROFIT: 5,
+    ActionState.TREND_RUNNER: 6,
+}
+_REGIME_LABELS = {
+    T.RegimeState.RISK_ON_TREND: "趋势进攻",
+    T.RegimeState.ROTATION: "震荡轮动",
+    T.RegimeState.RISK_OFF: "风险规避",
+    T.RegimeState.PANIC_REBOUND: "恐慌反弹",
+    T.RegimeState.OVERHEATED: "过热",
+}
+_REGIME_AGGRESSION = {
+    T.RegimeState.RISK_ON_TREND: 70,
+    T.RegimeState.ROTATION: 50,
+    T.RegimeState.RISK_OFF: 20,
+    T.RegimeState.PANIC_REBOUND: 40,
+    T.RegimeState.OVERHEATED: 30,
+}
+_REGIME_RISKS = {
+    T.RegimeState.RISK_ON_TREND: "趋势仍需服从个股赔率和拥挤度约束",
+    T.RegimeState.ROTATION: "板块轮动较快，追高后赔率容易恶化",
+    T.RegimeState.RISK_OFF: "整体风险偏高，新增仓位需要明显收缩",
+    T.RegimeState.PANIC_REBOUND: "反弹稳定性尚未确认，避免把修复当成新趋势",
+    T.RegimeState.OVERHEATED: "市场过热，重点防范拥挤和高位回撤",
+}
+
+
+def _worst_data_status(statuses: list[T.DataStatus]) -> T.DataStatus:
+    if not statuses:
+        return T.DataStatus.UNKNOWN
+    return max(statuses, key=lambda item: _STATUS_SEVERITY[item])
+
+
+def _effective_quote_status(ctx: AppContext, quote: Optional[T.Quote]) -> T.DataStatus:
+    if quote is None:
+        return T.DataStatus.UNKNOWN
+    observed = (
+        quote.data_status
+        if isinstance(quote.data_status, T.DataStatus)
+        else T.DataStatus.UNKNOWN
+    )
+    aged = S.quote_data_status(
+        S.recompute_age_ms(quote),
+        _market_cfg(ctx, quote.market),
+    )
+    return _worst_data_status([observed, aged])
+
+
+def _sector_name(ctx: AppContext, symbol: str) -> str:
+    meta = ctx.store.get_instrument(symbol) or {}
+    sector = meta.get("sector")
+    if type(sector) is str and sector.strip():
+        return sector.strip()
+    return "UNKNOWN"
+
+
+def _position_reference_value(
+    ctx: AppContext,
+    position: T.Position,
+) -> tuple[float, bool]:
+    quote = ctx.store.get_quote(position.symbol)
+    status = _effective_quote_status(ctx, quote)
+    if (
+        quote is not None
+        and status in (T.DataStatus.LIVE, T.DataStatus.DELAYED)
+        and type(quote.last) in (int, float)
+        and math.isfinite(float(quote.last))
+        and float(quote.last) > 0
+    ):
+        return float(quote.last), True
+    return float(position.cost), False
+
+
+def _portfolio_decision_context(
+    ctx: AppContext,
+    profile: Optional[UserPortfolioProfile],
+    positions: list[T.Position],
+) -> tuple[float, dict[str, float], tuple[DecisionBlocker, ...]]:
+    if profile is None:
+        return 0.0, {}, ()
+    equity = float(profile.account_equity)
+    total_risk = 0.0
+    sector_values: dict[str, float] = {}
+    incomplete: list[str] = []
+    for position in positions:
+        reference, price_reliable = _position_reference_value(ctx, position)
+        sector = _sector_name(ctx, position.symbol)
+        sector_values[sector] = sector_values.get(sector, 0.0) + (
+            reference * float(position.shares)
+        )
+        valid_invalidations = [
+            float(signal.invalidation_price)
+            for signal in ctx.store.get_signals_by_symbol(position.symbol)
+            if type(signal.invalidation_price) in (int, float)
+            and math.isfinite(float(signal.invalidation_price))
+            and 0 < float(signal.invalidation_price) < reference
+        ]
+        if not price_reliable or not valid_invalidations:
+            incomplete.append(position.symbol)
+            continue
+        conservative_invalidation = min(valid_invalidations)
+        total_risk += float(position.shares) * (
+            reference - conservative_invalidation
+        )
+    heat = min(1.0, max(0.0, total_risk / equity))
+    exposures = {
+        sector: min(1.0, max(0.0, value / equity))
+        for sector, value in sector_values.items()
+    }
+    blockers: tuple[DecisionBlocker, ...] = ()
+    if incomplete:
+        shown = "、".join(sorted(incomplete)[:3])
+        suffix = " 等" if len(incomplete) > 3 else ""
+        blockers = (
+            DecisionBlocker(
+                code="PORTFOLIO_RISK_INCOMPLETE",
+                message=(
+                    f"现有持仓 {shown}{suffix} 缺少可靠现价或结构失效位，"
+                    "暂不生成新增仓位建议"
+                ),
+                severity=BlockerSeverity.HARD,
+                recoverable=True,
+            ),
+        )
+    return heat, exposures, blockers
+
+
+def _instrument_lot_size(ctx: AppContext, symbol: str, market: T.Market) -> Optional[int]:
+    if market is not T.Market.HK:
+        return None
+    meta = ctx.store.get_instrument(symbol) or {}
+    lot_size = meta.get("lot_size")
+    if type(lot_size) is int and lot_size > 0:
+        return lot_size
+    return None
+
+
+def _posture_payload(ctx: AppContext) -> tuple[dict, str, int]:
+    regime = ctx.store.get_regime()
+    state = regime.regime if regime is not None else T.RegimeState.ROTATION
+    aggression = _REGIME_AGGRESSION[state]
+    label = _REGIME_LABELS[state]
+    reliable_sectors = [
+        sector
+        for sector in ctx.store.get_sectors().values()
+        if sector.sector.strip().upper() not in {"", "UNKNOWN", "BROAD"}
+    ]
+    strongest = max(reliable_sectors, key=lambda item: item.score, default=None)
+    strongest_theme = strongest.sector if strongest is not None else "暂无可靠板块数据"
+    return (
+        {
+            "market": "A",
+            "regime": state.value,
+            "label": label,
+            "aggression_level": aggression,
+            "strongest_theme": strongest_theme,
+            "main_risk": _REGIME_RISKS[state],
+        },
+        state.value,
+        aggression,
+    )
+
+
+def _today_summary_text(
+    data_status: T.DataStatus,
+    aggression_level: int,
+    executable_count: int,
+    holding_attention_count: int,
+) -> str:
+    if data_status in (T.DataStatus.STALE, T.DataStatus.UNKNOWN):
+        return "当前关键数据不足，暂停新增执行判断，以核对数据和持仓风险为主。"
+    if aggression_level >= 65:
+        prefix = "今天可以适度进攻，但只执行通过数据、赔率和风险闸门的机会。"
+    elif aggression_level >= 40:
+        prefix = "今天以持仓管理为主，只选择性开新仓。"
+    else:
+        prefix = "今天以防守和控制回撤为主，原则上不主动扩大仓位。"
+    return (
+        f"{prefix} 当前有 {executable_count} 个机会具备执行条件，"
+        f"{holding_attention_count} 个持仓需要重点处理。"
+    )
+
+
+def _record_by_action(
+    records: list[RuntimeDecisionRecord],
+) -> dict[int, RuntimeDecisionRecord]:
+    return {id(record.action): record for record in records}
+
+
+def get_today_brief(ctx: AppContext) -> dict:
+    """Return the deterministic Stage 1 Today Action brief.
+
+    This endpoint consumes only MarketStore and Repository state. It does not
+    call any Provider, LLM, model-training path, or quantitative migration.
+    """
+
+    as_of = datetime.now(timezone.utc)
+    profile = ctx.repo.load_portfolio_profile()
+    positions = ctx.repo.load_positions()
+    ctx.store.set_portfolio_profile(profile)
+    ctx.store.set_positions(positions)
+    positions_by_symbol = {
+        position.symbol: position
+        for position in positions
+        if position.closed_at is None
+    }
+    heat, sector_exposures, portfolio_blockers = _portfolio_decision_context(
+        ctx,
+        profile,
+        list(positions_by_symbol.values()),
+    )
+    no_chase_pct = float(
+        getattr(ctx.bundle.risk, "overextension_max_above_entry_pct", 0.05)
+    )
+
+    core_records: list[RuntimeDecisionRecord] = []
+    holding_candidates: list[RuntimeDecisionRecord] = []
+    invalid_signal_messages: list[str] = []
+    for signal in ctx.store.get_signals().values():
+        quote = ctx.store.get_quote(signal.symbol)
+        status = _effective_quote_status(ctx, quote)
+        sector = _sector_name(ctx, signal.symbol)
+        has_position = signal.symbol in positions_by_symbol
+        try:
+            record = build_signal_record(
+                signal,
+                quote=quote,
+                data_status=status,
+                has_position=has_position,
+                profile=None if has_position else profile,
+                current_portfolio_heat_pct=heat,
+                current_sector_exposure_pct=sector_exposures.get(sector, 0.0),
+                current_theme_exposure_pct=sector_exposures.get(sector, 0.0),
+                sector=sector,
+                as_of=as_of,
+                no_chase_pct=no_chase_pct,
+                lot_size=_instrument_lot_size(ctx, signal.symbol, signal.market),
+                external_hard_blockers=() if has_position else portfolio_blockers,
+            )
+        except DecisionContractError as exc:
+            invalid_signal_messages.append(
+                f"{signal.symbol} {signal.strategy_id}: {exc}"
+            )
+            continue
+        if has_position:
+            holding_candidates.append(record)
+        else:
+            core_records.append(record)
+
+    holding_records: list[RuntimeDecisionRecord] = []
+    for symbol, position in positions_by_symbol.items():
+        candidates = [
+            record for record in holding_candidates if record.action.symbol == symbol
+        ]
+        if candidates:
+            candidates.sort(
+                key=lambda record: (
+                    _HOLDING_ACTION_PRIORITY.get(record.action.action, 99),
+                    -record.action.risk,
+                    record.action.strategy_id,
+                )
+            )
+            holding_records.append(candidates[0])
+        else:
+            quote = ctx.store.get_quote(symbol)
+            holding_records.append(
+                build_unbound_position_record(
+                    position,
+                    quote=quote,
+                    data_status=_effective_quote_status(ctx, quote),
+                    sector=_sector_name(ctx, symbol),
+                )
+            )
+
+    all_statuses = [record.action.data_status for record in core_records]
+    all_statuses.extend(record.action.data_status for record in holding_records)
+    if not all_statuses:
+        all_statuses = [
+            _effective_quote_status(ctx, quote)
+            for quote in ctx.store.get_quotes().values()
+        ]
+    data_health = _worst_data_status(all_statuses)
+    posture, posture_state, aggression_level = _posture_payload(ctx)
+
+    avoid_messages: list[str] = []
+    for record in core_records:
+        if record.action.action in (ActionState.AVOID, ActionState.DATA_BLOCKED):
+            avoid_messages.append(record.action.reason)
+    avoid_messages.extend(blocker.message for blocker in portfolio_blockers)
+    avoid_messages.extend(invalid_signal_messages)
+    avoid_messages.append(posture["main_risk"])
+    avoid_reasons = tuple(dict.fromkeys(item for item in avoid_messages if item))
+
+    brief = build_decision_brief(
+        as_of=as_of,
+        market_posture=posture_state,
+        aggression_level=aggression_level,
+        core_candidates=tuple(record.action for record in core_records),
+        holding_actions=tuple(record.action for record in holding_records),
+        avoid_reasons=avoid_reasons,
+        data_health=data_health,
+    )
+    core_lookup = _record_by_action(core_records)
+    holding_lookup = _record_by_action(holding_records)
+    selected_core = [core_lookup[id(action)] for action in brief.core_opportunities]
+    selected_holdings = [
+        holding_lookup[id(action)] for action in sort_holding_actions(brief.holding_actions)
+    ]
+
+    executable_count = sum(
+        record.action.action is ActionState.EXECUTABLE for record in selected_core
+    )
+    waiting_count = sum(
+        record.action.action
+        in (ActionState.WAIT_PULLBACK, ActionState.WAIT_BREAKOUT)
+        for record in selected_core
+    )
+    holding_attention_count = sum(
+        record.action.action
+        in (ActionState.EXIT, ActionState.TRIM, ActionState.WARNING, ActionState.DATA_BLOCKED)
+        for record in selected_holdings
+    )
+    facts = list(brief.summary_facts)
+    if profile is None:
+        facts.append("尚未设置账户净值和现金，暂不生成建议股数")
+    if invalid_signal_messages:
+        facts.append(f"{len(invalid_signal_messages)} 条信号因合同不完整被跳过")
+
+    serialized_holdings = []
+    for record in selected_holdings:
+        position = positions_by_symbol[record.action.symbol]
+        serialized_holdings.append(S.serialize_runtime_holding(record, position))
+
+    return {
+        "schema_version": "stage1-v1",
+        "as_of": as_of.isoformat(),
+        "data_status": brief.data_health.value,
+        "ranking_mode": brief.ranking_mode.value,
+        "evidence_id": None,
+        "market_posture": posture,
+        "summary": {
+            "mode": "DETERMINISTIC_TEMPLATE",
+            "text": _today_summary_text(
+                brief.data_health,
+                aggression_level,
+                executable_count,
+                holding_attention_count,
+            ),
+            "facts": facts,
+        },
+        "actions": {
+            "executable_count": executable_count,
+            "waiting_count": waiting_count,
+            "holding_attention_count": holding_attention_count,
+        },
+        "core_opportunities": [
+            S.serialize_runtime_opportunity(record) for record in selected_core
+        ],
+        "holding_actions": serialized_holdings,
+        "avoid_reasons": [
+            {"code": f"AVOID_{index + 1}", "message": message}
+            for index, message in enumerate(brief.avoid_reasons[:5])
+        ],
+        "big_trend": {
+            "status": "NOT_AVAILABLE",
+            "message": "正式主升浪算法尚未启用；当前不使用 SectorScore 冒充主升浪状态",
+            "items": [],
+        },
+        "strategy_evidence": {
+            "status": "INSUFFICIENT_REAL_EVIDENCE",
+            "message": "当前只有工程合同和合成验证，暂不展示真实策略战绩",
+        },
+    }
+
+
 # --------------------------------------------------------------------------- #
 # 端点
 # --------------------------------------------------------------------------- #
@@ -407,6 +904,104 @@ def get_positions(ctx: AppContext) -> dict:
     ds, age = _response_freshness(ctx, qs)
     return {"positions": out, "count": len(out),
             "data_status": ds, "observed_age_ms": age}
+
+
+def get_portfolio(ctx: AppContext) -> dict:
+    profile = ctx.repo.load_portfolio_profile()
+    positions = ctx.repo.load_positions()
+    ctx.store.set_portfolio_profile(profile)
+    ctx.store.set_positions(positions)
+    return {
+        "schema_version": "stage1-v1",
+        "profile": S.serialize_portfolio_profile(profile) if profile else None,
+        "positions": [S.serialize_position(position) for position in positions],
+    }
+
+
+def put_portfolio_profile(ctx: AppContext, payload: dict) -> dict:
+    _require_fields(payload, _PROFILE_FIELDS, _PROFILE_FIELDS)
+    risk_mode_value = payload["risk_mode"]
+    if type(risk_mode_value) is not str:
+        raise APIError(400, "INVALID_RISK_MODE", "risk_mode is invalid", "risk_mode")
+    try:
+        risk_mode = RiskMode(risk_mode_value.upper())
+    except ValueError as exc:
+        raise APIError(400, "INVALID_RISK_MODE", "risk_mode is invalid", "risk_mode") from exc
+    try:
+        profile = UserPortfolioProfile(
+            account_equity=_finite_number(payload, "account_equity", positive=True),
+            available_cash=_finite_number(payload, "available_cash"),
+            risk_mode=risk_mode,
+            per_trade_risk_pct=_finite_number(payload, "per_trade_risk_pct", positive=True),
+            max_position_pct=_finite_number(payload, "max_position_pct", positive=True),
+            max_portfolio_heat_pct=_finite_number(
+                payload, "max_portfolio_heat_pct", positive=True
+            ),
+            max_sector_pct=_finite_number(payload, "max_sector_pct", positive=True),
+            max_theme_pct=_finite_number(payload, "max_theme_pct", positive=True),
+            updated_at=datetime.now(timezone.utc),
+        )
+    except DecisionContractError as exc:
+        raise APIError(400, "INVALID_PROFILE", str(exc)) from exc
+    ctx.repo.save_portfolio_profile(profile)
+    ctx.store.set_portfolio_profile(profile)
+    return S.serialize_portfolio_profile(profile)
+
+
+def post_portfolio_position(ctx: AppContext, payload: dict) -> dict:
+    _require_fields(payload, _POSITION_CREATE_FIELDS, _POSITION_CREATE_FIELDS)
+    market, symbol = _market_symbol(payload)
+    shares = _positive_integer(payload, "shares")
+    average_cost = _finite_number(payload, "average_cost", positive=True)
+    added_at = _aware_datetime(payload, "added_at")
+    try:
+        position = ctx.repo.create_position(
+            symbol=symbol,
+            market=market,
+            shares=shares,
+            average_cost=average_cost,
+            added_at=added_at,
+        )
+    except RepositoryConflictError as exc:
+        raise APIError(409, "POSITION_CONFLICT", str(exc), "symbol") from exc
+    except RepositoryValidationError as exc:
+        raise APIError(400, "INVALID_POSITION", str(exc)) from exc
+    ctx.store.upsert_position(position)
+    return S.serialize_position(position)
+
+
+def patch_portfolio_position(ctx: AppContext, position_id: str, payload: dict) -> dict:
+    _require_fields(payload, _POSITION_PATCH_FIELDS, set())
+    if not payload:
+        raise APIError(400, "EMPTY_PATCH", "PATCH payload must contain at least one field")
+    shares = _positive_integer(payload, "shares") if "shares" in payload else None
+    average_cost = (
+        _finite_number(payload, "average_cost", positive=True)
+        if "average_cost" in payload
+        else None
+    )
+    current = ctx.repo.get_position(position_id)
+    if current is None:
+        raise APIError(404, "POSITION_NOT_FOUND", "position not found")
+    try:
+        position = ctx.repo.update_position(
+            position_id,
+            shares=shares,
+            average_cost=average_cost,
+        )
+    except RepositoryValidationError as exc:
+        raise APIError(400, "INVALID_POSITION", str(exc)) from exc
+    if position is None:
+        raise APIError(404, "POSITION_NOT_FOUND", "position not found")
+    ctx.store.upsert_position(position)
+    return S.serialize_position(position)
+
+
+def delete_portfolio_position(ctx: AppContext, position_id: str) -> dict:
+    if not ctx.repo.delete_position(position_id):
+        raise APIError(404, "POSITION_NOT_FOUND", "position not found")
+    ctx.store.remove_position(position_id)
+    return {"ok": True, "position_id": position_id}
 
 
 def get_radar(ctx: AppContext) -> dict:

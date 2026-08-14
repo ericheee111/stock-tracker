@@ -60,6 +60,19 @@ CREATE TABLE IF NOT EXISTS positions (
 );
 CREATE INDEX IF NOT EXISTS idx_positions_symbol ON positions(symbol);
 
+CREATE TABLE IF NOT EXISTS portfolio_profile (
+    id                      INTEGER PRIMARY KEY CHECK (id = 1),
+    account_equity          REAL NOT NULL,
+    available_cash          REAL NOT NULL,
+    risk_mode               TEXT NOT NULL,
+    per_trade_risk_pct      REAL NOT NULL,
+    max_position_pct        REAL NOT NULL,
+    max_portfolio_heat_pct  REAL NOT NULL,
+    max_sector_pct          REAL NOT NULL,
+    max_theme_pct           REAL NOT NULL,
+    updated_at              TEXT NOT NULL
+);
+
 -- 信号当前态
 CREATE TABLE IF NOT EXISTS signals (
     signal_id   TEXT PRIMARY KEY,

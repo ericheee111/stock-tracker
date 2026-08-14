@@ -17,16 +17,27 @@
   /**
    * 带超时的 JSON GET。fetch 失败时抛 Error，便于上层 Promise.allSettled 兜底。
    */
+  function privateAccessValue() {
+    try {
+      return global.sessionStorage.getItem('stockTrackerPrivateAccess') || '';
+    } catch (e) {
+      return '';
+    }
+  }
+
   async function fetchJSON(url, opts) {
     opts = opts || {};
     const ctrl = new AbortController();
     const timer = setTimeout(function () { ctrl.abort(); }, opts.timeout || DEFAULT_TIMEOUT_MS);
+    const headers = { 'Accept': 'application/json' };
+    const privateAccess = opts.private ? privateAccessValue() : '';
+    if (privateAccess) headers.Authorization = 'Bearer ' + privateAccess;
     try {
       const res = await fetch(url, {
         method: 'GET',
         signal: ctrl.signal,
         cache: 'no-store',
-        headers: { 'Accept': 'application/json' }
+        headers: headers
       });
       if (!res.ok) {
         throw new Error('HTTP ' + res.status + ' @ ' + url);
@@ -53,6 +64,15 @@
   const API = {
     getOverview: function () {
       return fetchJSON('/api/overview').then(function (d) { return d; });
+    },
+    /** 今日作战简报（Stage 1 Lane D）：/api/brief/today，兼容 {brief:...} 或裸对象。 */
+    getBriefToday: function (opts) {
+      opts = opts || {};
+      return fetchJSON('/api/brief/today', {
+        timeout: opts.timeout || DEFAULT_TIMEOUT_MS,
+        private: true
+      })
+        .then(function (payload) { return unwrap(payload, 'brief') || payload; });
     },
     getWatchlist: function () {
       return fetchJSON('/api/watchlist').then(function (d) { return unwrap(d, 'items') || unwrap(d, 'watchlist') || []; });

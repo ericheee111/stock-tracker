@@ -69,6 +69,7 @@ class SignalManager:
             self.store.upsert_signal(sig)
         self.store.set_watchlist(self.repo.load_watchlist())
         self.store.set_positions(self.repo.load_positions())
+        self.store.set_portfolio_profile(self.repo.load_portfolio_profile())
 
     # ---- 组合热度 ----
     def _portfolio_heat(self) -> float:

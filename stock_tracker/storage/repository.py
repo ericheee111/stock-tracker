@@ -7,6 +7,9 @@
 from __future__ import annotations
 
 import json
+import math
+import sqlite3
+import uuid
 from dataclasses import dataclass, fields, is_dataclass
 from datetime import datetime
 from enum import Enum
@@ -14,6 +17,54 @@ from typing import Any, Optional, get_args, get_origin, get_type_hints
 
 from .db import get_connection
 from ..core import types as T
+from ..decision.types import RiskMode, UserPortfolioProfile
+
+
+class RepositoryConflictError(ValueError):
+    pass
+
+
+class RepositoryValidationError(ValueError):
+    pass
+
+
+def _validate_position_values(
+    *,
+    symbol: object,
+    market: object,
+    shares: object,
+    average_cost: object,
+    added_at: object,
+) -> tuple[str, T.Market, int, float, datetime]:
+    if type(symbol) is not str or not symbol.strip():
+        raise RepositoryValidationError("symbol must be a non-empty string")
+    normalized_symbol = symbol.strip().upper()
+    if symbol != normalized_symbol:
+        raise RepositoryValidationError("symbol must use canonical uppercase form")
+    if not isinstance(market, T.Market):
+        raise RepositoryValidationError("market must be Market")
+    code, separator, suffix = normalized_symbol.rpartition(".")
+    valid_suffixes = {
+        T.Market.A: {"SH", "SZ"},
+        T.Market.HK: {"HK"},
+        T.Market.US: {"US"},
+    }
+    if not separator or not code or suffix not in valid_suffixes[market]:
+        raise RepositoryValidationError("symbol suffix must match market")
+    if type(shares) is not int or shares <= 0:
+        raise RepositoryValidationError("shares must be a positive integer")
+    if type(average_cost) not in (int, float):
+        raise RepositoryValidationError("average_cost must be a finite number")
+    normalized_cost = float(average_cost)
+    if not math.isfinite(normalized_cost) or normalized_cost <= 0:
+        raise RepositoryValidationError(
+            "average_cost must be finite and greater than zero"
+        )
+    if not isinstance(added_at, datetime):
+        raise RepositoryValidationError("added_at must be a datetime")
+    if added_at.tzinfo is None or added_at.utcoffset() is None:
+        raise RepositoryValidationError("added_at must be timezone-aware")
+    return normalized_symbol, market, shares, normalized_cost, added_at
 
 
 # --------------------------------------------------------------------------- #
@@ -240,6 +291,177 @@ class Repository:
                 closed_at=datetime.fromisoformat(r["closed_at"]) if r["closed_at"] else None,
             ))
         return out
+
+    def get_position(self, position_id: str) -> Optional[T.Position]:
+        conn = get_connection(self.db_path)
+        row = conn.execute("SELECT * FROM positions WHERE id=?", (position_id,)).fetchone()
+        return self._row_to_position(row) if row is not None else None
+
+    def create_position(
+        self,
+        *,
+        symbol: str,
+        market: T.Market,
+        shares: int,
+        average_cost: float,
+        added_at: datetime,
+        position_id: Optional[str] = None,
+    ) -> T.Position:
+        symbol, market, shares, average_cost, added_at = _validate_position_values(
+            symbol=symbol,
+            market=market,
+            shares=shares,
+            average_cost=average_cost,
+            added_at=added_at,
+        )
+        if position_id is not None and (
+            type(position_id) is not str or not position_id.strip()
+        ):
+            raise RepositoryValidationError(
+                "position_id must be a non-empty string or None"
+            )
+        conn = get_connection(self.db_path)
+        position = T.Position(
+            id=position_id or f"pos-{uuid.uuid4().hex}",
+            symbol=symbol,
+            market=market,
+            shares=shares,
+            cost=average_cost,
+            added_at=added_at,
+        )
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            duplicate = conn.execute(
+                "SELECT 1 FROM positions WHERE symbol=? AND closed_at IS NULL LIMIT 1",
+                (symbol,),
+            ).fetchone()
+            if duplicate is not None:
+                raise RepositoryConflictError(f"active position already exists for {symbol}")
+            conn.execute(
+                "INSERT INTO positions(id, symbol, market, shares, cost, added_at, closed_at)"
+                " VALUES (?,?,?,?,?,?,NULL)",
+                (position.id, symbol, market.value, shares, average_cost, added_at.isoformat()),
+            )
+            conn.commit()
+        except RepositoryConflictError:
+            conn.rollback()
+            raise
+        except sqlite3.IntegrityError as exc:
+            conn.rollback()
+            raise RepositoryConflictError("position identity already exists") from exc
+        return position
+
+    def update_position(
+        self,
+        position_id: str,
+        *,
+        shares: Optional[int] = None,
+        average_cost: Optional[float] = None,
+    ) -> Optional[T.Position]:
+        if type(position_id) is not str or not position_id.strip():
+            raise RepositoryValidationError("position_id must be a non-empty string")
+        if shares is not None and (type(shares) is not int or shares <= 0):
+            raise RepositoryValidationError("shares must be a positive integer")
+        if average_cost is not None:
+            if type(average_cost) not in (int, float):
+                raise RepositoryValidationError(
+                    "average_cost must be a finite number"
+                )
+            average_cost = float(average_cost)
+            if not math.isfinite(average_cost) or average_cost <= 0:
+                raise RepositoryValidationError(
+                    "average_cost must be finite and greater than zero"
+                )
+        conn = get_connection(self.db_path)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM positions WHERE id=?", (position_id,)
+            ).fetchone()
+            if row is None:
+                conn.rollback()
+                return None
+            new_shares = row["shares"] if shares is None else shares
+            new_cost = row["cost"] if average_cost is None else average_cost
+            cursor = conn.execute(
+                "UPDATE positions SET shares=?, cost=? WHERE id=?",
+                (new_shares, new_cost, position_id),
+            )
+            if cursor.rowcount != 1:
+                conn.rollback()
+                return None
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        position = self._row_to_position(row)
+        position.shares = new_shares
+        position.cost = new_cost
+        return position
+
+    def delete_position(self, position_id: str) -> bool:
+        conn = get_connection(self.db_path)
+        cur = conn.execute("DELETE FROM positions WHERE id=?", (position_id,))
+        conn.commit()
+        return cur.rowcount > 0
+
+    @staticmethod
+    def _row_to_position(row: Any) -> T.Position:
+        return T.Position(
+            id=row["id"],
+            symbol=row["symbol"],
+            market=T.Market(row["market"]),
+            shares=row["shares"],
+            cost=row["cost"],
+            added_at=datetime.fromisoformat(row["added_at"]) if row["added_at"] else datetime.now(),
+            closed_at=datetime.fromisoformat(row["closed_at"]) if row["closed_at"] else None,
+        )
+
+    def load_portfolio_profile(self) -> Optional[UserPortfolioProfile]:
+        conn = get_connection(self.db_path)
+        row = conn.execute("SELECT * FROM portfolio_profile WHERE id=1").fetchone()
+        if row is None:
+            return None
+        return UserPortfolioProfile(
+            account_equity=row["account_equity"],
+            available_cash=row["available_cash"],
+            risk_mode=RiskMode(row["risk_mode"]),
+            per_trade_risk_pct=row["per_trade_risk_pct"],
+            max_position_pct=row["max_position_pct"],
+            max_portfolio_heat_pct=row["max_portfolio_heat_pct"],
+            max_sector_pct=row["max_sector_pct"],
+            max_theme_pct=row["max_theme_pct"],
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    def save_portfolio_profile(self, profile: UserPortfolioProfile) -> UserPortfolioProfile:
+        conn = get_connection(self.db_path)
+        conn.execute(
+            "INSERT INTO portfolio_profile("
+            "id, account_equity, available_cash, risk_mode, per_trade_risk_pct,"
+            "max_position_pct, max_portfolio_heat_pct, max_sector_pct, max_theme_pct, updated_at)"
+            " VALUES (1,?,?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(id) DO UPDATE SET"
+            " account_equity=excluded.account_equity, available_cash=excluded.available_cash,"
+            " risk_mode=excluded.risk_mode, per_trade_risk_pct=excluded.per_trade_risk_pct,"
+            " max_position_pct=excluded.max_position_pct,"
+            " max_portfolio_heat_pct=excluded.max_portfolio_heat_pct,"
+            " max_sector_pct=excluded.max_sector_pct, max_theme_pct=excluded.max_theme_pct,"
+            " updated_at=excluded.updated_at",
+            (
+                profile.account_equity,
+                profile.available_cash,
+                profile.risk_mode.value,
+                profile.per_trade_risk_pct,
+                profile.max_position_pct,
+                profile.max_portfolio_heat_pct,
+                profile.max_sector_pct,
+                profile.max_theme_pct,
+                profile.updated_at.isoformat(),
+            ),
+        )
+        conn.commit()
+        return profile
 
     # ---- Signals ----
     def upsert_signal(self, sig: T.Signal) -> None:

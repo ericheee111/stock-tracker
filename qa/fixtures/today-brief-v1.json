@@ -1,0 +1,294 @@
+{
+  "schema_version": "stage1-v1",
+  "as_of": "2026-08-14T09:45:00+08:00",
+  "data_status": "DELAYED",
+  "ranking_mode": "RULE_EVIDENCE",
+  "evidence_id": null,
+  "market_posture": {
+    "market": "A",
+    "regime": "ROTATION",
+    "label": "震荡轮动",
+    "aggression_level": 50,
+    "strongest_theme": "机器人",
+    "main_risk": "板块轮动较快，追高后赔率容易恶化"
+  },
+  "summary": {
+    "mode": "DETERMINISTIC_TEMPLATE",
+    "text": "今天以持仓管理为主，只选择性开新仓。当前有 1 个机会具备执行条件，1 个持仓需要重点处理。",
+    "facts": [
+      "1 个新机会达到可执行条件",
+      "1 个新机会等待确认",
+      "1 个持仓需要处理",
+      "校准成功概率尚不可用"
+    ]
+  },
+  "actions": {
+    "executable_count": 1,
+    "waiting_count": 1,
+    "holding_attention_count": 1
+  },
+  "core_opportunities": [
+    {
+      "symbol": "600000.SH",
+      "market": "A",
+      "name": "浦发银行",
+      "action_state": "EXECUTABLE",
+      "action_label": "当前具备执行条件",
+      "opportunity_grade": "A",
+      "strategy_id": "S1",
+      "strategy_version": "runtime-v1",
+      "scores": {
+        "opportunity": 84,
+        "timing": 78,
+        "risk": 41,
+        "confidence": 72
+      },
+      "model": {
+        "tendency": "STRONG",
+        "score": null,
+        "calibrated_probability": null,
+        "probability_evidence_level": "INSUFFICIENT",
+        "message": "真实样本或校准证据不足，暂不展示概率"
+      },
+      "trade_plan": {
+        "entry_low": 10.1,
+        "entry_high": 10.4,
+        "trigger_price": 10.5,
+        "no_chase_above": 10.7,
+        "invalidation_price": 9.7,
+        "target_1": 11.5,
+        "target_2": 12.2,
+        "reward_risk": 2.1,
+        "next_trigger": "现价与风险闸门均满足执行条件",
+        "suggested_position_pct": 0.102,
+        "suggested_shares": 1000,
+        "risk_budget_amount": 700.0,
+        "actual_risk_amount": 600.0,
+        "position_message": "已按风险、现金、集中度和交易单位取最小值",
+        "balanced_plan": {
+          "name": "BALANCED",
+          "action_state": "EXECUTABLE",
+          "action_label": "当前具备执行条件",
+          "risk_budget_multiplier": 1.0,
+          "note": "Standard confirmation and account constraints apply"
+        },
+        "aggressive_plan": null,
+        "position_size": {
+          "allowed": true,
+          "shares": 1000,
+          "lot_size": 100,
+          "entry_price": 10.3,
+          "invalidation_price": 9.7,
+          "risk_per_share": 0.6,
+          "risk_budget_amount": 700.0,
+          "actual_risk_amount": 600.0,
+          "actual_risk_pct": 0.006,
+          "position_value": 10300.0,
+          "position_pct": 0.103,
+          "limiting_factors": ["PER_TRADE_RISK", "LOT_SIZE"],
+          "blockers": []
+        },
+        "calibrated_probability": null,
+        "probability_evidence_level": "INSUFFICIENT",
+        "as_of": "2026-08-14T09:45:00+08:00",
+        "data_status": "LIVE"
+      },
+      "next_trigger": "现价与风险闸门均满足执行条件",
+      "positive_reasons": [
+        "趋势结构完整",
+        "量价配合改善"
+      ],
+      "negative_reasons": [
+        "临近前高，仍需遵守不追价"
+      ],
+      "hard_blockers": [],
+      "soft_blockers": [],
+      "data_status": "LIVE",
+      "freshness": 0.92,
+      "evidence_id": null
+    },
+    {
+      "symbol": "300750.SZ",
+      "market": "A",
+      "name": "宁德时代",
+      "action_state": "WAIT_PULLBACK",
+      "action_label": "等回踩确认",
+      "opportunity_grade": "B",
+      "strategy_id": "S2",
+      "strategy_version": "runtime-v1",
+      "scores": {
+        "opportunity": 76,
+        "timing": 64,
+        "risk": 52,
+        "confidence": 63
+      },
+      "model": {
+        "tendency": "NEUTRAL",
+        "score": null,
+        "calibrated_probability": null,
+        "probability_evidence_level": "INSUFFICIENT",
+        "message": "真实样本或校准证据不足，暂不展示概率"
+      },
+      "trade_plan": {
+        "entry_low": 198.0,
+        "entry_high": 206.0,
+        "trigger_price": 210.0,
+        "no_chase_above": 214.0,
+        "invalidation_price": 188.0,
+        "target_1": 224.0,
+        "target_2": 240.0,
+        "reward_risk": 1.9,
+        "next_trigger": "回踩 198—206 区间后出现止跌确认",
+        "suggested_position_pct": null,
+        "suggested_shares": null,
+        "risk_budget_amount": null,
+        "actual_risk_amount": null,
+        "position_message": "请先设置账户净值、可用现金和风险参数",
+        "balanced_plan": {
+          "name": "BALANCED",
+          "action_state": "WAIT_PULLBACK",
+          "action_label": "等回踩确认",
+          "risk_budget_multiplier": 1.0,
+          "note": "Standard confirmation and account constraints apply"
+        },
+        "aggressive_plan": null,
+        "position_size": null,
+        "calibrated_probability": null,
+        "probability_evidence_level": "INSUFFICIENT",
+        "as_of": "2026-08-14T09:45:00+08:00",
+        "data_status": "LIVE"
+      },
+      "next_trigger": "回踩 198—206 区间后出现止跌确认",
+      "positive_reasons": [
+        "中期趋势仍在",
+        "回踩区间清晰"
+      ],
+      "negative_reasons": [
+        "当前尚未完成回踩确认"
+      ],
+      "hard_blockers": [],
+      "soft_blockers": [
+        {
+          "code": "WAIT_PULLBACK_CONFIRMATION",
+          "message": "尚未完成回踩确认",
+          "severity": "SOFT",
+          "recoverable": true
+        }
+      ],
+      "data_status": "LIVE",
+      "freshness": 0.85,
+      "evidence_id": null
+    },
+    {
+      "symbol": "00700.HK",
+      "market": "HK",
+      "name": "腾讯控股",
+      "action_state": "DATA_BLOCKED",
+      "action_label": "数据或决策证据不足",
+      "opportunity_grade": "B",
+      "strategy_id": "S1",
+      "strategy_version": "runtime-v1",
+      "scores": {
+        "opportunity": 74,
+        "timing": 61,
+        "risk": 55,
+        "confidence": 62
+      },
+      "model": {
+        "tendency": "NEUTRAL",
+        "score": null,
+        "calibrated_probability": null,
+        "probability_evidence_level": "INSUFFICIENT",
+        "message": "真实样本或校准证据不足，暂不展示概率"
+      },
+      "trade_plan": null,
+      "next_trigger": "等待行情恢复可执行新鲜度",
+      "positive_reasons": [
+        "中期相对强弱仍在"
+      ],
+      "negative_reasons": [
+        "当前行情存在延迟"
+      ],
+      "hard_blockers": [
+        {
+          "code": "EXECUTION_DATA_NOT_LIVE",
+          "message": "当前行情不支持新的盘中执行动作",
+          "severity": "HARD",
+          "recoverable": true
+        }
+      ],
+      "soft_blockers": [],
+      "data_status": "DELAYED",
+      "freshness": 0.65,
+      "evidence_id": null
+    }
+  ],
+  "holding_actions": [
+    {
+      "position_id": "pos-1",
+      "symbol": "300059.SZ",
+      "market": "A",
+      "name": "东方财富",
+      "shares": 1000,
+      "average_cost": 18.5,
+      "last": 20.1,
+      "pnl": 1600.0,
+      "pnl_pct": 8.65,
+      "action_state": "TRIM",
+      "action_label": "建议降低仓位",
+      "reason": "风险收益或趋势质量恶化",
+      "strategy_id": "S2",
+      "invalidation_price": 17.5,
+      "distance_to_invalidation_pct": 12.94,
+      "hard_blockers": [],
+      "soft_blockers": [],
+      "data_status": "LIVE"
+    },
+    {
+      "position_id": "pos-2",
+      "symbol": "000333.SZ",
+      "market": "A",
+      "name": "美的集团",
+      "shares": 800,
+      "average_cost": 62.0,
+      "last": null,
+      "pnl": null,
+      "pnl_pct": null,
+      "action_state": "DATA_BLOCKED",
+      "action_label": "数据或决策证据不足",
+      "reason": "持仓未绑定有效交易计划，暂无法给出结构化退出判断",
+      "strategy_id": "UNBOUND_POSITION",
+      "invalidation_price": null,
+      "distance_to_invalidation_pct": null,
+      "hard_blockers": [
+        {
+          "code": "POSITION_THESIS_MISSING",
+          "message": "持仓未绑定有效交易计划，暂无法给出结构化退出判断",
+          "severity": "HARD",
+          "recoverable": true
+        }
+      ],
+      "soft_blockers": [],
+      "data_status": "UNKNOWN"
+    }
+  ],
+  "avoid_reasons": [
+    {
+      "code": "AVOID_1",
+      "message": "板块轮动较快，追高后赔率容易恶化"
+    },
+    {
+      "code": "AVOID_2",
+      "message": "港股当前行情存在延迟，不做新的盘中执行判断"
+    }
+  ],
+  "big_trend": {
+    "status": "NOT_AVAILABLE",
+    "message": "正式主升浪算法尚未启用；当前不使用 SectorScore 冒充主升浪状态",
+    "items": []
+  },
+  "strategy_evidence": {
+    "status": "INSUFFICIENT_REAL_EVIDENCE",
+    "message": "当前只有工程合同和合成验证，暂不展示真实策略战绩"
+  }
+}

@@ -734,7 +734,7 @@
     REGIME_LABELS: REGIME_LABELS, SECTOR_STAGE_LABELS: SECTOR_STAGE_LABELS,
     RISK_LEVEL_COLORS: RISK_LEVEL_COLORS, RISK_LEVEL_LABELS: RISK_LEVEL_LABELS,
     radarGroupOf: radarGroupOf, RADAR_GROUP_ORDER: RADAR_GROUP_ORDER,
-    stateBadge: stateBadge, renderScores: renderScores,
+    stateBadge: stateBadge, renderScores: renderScores, nextTriggerBox: nextTriggerBox,
     renderBanner: renderBanner, bannerModeClass: bannerModeClass,
     isAllMarketsClosed: isAllMarketsClosed, renderHoldingSignals: renderHoldingSignals,
     renderCrowdingGauge: renderCrowdingGauge,

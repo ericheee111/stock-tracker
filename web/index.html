@@ -6,6 +6,7 @@
   <title>Stock Tracker · 交易驾驶舱</title>
   <link rel="stylesheet" href="css/base.css" />
   <link rel="stylesheet" href="css/cockpit.css" />
+  <link rel="stylesheet" href="css/today.css" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300d4ff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2L2 9l10 13 10-13L12 2z'/%3E%3Cpath d='M2 9l10 4 10-4'/%3E%3Cpath d='M12 13v9'/%3E%3C/svg%3E" />
 </head>
 <body>
@@ -37,7 +38,14 @@
   <main class="content">
 
     <!-- ① 市场总览 -->
-    <section class="page active" id="page-overview">
+    <!-- ⓪ 今日作战简报（Stage 1 首页：今天该怎么操作？） -->
+    <section class="page active" id="page-today">
+      <h2 class="page-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg> 今日作战简报</h2>
+      <div id="todayBrief"></div>
+    </section>
+
+    <!-- ① 市场总览 -->
+    <section class="page" id="page-overview">
       <h2 class="page-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg> 市场总览</h2>
 
       <!-- 三大市场指数卡片 -->
@@ -94,9 +102,10 @@
     本页所有行情与信号均来自后端真实行情接口（腾讯 / 东财 / 新浪公开数据），经数据质量闸门校验后展示。<strong>延迟（DELAYED）/ 过期（STALE）/ 异常（UNKNOWN）数据已逐条标注</strong>，请勿将延迟数据当作实时数据使用。本系统仅作辅助参考，不构成任何投资建议。市场有风险，决策需谨慎。
   </footer>
 
-  <!-- ===== 底部：4 个 Tab 导航 ===== -->
+  <!-- ===== 底部：5 个 Tab 导航（今日为默认首页） ===== -->
   <nav class="bottom-nav">
-    <button class="nav-btn active" data-page="overview"><span class="nav-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></span><span>总览</span></button>
+    <button class="nav-btn active" data-page="today"><span class="nav-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg></span><span>今日</span></button>
+    <button class="nav-btn" data-page="overview"><span class="nav-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></span><span>总览</span></button>
     <button class="nav-btn" data-page="watch"><span class="nav-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span><span>自选</span></button>
     <button class="nav-btn" data-page="radar"><span class="nav-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span><span>雷达</span></button>
     <button class="nav-btn" data-page="research"><span class="nav-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6l-4 9a2 2 0 002 3h10a2 2 0 002-3l-4-9V2"/><path d="M9 2h6"/></svg></span><span>研究室</span></button>
@@ -115,6 +124,7 @@
   <script src="js/api.js"></script>
   <script src="js/sse.js"></script>
   <script src="js/components.js"></script>
+  <script src="js/today.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

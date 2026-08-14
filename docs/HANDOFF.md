@@ -1,20 +1,31 @@
 # stock-tracker 交接文档（HANDOFF）
 
 > 主理人：齐活林（Delivery Director）｜团队：许清楚(PM) / 高见远(Architect) / 寇豆码(Engineer) / 严过关(QA)
-> 对应 PRD：`docs/PRD-股票辅助判断与交易参考网站.md`（v0.4；可信数据双车道 + 工程验收版）
-> 日期：2026-08-13
-> 用途：供其他 agent / 开发者接续 Phase 2–5 工作。
+> 对应 PRD：`docs/PRD-股票辅助判断与交易参考网站.md`（v1.0；A 股优先的个人交易决策驾驶舱）
+> 日期：2026-08-14
+> 用途：供其他 Agent / 开发者按 v1.0 Stage 0–7 路线接续工作。
 
 ---
 
 ## 0. TL;DR
 
-stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + 独立 Quant Foundation** 的真实可运行系统。`main` 上的量化基线为 `93e1c94`；PRD 已升级到 v0.4，将运行缓存与研究训练数据明确分车道。历史 K 线的运行采集/UI 链路已经接通，Quant 的 PIT、执行、标签、校准和治理合同也已存在；当前最高优先级不再是继续堆模型，而是完成 G0 源码分发门禁和 Wave 2B 可信原始数据、日历、历史 Universe、证券状态与公司行为绑定。测试数量会随阶段增长，接续时以当前 commit 的自动化输出为准，不再在 TL;DR 固定一个很快过时的数字。
+stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + 独立 Quant Foundation** 的真实可运行系统。v1.0 将产品中心冻结为“今天该怎么操作”，市场资源按 A 股、港股通、美股排序，并把 Core Opportunity、Big Trend、Event Intelligence、持仓/Exit、Strategy Scoreboard 与 Replay 设为主线。Stage 1 的严格决策合同、Action Mapper、PositionSizer、TradePlan、Core 3—5、Portfolio REST、真实 `/api/brief/today` 和 Today Action 首页已经接线，并通过真实 Python API + Web Playwright 集成；概率仍严格为 `null`，Big Trend 返回 `NOT_AVAILABLE`，策略战绩返回 `INSUFFICIENT_REAL_EVIDENCE`。下一产品切片是 Portfolio 设置/持仓编辑 UI；这些工程能力仍不等于真实投资表现。
 
-### 0.1 v0.4 当前状态覆盖说明
+> **路线覆盖规则：** 下文保留的 v0.4 Wave、T1–T15 和历史提交记录用于追溯；若与新版产品优先级冲突，以 PRD v1.0、根 `AGENTS.md` 和 `docs/PRODUCT-GAP-MATRIX-v1.0.md` 为准。
+
+### 0.1 v1.0 当前状态覆盖说明
 
 本节优先级高于下文保留的历史会话记录：
 
+- Stage 1 Today Action 已实现严格产品合同、旧 SignalState → ActionState 映射、按风险计算的 PositionSizer、TradePlan、Core 3—5 和最低安全 Exit baseline；
+- `GET /api/brief/today` 已真实接线，只读 Store/Repository，不调用 Provider、LLM 或 Quant 训练链；单条合同损坏信号会跳过而不是拖垮整页；
+- Portfolio Profile 与 Position CRUD 已接入临时 SQLite 验证；持仓事实允许零碎股，新开仓建议仍按市场 lot size 向下取整；
+- `/api/brief/today` 与 `/api/portfolio*` 属于私有 API：本机直连可用，公网未配置私有访问时失败关闭，反向代理不能用本机 TCP 来源绕过认证；
+- Today Web 已支持 object blocker、概率空值、0—1 仓位比例、null 行情和 3—5 个 Core；Mock QA 与真实 API/Web QA 均通过；
+- 当前发布门禁：运行产品 335 项通过、1 项未启动本地服务的活体探针跳过；Quant 170 项通过；Mock UI 17/17；真实 API/Web 16/16；compileall、pip check、Quant smoke、fixture benchmark、migration dry-run 和 `git diff --check` 均通过；
+- 生产 `data/stock_tracker.db` 验证前后 SHA-256 均为 `1cde40aa66846630d89b10d080a8837d204266c5ce32001a45d3b0c0c06197b1`；
+- 当前仍未实现 Portfolio 编辑 UI、Big Trend、正式 Event Intelligence、真实 Strategy Scoreboard、Replay 和真实校准概率；
+- 下文旧测试数字和旧 T1—T15 状态仅供历史追溯，当前验证以最新自动化输出为准；
 - 根 `.gitignore` 的 `data/` 曾误排除 `stock_tracker/quant/data/`；现已改为 `/data/`，并增加关键源码 `git ls-files` 回归测试；
 - Eastmoney 日 K 已拆分为 `fetch_bars_raw()` 与 `parse_bars()`，可在解析前保存 exact raw bytes；
 - 新增 `RawDataArtifact + Trust Tier + request_parameters + normalized_dataset_id + capture_id` 的内容寻址捕获与重放合同；descriptor 绑定端点、复权模式、请求起止范围和 parser version；

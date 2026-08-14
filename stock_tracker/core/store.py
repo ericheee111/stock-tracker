@@ -26,6 +26,7 @@ class MarketStore:
         self._health: dict[str, T.ProviderHealth] = {}
         self._watchlist: dict[str, T.WatchlistItem] = {}
         self._positions: dict[str, T.Position] = {}
+        self._portfolio_profile = None
         self._instruments: dict[str, dict] = {}
         self._last_update: Optional[datetime] = None
 
@@ -125,6 +126,22 @@ class MarketStore:
     def get_positions(self) -> dict[str, T.Position]:
         with self._lock:
             return dict(self._positions)
+
+    def upsert_position(self, item: T.Position) -> None:
+        with self._lock:
+            self._positions[item.id] = item
+
+    def remove_position(self, position_id: str) -> None:
+        with self._lock:
+            self._positions.pop(position_id, None)
+
+    def set_portfolio_profile(self, profile: object) -> None:
+        with self._lock:
+            self._portfolio_profile = profile
+
+    def get_portfolio_profile(self) -> object:
+        with self._lock:
+            return self._portfolio_profile
 
     # ---- Instruments ----
     def upsert_instrument(self, symbol: str, meta: dict) -> None:
