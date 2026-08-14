@@ -50,6 +50,33 @@ class TestMigrationDiscovery(unittest.TestCase):
             self.assertEqual(before_stat.st_mtime_ns, after_stat.st_mtime_ns)
             self.assertEqual(before_entries, after_entries)
 
+    def test_lf_and_crlf_have_the_same_canonical_checksum(self) -> None:
+        sql = "CREATE TABLE fixture(id INTEGER);\nINSERT INTO fixture VALUES (1);\n"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lf = root / "lf"
+            crlf = root / "crlf"
+            lf.mkdir()
+            crlf.mkdir()
+            (lf / "0001_fixture.sql").write_bytes(sql.encode("utf-8"))
+            (crlf / "0001_fixture.sql").write_bytes(
+                sql.replace("\n", "\r\n").encode("utf-8")
+            )
+            lf_migration = load_migrations(lf)[0]
+            crlf_migration = load_migrations(crlf)[0]
+            self.assertEqual(lf_migration.checksum, crlf_migration.checksum)
+            self.assertEqual(lf_migration.sql, crlf_migration.sql)
+            self.assertIn(
+                hashlib.sha256(sql.encode("utf-8")).hexdigest(),
+                lf_migration.accepted_checksums,
+            )
+            self.assertIn(
+                hashlib.sha256(
+                    sql.replace("\n", "\r\n").encode("utf-8")
+                ).hexdigest(),
+                lf_migration.accepted_checksums,
+            )
+
 
 class TestMigrationApply(unittest.TestCase):
     def test_apply_is_idempotent(self) -> None:
@@ -196,6 +223,32 @@ class TestMigrationApply(unittest.TestCase):
             connection.commit()
             with self.assertRaisesRegex(MigrationContractError, "does not match"):
                 plan_connection(connection)
+
+    def test_legacy_crlf_checksum_history_is_accepted(self) -> None:
+        migrations = load_migrations()
+        first = migrations[0]
+        crlf_checksum = hashlib.sha256(
+            first.sql.replace("\n", "\r\n").encode("utf-8")
+        ).hexdigest()
+        self.assertIn(crlf_checksum, first.accepted_checksums)
+        with sqlite3.connect(":memory:") as connection:
+            apply_connection(connection, migrations=migrations)
+            connection.execute("DROP TRIGGER quant_schema_migration_no_update")
+            connection.execute(
+                "UPDATE quant_schema_migration SET checksum = ? WHERE version = ?",
+                (crlf_checksum, first.version),
+            )
+            connection.commit()
+            plan = plan_connection(connection, migrations=migrations)
+            self.assertEqual(len(plan.applied), len(migrations))
+
+    def test_non_line_ending_change_is_not_accepted(self) -> None:
+        migrations = load_migrations()
+        first = migrations[0]
+        changed_checksum = hashlib.sha256(
+            (first.sql + "-- semantic identity changed\n").encode("utf-8")
+        ).hexdigest()
+        self.assertNotIn(changed_checksum, first.accepted_checksums)
 
 
 class TestMigrationCli(unittest.TestCase):

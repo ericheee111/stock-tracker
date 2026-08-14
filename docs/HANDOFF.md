@@ -22,7 +22,8 @@ stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + �
 - Portfolio Profile 与 Position CRUD 已接入临时 SQLite 验证；持仓事实允许零碎股，新开仓建议仍按市场 lot size 向下取整；
 - `/api/brief/today` 与 `/api/portfolio*` 属于私有 API：本机直连可用，公网未配置私有访问时失败关闭，反向代理不能用本机 TCP 来源绕过认证；
 - Today Web 已支持 object blocker、概率空值、0—1 仓位比例、null 行情和 3—5 个 Core；Mock QA 与真实 API/Web QA 均通过；
-- 当前发布门禁：运行产品 335 项通过、1 项未启动本地服务的活体探针跳过；Quant 170 项通过；Mock UI 17/17；真实 API/Web 16/16；compileall、pip check、Quant smoke、fixture benchmark、migration dry-run 和 `git diff --check` 均通过；
+- 当前发布门禁：运行产品 335 项通过、1 项未启动本地服务的活体探针跳过；Quant 173 项通过；Mock UI 17/17；真实 API/Web 16/16；compileall、pip check、Quant smoke、fixture benchmark、migration dry-run 和 `git diff --check` 均通过；
+- Quant migration checksum 已按 UTF-8 SQL 的规范化 LF 字节计算；新记录在 Windows/Linux 一致，旧 LF/CRLF/CR 原始 checksum 仍可读取，任何非行尾内容变化继续失败关闭；
 - 生产 `data/stock_tracker.db` 验证前后 SHA-256 均为 `1cde40aa66846630d89b10d080a8837d204266c5ce32001a45d3b0c0c06197b1`；
 - 当前仍未实现 Portfolio 编辑 UI、Big Trend、正式 Event Intelligence、真实 Strategy Scoreboard、Replay 和真实校准概率；
 - 下文旧测试数字和旧 T1—T15 状态仅供历史追溯，当前验证以最新自动化输出为准；

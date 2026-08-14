@@ -34,6 +34,7 @@ class Migration:
     path: Path
     sql: str
     checksum: str
+    accepted_checksums: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +95,41 @@ def migration_directory() -> Path:
     return Path(__file__).with_name("migrations")
 
 
+def _canonicalize_migration_bytes(
+    raw: bytes,
+    *,
+    filename: str,
+) -> tuple[str, bytes, frozenset[str]]:
+    """Normalize line endings without weakening migration content identity.
+
+    Git may materialize one tracked SQL file as LF or CRLF depending on the
+    platform. Line endings are not part of SQLite migration semantics, while
+    every other UTF-8 code point remains checksum-significant. The compatible
+    checksum set also lets databases created by the previous raw-byte scheme
+    survive a Windows/Linux checkout transition.
+    """
+
+    try:
+        decoded = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise MigrationContractError(
+            f"migration is not UTF-8: {filename}"
+        ) from exc
+    canonical_sql = decoded.replace("\r\n", "\n").replace("\r", "\n")
+    canonical = canonical_sql.encode("utf-8")
+    legacy_variants = {
+        raw,
+        canonical,
+        canonical_sql.replace("\n", "\r\n").encode("utf-8"),
+        canonical_sql.replace("\n", "\r").encode("utf-8"),
+    }
+    accepted = frozenset(
+        hashlib.sha256(candidate).hexdigest()
+        for candidate in legacy_variants
+    )
+    return canonical_sql, canonical, accepted
+
+
 def load_migrations(directory: str | Path | None = None) -> tuple[Migration, ...]:
     """Load and validate ordered migration files from the package directory."""
 
@@ -110,17 +146,15 @@ def load_migrations(directory: str | Path | None = None) -> tuple[Migration, ...
         if version in seen_versions:
             raise MigrationContractError(f"duplicate migration version: {version}")
         raw = path.read_bytes()
-        try:
-            sql = raw.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise MigrationContractError(
-                f"migration is not UTF-8: {path.name}"
-            ) from exc
+        sql, canonical, accepted_checksums = _canonicalize_migration_bytes(
+            raw,
+            filename=path.name,
+        )
         if _FORBIDDEN_TRANSACTION.search(sql):
             raise MigrationContractError(
                 f"migration cannot manage its own transaction: {path.name}"
             )
-        checksum = hashlib.sha256(raw).hexdigest()
+        checksum = hashlib.sha256(canonical).hexdigest()
         migrations.append(
             Migration(
                 version=version,
@@ -128,6 +162,7 @@ def load_migrations(directory: str | Path | None = None) -> tuple[Migration, ...
                 path=path,
                 sql=sql,
                 checksum=checksum,
+                accepted_checksums=accepted_checksums,
             )
         )
         seen_versions.add(version)
@@ -178,7 +213,10 @@ def plan_connection(
             state = MigrationState.PENDING
         else:
             name, checksum = recorded
-            if name != migration.name or checksum != migration.checksum:
+            accepted_checksums = migration.accepted_checksums or frozenset(
+                {migration.checksum}
+            )
+            if name != migration.name or checksum not in accepted_checksums:
                 raise MigrationContractError(
                     f"migration {migration.version:04d} history does not match source"
                 )
