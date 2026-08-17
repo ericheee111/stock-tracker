@@ -98,7 +98,16 @@ async function waitForPortfolio(page, predicate, timeoutMs) {
     );
     add('账户参数通过真实 PUT 持久化', true,
       'equity=' + afterProfile.profile.account_equity + ' risk=' + afterProfile.profile.per_trade_risk_pct);
-    await page.waitForSelector('#portfolioProfileForm', { timeout: 8000 });
+    await page.waitForFunction(function () {
+      const profile = document.querySelector('#portfolioProfileForm');
+      const create = document.querySelector('#portfolioPositionCreateForm');
+      const equity = document.querySelector('#pf-account_equity');
+      const profileSubmit = profile && profile.querySelector('button[type="submit"]');
+      const createSubmit = create && create.querySelector('button[type="submit"]');
+      return profile && create && equity && equity.value === '120000' &&
+        profileSubmit && !profileSubmit.disabled &&
+        createSubmit && !createSubmit.disabled;
+    }, null, { timeout: 10000 });
 
     await page.selectOption('#newPositionMarket', 'A');
     await page.fill('#pf-symbol', '600519.SH');
