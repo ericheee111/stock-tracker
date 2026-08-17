@@ -1,8 +1,8 @@
 /* =========================================================================
  * app.js —— 启动 / 路由 / 初始拉取 / SSE 增量更新 / 信号详情弹层
- * 对齐 architecture.md §9：fetch REST + EventSource('/api/stream')。
+ * 对齐 architecture.md §9：fetch REST + 带私有 Header 的 fetch-stream SSE。
  * 防御：每个 API 响应做空值防御；初始拉取失败显示"连接后端失败"，不白屏；
- *       SSE 断线由 EventSource 原生重连，回调异常被隔离。
+ *       SSE 断线由 fetch-stream 客户端退避重连，回调异常被隔离。
  * ========================================================================= */
 (function () {
   'use strict';
@@ -18,6 +18,9 @@
     market: 'A',
     meta: null,
     brief: null,
+    portfolio: null,
+    privateError: null,
+    portfolioBusy: false,
     overview: null,
     markets: [],
     watchlist: [],
@@ -34,6 +37,7 @@
   const $$ = function (sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); };
 
   let toastTimer = null;
+  let todayRefreshTimer = null;
   function toast(msg) {
     const t = $('#toast');
     if (!t) return;
@@ -65,21 +69,26 @@
 
   /* ---------------- 初始拉取 ---------------- */
   function ok(r) { return r && r.status === 'fulfilled' ? r.value : null; }
+  function failure(r) { return r && r.status === 'rejected' ? r.reason : null; }
 
   async function loadInitial() {
     const results = await Promise.allSettled([
-      API.getBriefToday(), API.getOverview(), API.getMarkets(), API.getWatchlist(),
-      API.getPositions(), API.getRadar(), API.getSectors(), API.getProviderHealth(), API.getConfig()
+      API.getBriefToday(), API.getPortfolio(), API.getOverview(), API.getMarkets(),
+      API.getWatchlist(), API.getPositions(), API.getRadar(), API.getSectors(),
+      API.getProviderHealth(), API.getConfig()
     ]);
     state.brief = ok(results[0]);
-    state.overview = ok(results[1]);
-    state.markets = ok(results[2]) || [];
-    state.watchlist = ok(results[3]) || [];
-    state.positions = ok(results[4]) || [];
-    state.radar = ok(results[5]) || [];
-    state.sectors = ok(results[6]) || [];
-    state.providers = ok(results[7]) || [];
-    state.config = ok(results[8]) || {};
+    state.portfolio = ok(results[1]);
+    state.privateError = failure(results[1]) || failure(results[0]) ||
+      failure(results[4]) || failure(results[5]);
+    state.overview = ok(results[2]);
+    state.markets = ok(results[3]) || [];
+    state.watchlist = ok(results[4]) || [];
+    state.positions = ok(results[5]) || [];
+    state.radar = ok(results[6]) || [];
+    state.sectors = ok(results[7]) || [];
+    state.providers = ok(results[8]) || [];
+    state.config = ok(results[9]) || {};
 
     if (state.overview) state.meta = state.overview.meta || null;
 
@@ -101,7 +110,23 @@
   }
 
   /* ---------------- 渲染：⓪ 今日作战简报（Stage 1 Lane D） ---------------- */
+  function renderPortfolioPanel() {
+    const el = $('#portfolioPanel');
+    if (!el) return;
+    const P = window.PortfolioUI;
+    if (!P) {
+      el.innerHTML = UI.loadingBox('账户管理模块未加载');
+      return;
+    }
+    el.innerHTML = P.renderPanel(
+      state.portfolio,
+      state.privateError,
+      state.portfolioBusy
+    );
+  }
+
   function renderToday() {
+    renderPortfolioPanel();
     const el = $('#todayBrief');
     if (!el) return;
     const T = window.Today;
@@ -312,6 +337,145 @@
     if (mask) mask.hidden = true;
   }
 
+  /* ---------------- Stage 1.1：Portfolio 私有 CRUD ---------------- */
+  function openPortfolioSheet() {
+    const P = window.PortfolioUI;
+    const mask = $('#sheetMask');
+    const sheet = $('#sheet');
+    if (!P || !mask || !sheet) return;
+    sheet.innerHTML = P.renderSheet(state.portfolio, state.privateError);
+    mask.hidden = false;
+    bindSheetClose();
+  }
+
+  function setFormBusy(form, busy) {
+    if (!form) return;
+    form.querySelectorAll('button, input, select').forEach(function (field) {
+      field.disabled = busy;
+    });
+  }
+
+  function portfolioErrorMessage(error) {
+    const P = window.PortfolioUI;
+    if (P && P.privateErrorText) {
+      const mapped = P.privateErrorText(error);
+      if (mapped) return mapped;
+    }
+    return (error && error.message) || '账户操作失败';
+  }
+
+  async function refreshPrivateData(reopenSheet) {
+    state.portfolioBusy = true;
+    renderPortfolioPanel();
+    const results = await Promise.allSettled([
+      API.getPortfolio(),
+      API.getBriefToday(),
+      API.getPositions(),
+      API.getOverview(),
+      API.getRadar(),
+      API.getConfig(),
+      API.getWatchlist()
+    ]);
+    state.portfolio = ok(results[0]);
+    state.brief = ok(results[1]);
+    state.positions = ok(results[2]) || [];
+    state.overview = ok(results[3]);
+    state.radar = ok(results[4]) || [];
+    state.config = ok(results[5]) || {};
+    state.watchlist = ok(results[6]) || [];
+    state.meta = state.overview ? (state.overview.meta || null) : null;
+    state.privateError = failure(results[0]) || failure(results[1]) ||
+      failure(results[2]) || failure(results[3]) || failure(results[4]) ||
+      failure(results[5]) || failure(results[6]);
+    state.portfolioBusy = false;
+    renderBanner();
+    renderOverview();
+    renderRadar();
+    renderToday();
+    renderWatch();
+    renderHolding();
+    if (reopenSheet) openPortfolioSheet();
+    return !state.privateError;
+  }
+
+  async function runPortfolioTask(form, task, successMessage) {
+    if (state.portfolioBusy) return;
+    state.portfolioBusy = true;
+    setFormBusy(form, true);
+    renderPortfolioPanel();
+    try {
+      await task();
+      const refreshed = await refreshPrivateData(true);
+      toast(refreshed ? successMessage : successMessage + '，但页面刷新失败');
+
+    } catch (error) {
+      toast(portfolioErrorMessage(error));
+      state.portfolioBusy = false;
+    renderBanner();
+    renderOverview();
+    renderRadar();
+      setFormBusy(form, false);
+      renderPortfolioPanel();
+    }
+  }
+
+  async function submitPrivateAccess(form) {
+    const field = form.elements.namedItem('private_access');
+    const value = field ? String(field.value || '').trim() : '';
+    if (!value) {
+      toast('请输入当前会话私有访问值');
+      return;
+    }
+    try {
+      API.setPrivateAccess(value);
+      if (SSE && typeof SSE.reconnect === 'function') SSE.reconnect();
+      const connected = await refreshPrivateData(true);
+      toast(connected ? '私有接口已连接' : '私有访问值未通过验证');
+    } catch (error) {
+      toast(portfolioErrorMessage(error));
+    }
+  }
+
+  function confirmDelete(button) {
+    if (button.dataset.confirming === 'true') return true;
+    button.dataset.confirming = 'true';
+    button.classList.add('pf-delete-confirming');
+    button.textContent = '再次点击确认删除';
+    setTimeout(function () {
+      if (!button.isConnected) return;
+      button.dataset.confirming = 'false';
+      button.classList.remove('pf-delete-confirming');
+      button.textContent = '删除记录';
+    }, 5000);
+    return false;
+  }
+
+  function scheduleTodayRefresh(delayMs) {
+    clearTimeout(todayRefreshTimer);
+    todayRefreshTimer = setTimeout(async function () {
+      todayRefreshTimer = null;
+      try {
+        state.brief = await API.getBriefToday();
+        state.privateError = null;
+        renderToday();
+      } catch (error) {
+        state.privateError = error;
+        if (error && (error.code === 'PRIVATE_API_AUTH_REQUIRED' ||
+            error.code === 'PRIVATE_API_DISABLED')) {
+          state.brief = null;
+          state.portfolio = null;
+          state.positions = [];
+          state.watchlist = [];
+          state.overview = null;
+          state.radar = [];
+          state.config = {};
+          state.meta = null;
+        }
+        renderToday();
+      }
+    }, delayMs || 400);
+  }
+
   /* ---------------- SSE：行情增量（定向更新，避免整页重绘闪烁） ---------------- */
   function paintQuote(q) {
     if (!q || !q.symbol) return;
@@ -329,7 +493,8 @@
       el.classList.add(chgCls);
     });
     // 保留 data-symbol：只替换内部 HTML，不替换元素本身
-    $$('.live-status[data-symbol="' + sym + '"]').forEach(function (el) { el.innerHTML = statusHtml; });
+    Array.prototype.slice.call(document.querySelectorAll('.live-status[data-symbol="' + sym + '"]')).forEach(function (el) { el.innerHTML = statusHtml; });
+    scheduleTodayRefresh(500);
   }
 
   function updateSignalInCaches(sig) {
@@ -354,12 +519,13 @@
   function subscribeSSE() {
     SSE.subscribe({
       quote: function (q) { paintQuote(q); },
-      signal: function (sig) { updateSignalInCaches(sig); renderActive(); },
-      regime: function (r) { if (state.overview) state.overview.regime = r; renderActive(); },
+      signal: function (sig) { updateSignalInCaches(sig); renderActive(); scheduleTodayRefresh(200); },
+      regime: function (r) { if (state.overview) state.overview.regime = r; renderActive(); scheduleTodayRefresh(200); },
       sector: function (payload) {
         const arr = Array.isArray(payload) ? payload : (payload && payload.sectors) || [];
         if (arr.length) { state.sectors = arr; if (state.overview) state.overview.sector_leaders = arr; }
         renderActive();
+        scheduleTodayRefresh(200);
       },
       provider_health: function (arr) {
         if (Array.isArray(arr) && arr.length) state.providers = arr;
@@ -381,10 +547,96 @@
     $$('.market-tab').forEach(function (t) {
       t.addEventListener('click', function () { setMarket(t.dataset.market); });
     });
-    // 卡片点击 → 信号详情（含 data-signal 的元素）
+    // 页面级委托：Portfolio 操作优先，其次信号详情。
     document.addEventListener('click', function (e) {
+      const portfolioOpen = e.target.closest('[data-portfolio-open]');
+      if (portfolioOpen) {
+        openPortfolioSheet();
+        return;
+      }
+      const clearAccess = e.target.closest('[data-private-access-clear]');
+      if (clearAccess) {
+        API.clearPrivateAccess();
+        if (SSE && typeof SSE.reconnect === 'function') SSE.reconnect();
+        state.portfolio = null;
+        state.brief = null;
+        state.overview = null;
+        state.radar = [];
+        state.config = {};
+        state.meta = null;
+        state.positions = [];
+        state.watchlist = [];
+        refreshPrivateData(true).then(function (connected) {
+          toast(connected ? '已清除会话访问值，本机私有接口仍可用' : '已清除当前会话访问值');
+        });
+        return;
+      }
+      const deleteButton = e.target.closest('[data-position-delete]');
+      if (deleteButton) {
+        if (!confirmDelete(deleteButton)) return;
+        const positionId = deleteButton.dataset.positionId;
+        const form = deleteButton.closest('form');
+        runPortfolioTask(
+          form,
+          function () { return API.deletePortfolioPosition(positionId); },
+          '持仓记录已删除'
+        );
+        return;
+      }
       const el = e.target.closest('[data-signal]');
       if (el && el.dataset.signal) openSignal(el.dataset.signal);
+    });
+    document.addEventListener('submit', function (e) {
+      const form = e.target;
+      const P = window.PortfolioUI;
+      if (!P || !form) return;
+      if (form.id === 'privateAccessForm') {
+        e.preventDefault();
+        submitPrivateAccess(form);
+        return;
+      }
+      if (form.id === 'portfolioProfileForm') {
+        e.preventDefault();
+        try {
+          const payload = P.readProfile(form);
+          runPortfolioTask(
+            form,
+            function () { return API.putPortfolioProfile(payload); },
+            '账户参数已保存'
+          );
+        } catch (error) {
+          toast(portfolioErrorMessage(error));
+        }
+        return;
+      }
+      if (form.id === 'portfolioPositionCreateForm') {
+        e.preventDefault();
+        try {
+          const payload = P.readNewPosition(form);
+          runPortfolioTask(
+            form,
+            function () { return API.createPortfolioPosition(payload); },
+            '持仓记录已新增'
+          );
+        } catch (error) {
+          toast(portfolioErrorMessage(error));
+        }
+        return;
+      }
+      if (form.matches('[data-position-form]')) {
+        e.preventDefault();
+        try {
+          const payload = P.readPositionPatch(form);
+          const positionId = form.dataset.positionId;
+          runPortfolioTask(
+            form,
+            function () { return API.patchPortfolioPosition(positionId, payload); },
+            '持仓记录已更新'
+          );
+        } catch (error) {
+          toast(portfolioErrorMessage(error));
+        }
+      }
     });
     // 弹层遮罩点击关闭
     const mask = $('#sheetMask');
@@ -399,6 +651,7 @@
   function init() {
     bindEvents();
     // 先渲染占位加载态，避免白屏
+    const pp = $('#portfolioPanel'); if (pp) pp.innerHTML = UI.loadingBox('加载账户与持仓…');
     const tb = $('#todayBrief'); if (tb) tb.innerHTML = UI.loadingBox('加载今日作战简报…');
     const idx = $('#indexGrid'); if (idx) idx.innerHTML = UI.loadingBox('加载指数中…');
     const grid = $('#overviewGrid'); if (grid) grid.innerHTML = UI.loadingBox('加载市场状态中…');

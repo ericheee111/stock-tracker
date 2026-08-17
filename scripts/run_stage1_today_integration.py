@@ -230,13 +230,20 @@ def main() -> int:
         try:
             env = os.environ.copy()
             env["TODAY_QA_BASE_URL"] = f"http://127.0.0.1:{port}"
-            result = subprocess.run(
-                ["node", "qa/ui/today_action_qa.cjs"],
-                cwd=ROOT,
-                env=env,
-                check=False,
+            checks = (
+                "qa/ui/today_action_qa.cjs",
+                "qa/ui/portfolio_crud_qa.cjs",
             )
-            return result.returncode
+            for script in checks:
+                result = subprocess.run(
+                    ["node", script],
+                    cwd=ROOT,
+                    env=env,
+                    check=False,
+                )
+                if result.returncode:
+                    return result.returncode
+            return 0
         finally:
             server.shutdown_wait()
             thread.join(timeout=5)

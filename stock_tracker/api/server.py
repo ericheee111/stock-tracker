@@ -45,14 +45,36 @@ _QUOTE_RE = re.compile(r"^/api/quote/([^/]+)$")
 _PORTFOLIO_POSITION_RE = re.compile(r"^/api/portfolio/positions/([^/]+)$")
 _PRIVATE_API_PATHS = frozenset({
     "/api/brief/today",
+    "/api/overview",
     "/api/portfolio",
     "/api/portfolio/profile",
     "/api/portfolio/positions",
+    "/api/positions",
+    "/api/watchlist",
+    "/api/watch",
+    "/api/watch/remove",
+    "/api/events",
+    "/api/radar",
+    "/api/config",
+    "/api/stream",
 })
-_PRIVATE_API_PREFIXES = ("/api/portfolio/positions/",)
+_PRIVATE_API_PREFIXES = (
+    "/api/portfolio/positions/",
+    "/api/signal/",
+)
 _PRIVATE_ACCESS_ENV = "STOCK_TRACKER_PRIVATE_ACCESS"
+_MIN_PRIVATE_ACCESS_LENGTH = 32
 _MAX_JSON_BODY_BYTES = 64 * 1024
 _MAX_OVERSIZE_DRAIN_BYTES = 1024 * 1024
+
+
+def _private_access_value_valid(value: str) -> bool:
+    return (
+        type(value) is str
+        and len(value) >= _MIN_PRIVATE_ACCESS_LENGTH
+        and value == value.strip()
+        and not any(ord(char) < 33 or ord(char) == 127 for char in value)
+    )
 
 
 def _private_api_access_allowed(
@@ -60,6 +82,9 @@ def _private_api_access_allowed(
     path: str,
     client_host: str,
     request_host: str,
+    has_forwarding_headers: bool,
+    request_origin: str,
+    sec_fetch_site: str,
     authorization: str,
     configured_access: str,
 ) -> bool:
@@ -80,9 +105,25 @@ def _private_api_access_allowed(
             request_host_is_loopback = ipaddress.ip_address(parsed_host).is_loopback
         except ValueError:
             request_host_is_loopback = False
-    if client_is_loopback and request_host_is_loopback:
+    origin_is_loopback = True
+    if request_origin:
+        origin_host = urlparse(request_origin).hostname
+        origin_is_loopback = origin_host == "localhost"
+        if origin_host and not origin_is_loopback:
+            try:
+                origin_is_loopback = ipaddress.ip_address(origin_host).is_loopback
+            except ValueError:
+                origin_is_loopback = False
+    request_is_cross_site = sec_fetch_site.strip().lower() == "cross-site"
+    if (
+        client_is_loopback
+        and request_host_is_loopback
+        and not has_forwarding_headers
+        and origin_is_loopback
+        and not request_is_cross_site
+    ):
         return True
-    if not configured_access:
+    if not _private_access_value_valid(configured_access):
         return False
     prefix = "Bearer "
     if not authorization.startswith(prefix):
@@ -111,17 +152,22 @@ class APIHandler(BaseHTTPRequestHandler):
     def _ctx(self) -> AppContext:
         return self.server.ctx
 
-    @staticmethod
-    def _is_private_api_path(path: str) -> bool:
-        return path in _PRIVATE_API_PATHS or any(
-            path.startswith(prefix) for prefix in _PRIVATE_API_PREFIXES
-        )
-
     def _private_api_authorized(self, path: str) -> bool:
         return _private_api_access_allowed(
             path=path,
             client_host=self.client_address[0],
             request_host=self.headers.get("Host", ""),
+            has_forwarding_headers=any(
+                self.headers.get(name)
+                for name in (
+                    "Forwarded",
+                    "X-Forwarded-For",
+                    "X-Forwarded-Host",
+                    "X-Real-IP",
+                )
+            ),
+            request_origin=self.headers.get("Origin", ""),
+            sec_fetch_site=self.headers.get("Sec-Fetch-Site", ""),
             authorization=self.headers.get("Authorization", ""),
             configured_access=os.environ.get(_PRIVATE_ACCESS_ENV, ""),
         )
@@ -129,22 +175,29 @@ class APIHandler(BaseHTTPRequestHandler):
     def _require_private_api(self, path: str) -> bool:
         if self._private_api_authorized(path):
             return True
-        configured = bool(os.environ.get(_PRIVATE_ACCESS_ENV, ""))
+        configured_value = os.environ.get(_PRIVATE_ACCESS_ENV, "")
+        configured = _private_access_value_valid(configured_value)
+        misconfigured = bool(configured_value) and not configured
+        code = (
+            "PRIVATE_API_AUTH_REQUIRED"
+            if configured
+            else (
+                "PRIVATE_API_MISCONFIGURED"
+                if misconfigured
+                else "PRIVATE_API_DISABLED"
+            )
+        )
+        message = (
+            "private API authorization is required"
+            if configured
+            else (
+                f"private access must contain at least {_MIN_PRIVATE_ACCESS_LENGTH} visible characters"
+                if misconfigured
+                else "private API is local-only until private access is configured"
+            )
+        )
         self._send_json(
-            {
-                "error": {
-                    "code": (
-                        "PRIVATE_API_AUTH_REQUIRED"
-                        if configured
-                        else "PRIVATE_API_DISABLED"
-                    ),
-                    "message": (
-                        "private API authorization is required"
-                        if configured
-                        else "private API is local-only until private access is configured"
-                    ),
-                }
-            },
+            {"error": {"code": code, "message": message}},
             status=401 if configured else 503,
         )
         return False
@@ -154,7 +207,6 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
@@ -164,7 +216,6 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
 
@@ -391,7 +442,6 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(data)
 
@@ -403,7 +453,6 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "keep-alive")
         self.send_header("X-Accel-Buffering", "no")
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
 
         q: "queue.Queue" = queue.Queue()

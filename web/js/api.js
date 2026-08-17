@@ -1,59 +1,137 @@
 /* =========================================================================
- * api.js —— REST 封装（fetch + 超时 + 失败兜底）
+ * api.js —— REST 封装（超时、严格 JSON、私有会话访问、结构化错误）
  * 全局对象：API
- * 端点严格对齐 architecture.md §9.1：
- *   /api/overview  /api/watchlist  /api/positions  /api/radar
- *   /api/signal/<id>  /api/markets  /api/provider_health
- *   /api/sectors  /api/config
- * 强制契约（§9.1）：行情/信号响应必含 data_status 与 observed_age_ms；
- *   /api/overview 顶层含 meta:{data_mode, providers, last_update, market_open}。
- * 所有函数：成功返回解析后的对象；失败抛出 Error（由调用方兜底，不白屏）。
  * ========================================================================= */
 (function (global) {
   'use strict';
 
   const DEFAULT_TIMEOUT_MS = 8000;
+  const PRIVATE_ACCESS_KEY = 'stockTrackerPrivateAccess';
 
-  /**
-   * 带超时的 JSON GET。fetch 失败时抛 Error，便于上层 Promise.allSettled 兜底。
-   */
+  function APIRequestError(status, code, message, field, url) {
+    Error.call(this, message);
+    this.name = 'APIRequestError';
+    this.message = message;
+    this.status = status;
+    this.code = code || 'HTTP_ERROR';
+    this.field = field || null;
+    this.url = url || '';
+    if (Error.captureStackTrace) Error.captureStackTrace(this, APIRequestError);
+  }
+  APIRequestError.prototype = Object.create(Error.prototype);
+  APIRequestError.prototype.constructor = APIRequestError;
+
   function privateAccessValue() {
     try {
-      return global.sessionStorage.getItem('stockTrackerPrivateAccess') || '';
+      return global.sessionStorage.getItem(PRIVATE_ACCESS_KEY) || '';
     } catch (e) {
       return '';
     }
   }
 
-  async function fetchJSON(url, opts) {
+  function setPrivateAccess(value) {
+    const normalized = typeof value === 'string' ? value.trim() : '';
+    try {
+      if (normalized) global.sessionStorage.setItem(PRIVATE_ACCESS_KEY, normalized);
+      else global.sessionStorage.removeItem(PRIVATE_ACCESS_KEY);
+    } catch (e) {
+      throw new Error('当前浏览器不允许保存会话访问值');
+    }
+  }
+
+  function clearPrivateAccess() {
+    setPrivateAccess('');
+  }
+
+  function hasPrivateAccess() {
+    return privateAccessValue().length > 0;
+  }
+
+  function privateHeaders() {
+    const value = privateAccessValue();
+    return value ? { 'Authorization': 'Bearer ' + value } : {};
+  }
+
+  async function readResponsePayload(res) {
+    if (res.status === 204) return null;
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.indexOf('application/json') === -1) {
+      const text = await res.text().catch(function () { return ''; });
+      return { __nonJson: true, text: text };
+    }
+    try {
+      return await res.json();
+    } catch (e) {
+      return { __invalidJson: true };
+    }
+  }
+
+  async function requestJSON(url, opts) {
     opts = opts || {};
     const ctrl = new AbortController();
     const timer = setTimeout(function () { ctrl.abort(); }, opts.timeout || DEFAULT_TIMEOUT_MS);
+    const method = opts.method || 'GET';
     const headers = { 'Accept': 'application/json' };
-    const privateAccess = opts.private ? privateAccessValue() : '';
-    if (privateAccess) headers.Authorization = 'Bearer ' + privateAccess;
+    if (opts.private) Object.assign(headers, privateHeaders());
+    let body;
+    if (opts.body !== undefined) {
+      headers['Content-Type'] = 'application/json; charset=utf-8';
+      body = JSON.stringify(opts.body);
+    }
     try {
       const res = await fetch(url, {
-        method: 'GET',
+        method: method,
         signal: ctrl.signal,
         cache: 'no-store',
-        headers: headers
+        headers: headers,
+        body: body
       });
+      const payload = await readResponsePayload(res);
       if (!res.ok) {
-        throw new Error('HTTP ' + res.status + ' @ ' + url);
+        const error = payload && payload.error && typeof payload.error === 'object'
+          ? payload.error : {};
+        throw new APIRequestError(
+          res.status,
+          error.code || 'HTTP_' + res.status,
+          error.message || ('HTTP ' + res.status + ' @ ' + url),
+          error.field || null,
+          url
+        );
       }
-      const ct = res.headers.get('content-type') || '';
-      if (ct.indexOf('application/json') === -1) {
-        // 后端可能在错误路由返回 HTML，统一按失败处理
-        throw new Error('非 JSON 响应 @ ' + url);
+      if (payload && payload.__nonJson) {
+        throw new APIRequestError(
+          res.status,
+          'NON_JSON_RESPONSE',
+          '后端返回了非 JSON 响应',
+          null,
+          url
+        );
       }
-      return await res.json();
+      if (payload && payload.__invalidJson) {
+        throw new APIRequestError(
+          res.status,
+          'INVALID_JSON_RESPONSE',
+          '后端 JSON 响应无法解析',
+          null,
+          url
+        );
+      }
+      return payload;
+    } catch (error) {
+      if (error && error.name === 'AbortError') {
+        throw new APIRequestError(0, 'REQUEST_TIMEOUT', '请求超时', null, url);
+      }
+      throw error;
     } finally {
       clearTimeout(timer);
     }
   }
 
-  /** 归一化：兼容后端返回 {data:...} 或裸数组/对象，统一抽取 */
+  function fetchJSON(url, opts) {
+    opts = Object.assign({}, opts || {}, { method: 'GET' });
+    return requestJSON(url, opts);
+  }
+
   function unwrap(payload, key) {
     if (payload && typeof payload === 'object' && key && payload[key] !== undefined) {
       return payload[key];
@@ -63,47 +141,78 @@
 
   const API = {
     getOverview: function () {
-      return fetchJSON('/api/overview').then(function (d) { return d; });
+      return fetchJSON('/api/overview', { private: true });
     },
-    /** 今日作战简报（Stage 1 Lane D）：/api/brief/today，兼容 {brief:...} 或裸对象。 */
     getBriefToday: function (opts) {
       opts = opts || {};
       return fetchJSON('/api/brief/today', {
         timeout: opts.timeout || DEFAULT_TIMEOUT_MS,
         private: true
-      })
-        .then(function (payload) { return unwrap(payload, 'brief') || payload; });
+      }).then(function (payload) { return unwrap(payload, 'brief') || payload; });
+    },
+    getPortfolio: function () {
+      return fetchJSON('/api/portfolio', { private: true });
+    },
+    putPortfolioProfile: function (payload) {
+      return requestJSON('/api/portfolio/profile', {
+        method: 'PUT', private: true, body: payload
+      });
+    },
+    createPortfolioPosition: function (payload) {
+      return requestJSON('/api/portfolio/positions', {
+        method: 'POST', private: true, body: payload
+      });
+    },
+    patchPortfolioPosition: function (positionId, payload) {
+      return requestJSON('/api/portfolio/positions/' + encodeURIComponent(positionId), {
+        method: 'PATCH', private: true, body: payload
+      });
+    },
+    deletePortfolioPosition: function (positionId) {
+      return requestJSON('/api/portfolio/positions/' + encodeURIComponent(positionId), {
+        method: 'DELETE', private: true
+      });
     },
     getWatchlist: function () {
-      return fetchJSON('/api/watchlist').then(function (d) { return unwrap(d, 'items') || unwrap(d, 'watchlist') || []; });
+      return fetchJSON('/api/watchlist', { private: true })
+        .then(function (d) { return unwrap(d, 'items') || unwrap(d, 'watchlist') || []; });
     },
     getPositions: function () {
-      return fetchJSON('/api/positions').then(function (d) { return unwrap(d, 'items') || unwrap(d, 'positions') || []; });
+      return fetchJSON('/api/positions', { private: true })
+        .then(function (d) { return unwrap(d, 'items') || unwrap(d, 'positions') || []; });
     },
     getRadar: function () {
-      return fetchJSON('/api/radar').then(function (d) { return unwrap(d, 'signals') || unwrap(d, 'items') || (Array.isArray(d) ? d : []); });
+      return fetchJSON('/api/radar', { private: true })
+        .then(function (d) { return unwrap(d, 'signals') || unwrap(d, 'items') || (Array.isArray(d) ? d : []); });
     },
     getSignal: function (id) {
-      return fetchJSON('/api/signal/' + encodeURIComponent(id));
+      return fetchJSON('/api/signal/' + encodeURIComponent(id), { private: true });
     },
-    /** 单标的详情（实时报价 + 展示指标 + 近期 K 线）：/api/quote/{symbol} */
     getQuote: function (symbol) {
       return fetchJSON('/api/quote/' + encodeURIComponent(symbol));
     },
     getMarkets: function () {
-      return fetchJSON('/api/markets').then(function (d) { return unwrap(d, 'markets') || unwrap(d, 'items') || (Array.isArray(d) ? d : []); });
+      return fetchJSON('/api/markets')
+        .then(function (d) { return unwrap(d, 'markets') || unwrap(d, 'items') || (Array.isArray(d) ? d : []); });
     },
     getProviderHealth: function () {
-      return fetchJSON('/api/provider_health').then(function (d) { return unwrap(d, 'providers') || unwrap(d, 'items') || (Array.isArray(d) ? d : []); });
+      return fetchJSON('/api/provider_health')
+        .then(function (d) { return unwrap(d, 'providers') || unwrap(d, 'items') || (Array.isArray(d) ? d : []); });
     },
     getSectors: function () {
-      return fetchJSON('/api/sectors').then(function (d) { return unwrap(d, 'sectors') || unwrap(d, 'items') || (Array.isArray(d) ? d : []); });
+      return fetchJSON('/api/sectors')
+        .then(function (d) { return unwrap(d, 'sectors') || unwrap(d, 'items') || (Array.isArray(d) ? d : []); });
     },
     getConfig: function () {
-      return fetchJSON('/api/config').then(function (d) { return d || {}; });
+      return fetchJSON('/api/config', { private: true }).then(function (d) { return d || {}; });
     },
-    // 暴露底层以便复用
-    fetchJSON: fetchJSON
+    requestJSON: requestJSON,
+    fetchJSON: fetchJSON,
+    APIRequestError: APIRequestError,
+    setPrivateAccess: setPrivateAccess,
+    clearPrivateAccess: clearPrivateAccess,
+    hasPrivateAccess: hasPrivateAccess,
+    privateHeaders: privateHeaders
   };
 
   global.API = API;

@@ -1,0 +1,208 @@
+/* =========================================================================
+ * portfolio.css —— Stage 1.1 账户与持仓管理
+ * ========================================================================= */
+.pf-panel { border-color: rgba(100, 210, 255, 0.24); }
+.pf-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.pf-panel-head .tb-card-title { margin-bottom: 2px; }
+.pf-access-state,
+.pf-help,
+.pf-honesty {
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+.pf-honesty {
+  border-top: 1px dashed var(--border-strong);
+  margin-top: 10px;
+  padding-top: 9px;
+}
+.pf-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.pf-summary-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--bg-surface);
+  padding: 8px 10px;
+}
+.pf-summary-grid span { color: var(--text-3); font-size: 11px; }
+.pf-summary-grid strong {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-primary,
+.pf-secondary,
+.pf-danger {
+  min-height: 38px;
+  border-radius: var(--radius-xs);
+  padding: 8px 12px;
+  font: 600 13px var(--font-sans);
+  cursor: pointer;
+  transition: opacity var(--dur) var(--ease), border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.pf-primary {
+  border: 1px solid rgba(100, 210, 255, 0.42);
+  background: rgba(100, 210, 255, 0.14);
+  color: var(--accent);
+}
+.pf-secondary {
+  border: 1px solid var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--text);
+}
+.pf-danger {
+  border: 1px solid rgba(255, 69, 58, 0.38);
+  background: rgba(255, 69, 58, 0.10);
+  color: #ff6961;
+}
+.pf-primary:hover,
+.pf-secondary:hover,
+.pf-danger:hover { border-color: currentColor; }
+.pf-primary:disabled,
+.pf-secondary:disabled,
+.pf-danger:disabled { cursor: wait; opacity: 0.55; }
+.pf-open { flex: 0 0 auto; }
+.pf-error,
+.pf-empty,
+.pf-success {
+  border-radius: var(--radius-xs);
+  padding: 9px 10px;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.pf-error {
+  border: 1px solid rgba(255, 69, 58, 0.32);
+  background: rgba(255, 69, 58, 0.08);
+  color: #ff9f98;
+}
+.pf-empty {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-2);
+}
+.pf-success {
+  border: 1px solid rgba(48, 209, 88, 0.30);
+  background: rgba(48, 209, 88, 0.08);
+  color: #77e893;
+}
+.pf-sheet-body { padding-right: 2px; }
+.pf-sheet-section {
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.025);
+  padding: 12px;
+}
+.pf-sheet-section h3 {
+  margin: 0 0 7px;
+  color: var(--text);
+  font: 600 14px var(--font-serif);
+}
+.pf-form-grid,
+.pf-inline-form,
+.pf-position-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.pf-inline-form { grid-template-columns: minmax(0, 1fr); }
+.pf-form-grid label,
+.pf-inline-form label,
+.pf-position-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.pf-form-grid label > span,
+.pf-inline-form label > span,
+.pf-position-fields label > span {
+  color: var(--text-2);
+  font-size: 11.5px;
+}
+.pf-form-grid input,
+.pf-form-grid select,
+.pf-inline-form input,
+.pf-position-fields input {
+  width: 100%;
+  min-height: 39px;
+  box-sizing: border-box;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  outline: none;
+  background: rgba(0, 0, 0, 0.20);
+  color: var(--text);
+  padding: 8px 9px;
+  font: 13px var(--font-mono);
+}
+.pf-form-grid input:focus,
+.pf-form-grid select:focus,
+.pf-inline-form input:focus,
+.pf-position-fields input:focus { border-color: var(--accent); }
+.pf-form-wide { grid-column: 1 / -1; }
+.pf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.pf-position-row {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--bg-surface);
+  padding: 10px;
+}
+.pf-position-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.pf-position-head strong { color: var(--text); font-family: var(--font-mono); }
+.pf-position-head span {
+  margin-left: 7px;
+  border-radius: 99px;
+  background: rgba(100, 210, 255, 0.10);
+  color: var(--accent);
+  padding: 2px 6px;
+  font-size: 10.5px;
+}
+.pf-position-head small { color: var(--text-3); font-size: 10.5px; }
+.pf-position-row .pf-actions { margin-top: 9px; }
+.pf-delete-confirming {
+  border-color: #ff453a;
+  background: rgba(255, 69, 58, 0.22);
+  color: #fff;
+}
+
+@media (min-width: 768px) {
+  .pf-summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 520px) {
+  .pf-panel-head { align-items: stretch; flex-direction: column; }
+  .pf-open { width: 100%; }
+  .pf-form-grid,
+  .pf-position-fields { grid-template-columns: 1fr; }
+  .pf-form-wide { grid-column: auto; }
+  .pf-position-head { flex-direction: column; }
+  .pf-actions > button { flex: 1 1 130px; }
+}

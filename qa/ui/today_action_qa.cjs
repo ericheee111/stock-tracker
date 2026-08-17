@@ -175,6 +175,14 @@ const KNOWN_ACTIONS = ['当前可执行', '等回踩', '等突破', '继续持�
     await page.goto(base, { waitUntil: 'domcontentloaded', timeout: 20000 });
     await page.waitForSelector('#todayBrief .tb-summary', { timeout: 8000 }).catch(() => {});
     await sleep(600);
+    if (EXTERNAL_BASE) {
+      const streamConnected = await page.waitForFunction(
+        () => window.SSE && window.SSE.isConnected(),
+        null,
+        { timeout: 5000 }
+      ).then(() => true).catch(() => false);
+      add('真实私有 fetch-SSE 已连接', streamConnected, 'connected=' + streamConnected);
+    }
 
     const text = () => page.$eval('#todayBrief', e => e.innerText).catch(() => '');
     const count = sel => page.$$eval(sel, els => els.length).catch(() => 0);
