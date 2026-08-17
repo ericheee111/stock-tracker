@@ -1,0 +1,24 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_id": "st-status-st-001",
+  "category": "status",
+  "boundary": "st",
+  "description": "Synthetic 其他风险警示 (ST) designation. ST is a risk warning, not a trading halt: the security remains LISTED and TRADABLE.",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "source_owner": "SYNTHETIC_STAGE2_AUX",
+  "raw_artifacts": [
+    {"artifact_id": "raw:status:st:607001:1", "media_type": "application/json", "source_uri": "synthetic://sse/disclosure/riskplate/st-607001", "retrieved_at_utc": "2025-03-02T16:00:00Z", "source_published_at": "2025-03-02", "source_published_granularity": "DATE", "sha256": "b111111111111111111111111111111111111111111111111111111111111111", "byte_length": 0, "raw_text": "[SYNTHETIC] 607001.SH designated ST (other risk warning) effective 2025-03-03."}
+  ],
+  "expected_facts": [
+    {"fact_type": "SecurityStatusFact", "instrument_id": "EXC:fixture:607001", "symbol": "607001.SH", "market": "A", "session_date": "2025-03-03", "listing_state": "LISTED", "trading_state": "TRADABLE", "risk_designation": "ST", "reason_code": "OTHER_RISK"},
+    {"fact_type": "UniverseMembershipFact", "universe_id": "A_SHARE_SSE_ALL", "instrument_id": "EXC:fixture:607001", "symbol": "607001.SH", "market": "A", "state": "INCLUDED", "effective_date": "2025-03-03", "reason": "TYPE_CHANGE"}
+  ],
+  "expected_contract_outcome": "risk_designation=ST with listing_state=LISTED and trading_state=TRADABLE is valid. ST must not be inferred from the name string alone (Agent A audit 5.4). Still INCLUDED in universe.",
+  "warnings": [
+    "SYNTHETIC_FIXTURE_ONLY: not real data; sha256 is a placeholder.",
+    "ST (其他风险警示) is distinct from *ST (退市风险警示) and from suspension."
+  ]
+}

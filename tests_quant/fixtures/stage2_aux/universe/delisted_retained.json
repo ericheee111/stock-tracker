@@ -1,0 +1,25 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_id": "uni-delisted-retained-001",
+  "category": "universe",
+  "boundary": "delisted_retained",
+  "description": "Synthetic delisted sample that must be RETAINED in the snapshot identity (survivorship guard). The EXCLUDED/DELISTED member stays visible via snapshot.delisted_symbols and is never silently dropped.",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "source_owner": "SYNTHETIC_STAGE2_AUX",
+  "raw_artifacts": [
+    {"artifact_id": "raw:uni:delret:607003:1", "media_type": "application/json", "source_uri": "synthetic://sse/universe/delisted-retained-607003", "retrieved_at_utc": "2022-06-30T16:00:00Z", "source_published_at": "2022-06-30", "source_published_granularity": "DATE", "sha256": "c444444444444444444444444444444444444444444444444444444444444444", "byte_length": 0, "raw_text": "[SYNTHETIC] 607003.SH delisted and retained in A_SHARE_SSE_ALL history."}
+  ],
+  "expected_facts": [
+    {"fact_type": "UniverseMembershipFact", "universe_id": "A_SHARE_SSE_ALL", "instrument_id": "EXC:fixture:607003", "symbol": "607003.SH", "market": "A", "state": "EXCLUDED", "effective_date": "2022-06-30", "reason": "DELISTED"},
+    {"fact_type": "InstrumentIdentityFact", "instrument_id": "EXC:fixture:607003", "symbol": "607003.SH", "market": "A", "exchange": "SSE", "security_type": "COMMON_EQUITY", "effective_from": "2010-01-01", "effective_to": "2022-06-30"},
+    {"fact_type": "SecurityStatusFact", "instrument_id": "EXC:fixture:607003", "symbol": "607003.SH", "market": "A", "session_date": "2022-06-30", "listing_state": "DELISTED", "trading_state": "HALTED", "risk_designation": "RISK_WARNING"}
+  ],
+  "expected_contract_outcome": "Snapshot.delisted_symbols includes 607003.SH; snapshot.member_symbols excludes it. The delisted sample is preserved for historical continuity and reconciliation, not dropped.",
+  "warnings": [
+    "SYNTHETIC_FIXTURE_ONLY: not real data; sha256 is a placeholder.",
+    "Delisted samples must be preserved (survivorship guard, Agent A audit 5.5)."
+  ]
+}

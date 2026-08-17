@@ -1,0 +1,34 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_id": "cal-date-only-publication-001",
+  "category": "calendar",
+  "boundary": "date_only_publication",
+  "description": "Synthetic source that publishes only a DATE (no intraday time). Exercises the DATE-granularity rule: known_at must not be back-dated to a fake 00:00 precision, and intraday replay must be disabled for this fact.",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "source_owner": "SYNTHETIC_STAGE2_AUX",
+  "notice_type": "HOLIDAY",
+  "raw_artifacts": [
+    {
+      "artifact_id": "raw:cal:dateonly:607001:1",
+      "media_type": "text/html",
+      "source_uri": "synthetic://sse/disclosure/notice/syn-dateonly-2025-04-01",
+      "retrieved_at_utc": "2025-04-01T16:00:00Z",
+      "source_published_at": "2025-04-01",
+      "source_published_granularity": "DATE",
+      "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "byte_length": 0,
+      "raw_text": "[SYNTHETIC] Notice published with DATE granularity only: closed session 2025-04-01. No intraday publish time supplied."
+    }
+  ],
+  "expected_facts": [
+    {"fact_type": "CalendarDay", "session_date": "2025-04-01", "status": "CLOSED", "source_published_granularity": "DATE", "intraday_replay_permitted": false}
+  ],
+  "expected_contract_outcome": "Parser keeps source_published_granularity=DATE and must NOT fabricate a precise known_at; conservative usable_from = next open session; intraday Replay for this fact fails closed.",
+  "warnings": [
+    "SYNTHETIC_FIXTURE_ONLY: not real data; sha256 is a placeholder.",
+    "DATE-only publication must never be treated as a precise intraday known_at (Agent A audit 2.3 / 5.8)."
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_id": "cal-temporary-revision-001",
+  "category": "calendar",
+  "boundary": "temporary_revision",
+  "description": "Synthetic temporary/technical calendar revision (notice_type=TEMPORARY) that revises a previously OPEN session to CLOSED after an incident. Exercises append-only revision + supersedes semantics.",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "source_owner": "SYNTHETIC_STAGE2_AUX",
+  "notice_type": "TEMPORARY",
+  "raw_artifacts": [
+    {
+      "artifact_id": "raw:cal:temp:607001:1",
+      "media_type": "text/html",
+      "source_uri": "synthetic://sse/disclosure/announcement/general/c/syn-temp-2025-03-15",
+      "retrieved_at_utc": "2025-03-15T11:30:00Z",
+      "source_published_at": "2025-03-15",
+      "source_published_granularity": "DATE",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "byte_length": 0,
+      "raw_text": "[SYNTHETIC] SSE temporary trading halt notice (illustrative): 2025-03-15 revised to CLOSED due to synthetic technical incident."
+    }
+  ],
+  "expected_facts": [
+    {"fact_type": "CalendarDay", "session_date": "2025-03-15", "status": "CLOSED", "session_kind": "SPECIAL", "revision": 2, "supersedes_revision_id": "rev:annual:2025-03-15:1"}
+  ],
+  "expected_contract_outcome": "Temporary revision yields a newer CLOSED day; old OPEN revision retained as a separate raw artifact. Selection at as_of picks latest visible revision; append-only invariant holds.",
+  "warnings": [
+    "SYNTHETIC_FIXTURE_ONLY: not real SSE data; sha256 is a placeholder.",
+    "Annual plan cannot assume it already contains temporary/technical closures (Agent A audit 5.1)."
+  ]
+}

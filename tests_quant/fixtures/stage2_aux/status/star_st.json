@@ -1,0 +1,24 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_id": "st-status-star-st-001",
+  "category": "status",
+  "boundary": "star_st",
+  "description": "Synthetic 退市风险警示 (*ST) designation. *ST is a delisting-risk warning; the security remains LISTED and TRADABLE unless it also enters the delisting period.",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "source_owner": "SYNTHETIC_STAGE2_AUX",
+  "raw_artifacts": [
+    {"artifact_id": "raw:status:starst:607002:1", "media_type": "application/json", "source_uri": "synthetic://sse/disclosure/riskplate/star-st-607002", "retrieved_at_utc": "2025-04-02T16:00:00Z", "source_published_at": "2025-04-02", "source_published_granularity": "DATE", "sha256": "b222222222222222222222222222222222222222222222222222222222222222", "byte_length": 0, "raw_text": "[SYNTHETIC] 607002.SH designated *ST (delisting risk warning) effective 2025-04-03."}
+  ],
+  "expected_facts": [
+    {"fact_type": "SecurityStatusFact", "instrument_id": "EXC:fixture:607002", "symbol": "607002.SH", "market": "A", "session_date": "2025-04-03", "listing_state": "LISTED", "trading_state": "TRADABLE", "risk_designation": "STAR_ST", "reason_code": "DELIST_RISK"},
+    {"fact_type": "UniverseMembershipFact", "universe_id": "A_SHARE_SSE_ALL", "instrument_id": "EXC:fixture:607002", "symbol": "607002.SH", "market": "A", "state": "INCLUDED", "effective_date": "2025-04-03", "reason": "TYPE_CHANGE"}
+  ],
+  "expected_contract_outcome": "risk_designation=STAR_ST with listing_state=LISTED and trading_state=TRADABLE is valid. *ST is not the same as DELISTING period; it does not by itself block TRADABLE.",
+  "warnings": [
+    "SYNTHETIC_FIXTURE_ONLY: not real data; sha256 is a placeholder.",
+    "STAR_ST != DELISTING listing_state. Do not conflate *ST with the delisting period."
+  ]
+}

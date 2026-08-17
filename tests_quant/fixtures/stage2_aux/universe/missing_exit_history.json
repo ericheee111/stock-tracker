@@ -1,0 +1,25 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_id": "uni-missing-exit-history-001",
+  "category": "universe",
+  "boundary": "missing_exit_history",
+  "description": "Synthetic CURRENT-LIST-ONLY source: it provides only today's INCLUDED members and NO delisting/exit history. This is the survivorship-bias trap. The adapter must NOT mark the coverage complete.",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "source_owner": "SYNTHETIC_STAGE2_AUX",
+  "raw_artifacts": [
+    {"artifact_id": "raw:uni:curlist:1", "media_type": "application/json", "source_uri": "synthetic://sse/current-list-only", "retrieved_at_utc": "2025-01-02T16:00:00Z", "source_published_at": "2025-01-02", "source_published_granularity": "DATE", "sha256": "c333333333333333333333333333333333333333333333333333333333333333", "byte_length": 0, "raw_text": "[SYNTHETIC] Current A-share list only: 607001.SH, 607002.SH, 009001.SZ. No historical exits provided."}
+  ],
+  "expected_facts": [
+    {"fact_type": "UniverseMembershipFact", "universe_id": "A_SHARE_SSE_ALL", "instrument_id": "EXC:fixture:607001", "symbol": "607001.SH", "market": "A", "state": "INCLUDED", "effective_date": "2000-01-01", "reason": "LISTED"},
+    {"fact_type": "UniverseMembershipFact", "universe_id": "A_SHARE_SSE_ALL", "instrument_id": "EXC:fixture:607002", "symbol": "607002.SH", "market": "A", "state": "INCLUDED", "effective_date": "2000-01-01", "reason": "LISTED"}
+  ],
+  "expected_contract_outcome": "Coverage.complete MUST be false. Adapter must not self-upgrade to complete=true or verified=true. A historical universe cannot be built from a current-list-only snapshot (survivorship bias). Research identity promotion must be refused (require_complete=True).",
+  "warnings": [
+    "SYNTHETIC_FIXTURE_ONLY: not real data; sha256 is a placeholder.",
+    "Current list cannot construct a historical universe (Agent A audit 3.1). complete=false is mandatory here.",
+    "If Agent B/C mistakenly sets complete=true on this input, that is a contract violation to be caught by tests."
+  ]
+}

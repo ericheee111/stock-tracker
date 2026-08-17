@@ -1,0 +1,24 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_id": "st-status-suspension-001",
+  "category": "status",
+  "boundary": "suspension",
+  "description": "Synthetic trading suspension (停牌). The security is LISTED but SUSPENDED; it stays INCLUDED in the universe (suspension is not exclusion).",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "source_owner": "SYNTHETIC_STAGE2_AUX",
+  "raw_artifacts": [
+    {"artifact_id": "raw:status:susp:607003:1", "media_type": "application/json", "source_uri": "synthetic://sse/disclosure/suspension/susp-607003", "retrieved_at_utc": "2025-07-01T16:00:00Z", "source_published_at": "2025-07-01", "source_published_granularity": "DATE", "sha256": "b333333333333333333333333333333333333333333333333333333333333333", "byte_length": 0, "raw_text": "[SYNTHETIC] 607003.SH suspended 2025-07-01, reason synthetic."}
+  ],
+  "expected_facts": [
+    {"fact_type": "SecurityStatusFact", "instrument_id": "EXC:fixture:607003", "symbol": "607003.SH", "market": "A", "session_date": "2025-07-01", "listing_state": "LISTED", "trading_state": "SUSPENDED", "risk_designation": "NORMAL", "reason_code": "TEMP_SUSPEND"},
+    {"fact_type": "UniverseMembershipFact", "universe_id": "A_SHARE_SSE_ALL", "instrument_id": "EXC:fixture:607003", "symbol": "607003.SH", "market": "A", "state": "INCLUDED", "effective_date": "2025-07-01", "reason": "LISTED"}
+  ],
+  "expected_contract_outcome": "SUSPENDED + LISTED is valid. member_symbols still includes 607003.SH (suspension != EXCLUDED). tradable_symbols excludes it. A missing bar on this date requires an explicit no-bar status (placeholder), not silence.",
+  "warnings": [
+    "SYNTHETIC_FIXTURE_ONLY: not real data; sha256 is a placeholder.",
+    "SUSPENDED must not be treated as removal from the universe (Agent A audit 5.3)."
+  ]
+}

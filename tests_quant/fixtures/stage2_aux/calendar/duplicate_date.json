@@ -1,0 +1,26 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_id": "cal-duplicate-date-001",
+  "category": "calendar",
+  "boundary": "duplicate_date",
+  "description": "Synthetic capture contains two day records for the SAME session_date 2025-06-02 with conflicting status (OPEN vs CLOSED). Exercises duplicate-date conflict detection.",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "source_owner": "SYNTHETIC_STAGE2_AUX",
+  "notice_type": "ANNUAL",
+  "raw_artifacts": [
+    {"artifact_id": "raw:cal:dup:607001:a", "media_type": "text/html", "source_uri": "synthetic://sse/cal/dup-a", "retrieved_at_utc": "2025-06-01T09:00:00Z", "source_published_at": "2025-06-01", "source_published_granularity": "DATE", "sha256": "5555555555555555555555555555555555555555555555555555555555555555", "byte_length": 0, "raw_text": "[SYNTHETIC] 2025-06-02 OPEN."},
+    {"artifact_id": "raw:cal:dup:607001:b", "media_type": "text/html", "source_uri": "synthetic://sse/cal/dup-b", "retrieved_at_utc": "2025-06-02T09:00:00Z", "source_published_at": "2025-06-02", "source_published_granularity": "DATE", "sha256": "6666666666666666666666666666666666666666666666666666666666666666", "byte_length": 0, "raw_text": "[SYNTHETIC] 2025-06-02 CLOSED (conflicting revision)."}
+  ],
+  "expected_facts": [
+    {"fact_type": "CalendarDay", "session_date": "2025-06-02", "status": "OPEN", "revision": 1},
+    {"fact_type": "CalendarDay", "session_date": "2025-06-02", "status": "CLOSED", "revision": 2}
+  ],
+  "expected_contract_outcome": "If both revisions are visible at as_of and disagree, selection raises PITConflictError. If a newer revision supersedes the older unambiguously, the single latest revision is selected. Duplicate dates must never be silently averaged.",
+  "warnings": [
+    "SYNTHETIC_FIXTURE_ONLY: not real data; sha256 values are placeholders.",
+    "Duplicate session_date with conflicting payload is a conflict, not a duplicate to drop."
+  ]
+}

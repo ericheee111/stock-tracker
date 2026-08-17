@@ -1,0 +1,25 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_id": "id-relisting-001",
+  "category": "identity",
+  "boundary": "relisting",
+  "description": "Synthetic relisting: a security is listed, then delisted, then relisted. Exercises multiple membership events where the latest effective membership controls the session.",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "source_owner": "SYNTHETIC_STAGE2_AUX",
+  "raw_artifacts": [
+    {"artifact_id": "raw:id:relist:607004:1", "media_type": "application/json", "source_uri": "synthetic://sse/security-master/relisting-607004", "retrieved_at_utc": "2022-01-15T16:00:00Z", "source_published_at": "2022-01-15", "source_published_granularity": "DATE", "sha256": "a777777777777777777777777777777777777777777777777777777777777777", "byte_length": 0, "raw_text": "[SYNTHETIC] 607004.SH relisted 2022-01-15 after prior delisting 2021-06-30."}
+  ],
+  "expected_facts": [
+    {"fact_type": "UniverseMembershipFact", "universe_id": "A_SHARE_SSE_ALL", "instrument_id": "EXC:fixture:607004", "symbol": "607004.SH", "market": "A", "state": "INCLUDED", "effective_date": "2018-01-01", "reason": "LISTED"},
+    {"fact_type": "UniverseMembershipFact", "universe_id": "A_SHARE_SSE_ALL", "instrument_id": "EXC:fixture:607004", "symbol": "607004.SH", "market": "A", "state": "EXCLUDED", "effective_date": "2021-06-30", "reason": "DELISTED"},
+    {"fact_type": "UniverseMembershipFact", "universe_id": "A_SHARE_SSE_ALL", "instrument_id": "EXC:fixture:607004", "symbol": "607004.SH", "market": "A", "state": "INCLUDED", "effective_date": "2022-01-15", "reason": "RELISTED"}
+  ],
+  "expected_contract_outcome": "For a session_date of 2022-02-01 the latest effective membership is INCLUDED (RELISTED), so the symbol appears in member_symbols. For 2021-07-01 it is EXCLUDED. Latest effective membership controls the session; old events are retained, not overwritten.",
+  "warnings": [
+    "SYNTHETIC_FIXTURE_ONLY: not real data; sha256 is a placeholder.",
+    "Relisting must be an explicit new membership event, not an overwrite of the delisting event."
+  ]
+}

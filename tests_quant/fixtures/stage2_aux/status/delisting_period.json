@@ -1,0 +1,24 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_id": "st-status-delisting-period-001",
+  "category": "status",
+  "boundary": "delisting_period",
+  "description": "Synthetic 退市整理期 (delisting period). The security is in DELISTING state and still TRADABLE during the period. Contract RiskDesignation has no explicit DELISTING_PERIOD, so it maps to OTHER (or RISK_WARNING).",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "source_owner": "SYNTHETIC_STAGE2_AUX",
+  "raw_artifacts": [
+    {"artifact_id": "raw:status:delperiod:607004:1", "media_type": "application/json", "source_uri": "synthetic://sse/disclosure/riskplate/delisting-period-607004", "retrieved_at_utc": "2025-08-01T16:00:00Z", "source_published_at": "2025-08-01", "source_published_granularity": "DATE", "sha256": "b555555555555555555555555555555555555555555555555555555555555555", "byte_length": 0, "raw_text": "[SYNTHETIC] 607004.SH entered delisting period 2025-08-01, still tradable during the period."}
+  ],
+  "expected_facts": [
+    {"fact_type": "SecurityStatusFact", "instrument_id": "EXC:fixture:607004", "symbol": "607004.SH", "market": "A", "session_date": "2025-08-01", "listing_state": "DELISTING", "trading_state": "TRADABLE", "risk_designation": "OTHER", "reason_code": "DELISTING_PERIOD"},
+    {"fact_type": "UniverseMembershipFact", "universe_id": "A_SHARE_SSE_ALL", "instrument_id": "EXC:fixture:607004", "symbol": "607004.SH", "market": "A", "state": "INCLUDED", "effective_date": "2025-08-01", "reason": "TYPE_CHANGE"}
+  ],
+  "expected_contract_outcome": "listing_state=DELISTING + trading_state=TRADABLE is valid (delisting period still trades). risk_designation uses OTHER because the enum lacks DELISTING_PERIOD. PRE_LISTING/DELISTED + TRADABLE is still rejected.",
+  "warnings": [
+    "SYNTHETIC_FIXTURE_ONLY: not real data; sha256 is a placeholder.",
+    "Contract gap: no explicit DELISTING_PERIOD risk designation; mapped to OTHER/RISK_WARNING by convention."
+  ]
+}

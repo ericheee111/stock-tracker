@@ -1,0 +1,714 @@
+{
+  "schema": "a-share-security-universe-source-v1",
+  "source": "fixture-sse-official-like",
+  "source_dataset": "synthetic-security-universe",
+  "source_version": "fixture-sse-v1",
+  "exchange": "SSE",
+  "universe_id": "A_SHARE_SSE_ALL",
+  "coverage": {
+    "start_date": "2024-01-02",
+    "end_date": "2024-01-12",
+    "coverage_kind": "HISTORICAL_EVENTS",
+    "required_session_dates": [
+      "2024-01-12"
+    ],
+    "provenance": {
+      "source_published_at": "2024-01-13",
+      "source_published_granularity": "DATE",
+      "observed_at": "2024-01-13T10:00:00+08:00",
+      "known_at": "2024-01-13T10:00:00+08:00",
+      "usable_from": "2024-01-14T09:30:00+08:00",
+      "revision": 1,
+      "supersedes": null,
+      "source_uri": "fixture://sse/coverage/2024-01",
+      "evidence_ids": [
+        "fixture-sse-coverage"
+      ]
+    }
+  },
+  "identities": [
+    {
+      "source_security_id": "SSECID-ALPHA",
+      "symbol": "600100.SH",
+      "name": "甲公司",
+      "security_type": "COMMON_EQUITY",
+      "board": "MAIN",
+      "effective_from": "2020-01-01",
+      "effective_to": "2024-01-07",
+      "provenance": {
+        "source_published_at": "2019-12-20",
+        "source_published_granularity": "DATE",
+        "observed_at": "2024-01-02T08:00:00+08:00",
+        "known_at": "2024-01-02T08:00:00+08:00",
+        "usable_from": "2024-01-02T09:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/identity/alpha-old",
+        "evidence_ids": [
+          "fixture-alpha-listing"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-ALPHA",
+      "symbol": "600101.SH",
+      "name": "甲股份",
+      "security_type": "COMMON_EQUITY",
+      "board": "MAIN",
+      "effective_from": "2024-01-08",
+      "effective_to": null,
+      "provenance": {
+        "source_published_at": "2024-01-05T18:00:00+08:00",
+        "source_published_granularity": "SECOND",
+        "observed_at": "2024-01-05T18:10:00+08:00",
+        "known_at": "2024-01-05T18:10:00+08:00",
+        "usable_from": "2024-01-08T09:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/identity/alpha-new",
+        "evidence_ids": [
+          "fixture-alpha-code-change"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-BETA",
+      "symbol": "600200.SH",
+      "name": "乙退",
+      "security_type": "COMMON_EQUITY",
+      "board": "MAIN",
+      "effective_from": "2018-01-01",
+      "effective_to": "2024-01-12",
+      "provenance": {
+        "source_published_at": "2017-12-20",
+        "source_published_granularity": "DATE",
+        "observed_at": "2024-01-02T08:00:00+08:00",
+        "known_at": "2024-01-02T08:00:00+08:00",
+        "usable_from": "2024-01-02T09:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/identity/beta",
+        "evidence_ids": [
+          "fixture-beta-listing"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-GAMMA",
+      "symbol": "600300.SH",
+      "name": "丙公司",
+      "security_type": "COMMON_EQUITY",
+      "board": "STAR",
+      "effective_from": "2021-01-01",
+      "effective_to": null,
+      "provenance": {
+        "source_published_at": "2020-12-20",
+        "source_published_granularity": "DATE",
+        "observed_at": "2024-01-02T08:00:00+08:00",
+        "known_at": "2024-01-02T08:00:00+08:00",
+        "usable_from": "2024-01-02T09:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/identity/gamma",
+        "evidence_ids": [
+          "fixture-gamma-listing"
+        ]
+      }
+    }
+  ],
+  "statuses": [
+    {
+      "source_security_id": "SSECID-ALPHA",
+      "symbol": "600100.SH",
+      "session_date": "2024-01-02",
+      "scope": "DAILY",
+      "effective_start": "2024-01-02",
+      "effective_end": "2024-01-02",
+      "listing_state": "LISTED",
+      "trading_state": "TRADABLE",
+      "risk_designation": "ST",
+      "reason_code": "ST_ACTIVE",
+      "provenance": {
+        "source_published_at": "2024-01-01",
+        "source_published_granularity": "DATE",
+        "observed_at": "2024-01-02T08:30:00+08:00",
+        "known_at": "2024-01-02T08:30:00+08:00",
+        "usable_from": "2024-01-02T09:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/status/alpha/2024-01-02",
+        "evidence_ids": [
+          "fixture-alpha-st"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-ALPHA",
+      "symbol": "600100.SH",
+      "session_date": "2024-01-03",
+      "scope": "DAILY",
+      "effective_start": "2024-01-03",
+      "effective_end": "2024-01-03",
+      "listing_state": "LISTED",
+      "trading_state": "TRADABLE",
+      "risk_designation": "NORMAL",
+      "reason_code": "ST_REMOVED",
+      "provenance": {
+        "source_published_at": "2024-01-02T18:00:00+08:00",
+        "source_published_granularity": "SECOND",
+        "observed_at": "2024-01-02T18:05:00+08:00",
+        "known_at": "2024-01-02T18:05:00+08:00",
+        "usable_from": "2024-01-03T09:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/status/alpha/2024-01-03",
+        "evidence_ids": [
+          "fixture-alpha-normal"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-ALPHA",
+      "symbol": "600100.SH",
+      "session_date": "2024-01-04",
+      "scope": "DAILY",
+      "effective_start": "2024-01-04",
+      "effective_end": "2024-01-04",
+      "listing_state": "LISTED",
+      "trading_state": "SUSPENDED",
+      "risk_designation": "NORMAL",
+      "reason_code": "LONG_SUSPENSION",
+      "provenance": {
+        "source_published_at": "2024-01-03T18:00:00+08:00",
+        "source_published_granularity": "SECOND",
+        "observed_at": "2024-01-03T18:05:00+08:00",
+        "known_at": "2024-01-03T18:05:00+08:00",
+        "usable_from": "2024-01-04T09:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/status/alpha/2024-01-04",
+        "evidence_ids": [
+          "fixture-alpha-suspended"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-ALPHA",
+      "symbol": "600100.SH",
+      "session_date": "2024-01-05",
+      "scope": "DAILY",
+      "effective_start": "2024-01-05",
+      "effective_end": "2024-01-05",
+      "listing_state": "LISTED",
+      "trading_state": "RESUMED",
+      "risk_designation": "NORMAL",
+      "reason_code": "RESUMED",
+      "provenance": {
+        "source_published_at": "2024-01-04T18:00:00+08:00",
+        "source_published_granularity": "SECOND",
+        "observed_at": "2024-01-04T18:05:00+08:00",
+        "known_at": "2024-01-04T18:05:00+08:00",
+        "usable_from": "2024-01-05T09:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/status/alpha/2024-01-05",
+        "evidence_ids": [
+          "fixture-alpha-resumed"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-ALPHA",
+      "symbol": "600101.SH",
+      "session_date": "2024-01-08",
+      "scope": "DAILY",
+      "effective_start": "2024-01-08",
+      "effective_end": "2024-01-08",
+      "listing_state": "LISTED",
+      "trading_state": "TRADABLE",
+      "risk_designation": "NORMAL",
+      "reason_code": "SYMBOL_CHANGED",
+      "provenance": {
+        "source_published_at": "2024-01-05T18:00:00+08:00",
+        "source_published_granularity": "SECOND",
+        "observed_at": "2024-01-05T18:10:00+08:00",
+        "known_at": "2024-01-05T18:10:00+08:00",
+        "usable_from": "2024-01-08T09:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/status/alpha/2024-01-08",
+        "evidence_ids": [
+          "fixture-alpha-code-change"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-ALPHA",
+      "symbol": "600101.SH",
+      "session_date": "2024-01-08",
+      "scope": "INTRADAY",
+      "effective_start": "2024-01-08T10:00:00+08:00",
+      "effective_end": "2024-01-08T10:30:00+08:00",
+      "listing_state": "LISTED",
+      "trading_state": "HALTED",
+      "risk_designation": "NORMAL",
+      "reason_code": "TEMP_HALT",
+      "provenance": {
+        "source_published_at": "2024-01-08T09:59:30+08:00",
+        "source_published_granularity": "SECOND",
+        "observed_at": "2024-01-08T10:00:00+08:00",
+        "known_at": "2024-01-08T10:00:00+08:00",
+        "usable_from": "2024-01-08T10:00:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/status/alpha/halt",
+        "evidence_ids": [
+          "fixture-alpha-temp-halt"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-ALPHA",
+      "symbol": "600101.SH",
+      "session_date": "2024-01-08",
+      "scope": "INTRADAY",
+      "effective_start": "2024-01-08T10:30:00+08:00",
+      "effective_end": null,
+      "listing_state": "LISTED",
+      "trading_state": "RESUMED",
+      "risk_designation": "NORMAL",
+      "reason_code": "TEMP_RESUME",
+      "provenance": {
+        "source_published_at": "2024-01-08T10:29:30+08:00",
+        "source_published_granularity": "SECOND",
+        "observed_at": "2024-01-08T10:30:00+08:00",
+        "known_at": "2024-01-08T10:30:00+08:00",
+        "usable_from": "2024-01-08T10:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/status/alpha/resume",
+        "evidence_ids": [
+          "fixture-alpha-temp-resume"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-ALPHA",
+      "symbol": "600101.SH",
+      "session_date": "2024-01-12",
+      "scope": "DAILY",
+      "effective_start": "2024-01-12",
+      "effective_end": "2024-01-12",
+      "listing_state": "LISTED",
+      "trading_state": "TRADABLE",
+      "risk_designation": "NORMAL",
+      "reason_code": null,
+      "provenance": {
+        "source_published_at": "2024-01-12",
+        "source_published_granularity": "DATE",
+        "observed_at": "2024-01-12T15:30:00+08:00",
+        "known_at": "2024-01-12T15:30:00+08:00",
+        "usable_from": "2024-01-12T15:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/status/alpha/2024-01-12",
+        "evidence_ids": [
+          "fixture-alpha-daily-12"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-BETA",
+      "symbol": "600200.SH",
+      "session_date": "2024-01-10",
+      "scope": "DAILY",
+      "effective_start": "2024-01-10",
+      "effective_end": "2024-01-10",
+      "listing_state": "LISTED",
+      "trading_state": "TRADABLE",
+      "risk_designation": "STAR_ST",
+      "reason_code": "DELISTING_RISK_WARNING",
+      "provenance": {
+        "source_published_at": "2024-01-09T18:00:00+08:00",
+        "source_published_granularity": "SECOND",
+        "observed_at": "2024-01-09T18:05:00+08:00",
+        "known_at": "2024-01-09T18:05:00+08:00",
+        "usable_from": "2024-01-10T09:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/status/beta/2024-01-10",
+        "evidence_ids": [
+          "fixture-beta-star-st"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-BETA",
+      "symbol": "600200.SH",
+      "session_date": "2024-01-11",
+      "scope": "DAILY",
+      "effective_start": "2024-01-11",
+      "effective_end": "2024-01-11",
+      "listing_state": "DELISTING",
+      "trading_state": "TRADABLE",
+      "risk_designation": "RISK_WARNING",
+      "reason_code": "DELISTING_PERIOD",
+      "provenance": {
+        "source_published_at": "2024-01-10T18:00:00+08:00",
+        "source_published_granularity": "SECOND",
+        "observed_at": "2024-01-10T18:05:00+08:00",
+        "known_at": "2024-01-10T18:05:00+08:00",
+        "usable_from": "2024-01-11T09:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/status/beta/2024-01-11",
+        "evidence_ids": [
+          "fixture-beta-delisting-period"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-BETA",
+      "symbol": "600200.SH",
+      "session_date": "2024-01-12",
+      "scope": "DAILY",
+      "effective_start": "2024-01-12",
+      "effective_end": "2024-01-12",
+      "listing_state": "DELISTED",
+      "trading_state": "HALTED",
+      "risk_designation": "OTHER",
+      "reason_code": "FORMAL_DELISTING",
+      "provenance": {
+        "source_published_at": "2024-01-12T15:00:00+08:00",
+        "source_published_granularity": "SECOND",
+        "observed_at": "2024-01-12T15:05:00+08:00",
+        "known_at": "2024-01-12T15:05:00+08:00",
+        "usable_from": "2024-01-12T15:05:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/status/beta/2024-01-12",
+        "evidence_ids": [
+          "fixture-beta-formal-delisting"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-GAMMA",
+      "symbol": "600300.SH",
+      "session_date": "2024-01-02",
+      "scope": "DAILY",
+      "effective_start": "2024-01-02",
+      "effective_end": "2024-01-02",
+      "listing_state": "LISTED",
+      "trading_state": "TRADABLE",
+      "risk_designation": "NORMAL",
+      "reason_code": null,
+      "provenance": {
+        "source_published_at": "2024-01-02",
+        "source_published_granularity": "DATE",
+        "observed_at": "2024-01-02T15:30:00+08:00",
+        "known_at": "2024-01-02T15:30:00+08:00",
+        "usable_from": "2024-01-02T15:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/status/gamma/2024-01-02",
+        "evidence_ids": [
+          "fixture-gamma-normal"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-GAMMA",
+      "symbol": "600300.SH",
+      "session_date": "2024-01-03",
+      "scope": "DAILY",
+      "effective_start": "2024-01-03",
+      "effective_end": "2024-01-03",
+      "listing_state": "LISTED",
+      "trading_state": "TRADABLE",
+      "risk_designation": "ST",
+      "reason_code": "ST_APPLIED",
+      "provenance": {
+        "source_published_at": "2024-01-02T18:00:00+08:00",
+        "source_published_granularity": "SECOND",
+        "observed_at": "2024-01-02T18:05:00+08:00",
+        "known_at": "2024-01-02T18:05:00+08:00",
+        "usable_from": "2024-01-03T09:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/status/gamma/2024-01-03",
+        "evidence_ids": [
+          "fixture-gamma-st"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-GAMMA",
+      "symbol": "600300.SH",
+      "session_date": "2024-01-09",
+      "scope": "INTRADAY",
+      "effective_start": "2024-01-09T10:00:00+08:00",
+      "effective_end": "2024-01-09T10:01:00+08:00",
+      "listing_state": "UNKNOWN",
+      "trading_state": "UNKNOWN",
+      "risk_designation": "UNKNOWN",
+      "reason_code": "SOURCE_UNKNOWN",
+      "provenance": {
+        "source_published_at": null,
+        "source_published_granularity": "UNKNOWN",
+        "observed_at": "2024-01-09T10:00:00+08:00",
+        "known_at": "2024-01-09T10:00:00+08:00",
+        "usable_from": "2024-01-09T10:00:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/status/gamma/unknown",
+        "evidence_ids": [
+          "fixture-gamma-unknown"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-GAMMA",
+      "symbol": "600300.SH",
+      "session_date": "2024-01-12",
+      "scope": "DAILY",
+      "effective_start": "2024-01-12",
+      "effective_end": "2024-01-12",
+      "listing_state": "LISTED",
+      "trading_state": "TRADABLE",
+      "risk_designation": "ST",
+      "reason_code": "ST_ACTIVE",
+      "provenance": {
+        "source_published_at": "2024-01-12",
+        "source_published_granularity": "DATE",
+        "observed_at": "2024-01-12T15:30:00+08:00",
+        "known_at": "2024-01-12T15:30:00+08:00",
+        "usable_from": "2024-01-12T15:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/status/gamma/2024-01-12",
+        "evidence_ids": [
+          "fixture-gamma-daily-12"
+        ]
+      }
+    }
+  ],
+  "memberships": [
+    {
+      "source_security_id": "SSECID-ALPHA",
+      "symbol": "600100.SH",
+      "effective_date": "2020-01-01",
+      "state": "INCLUDED",
+      "reason": "LISTED",
+      "evidence_ids": [
+        "fixture-alpha-listing"
+      ],
+      "provenance": {
+        "source_published_at": "2019-12-20",
+        "source_published_granularity": "DATE",
+        "observed_at": "2024-01-02T08:00:00+08:00",
+        "known_at": "2024-01-02T08:00:00+08:00",
+        "usable_from": "2024-01-02T09:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/membership/alpha/listed",
+        "evidence_ids": [
+          "fixture-alpha-listing"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-ALPHA",
+      "symbol": "600101.SH",
+      "effective_date": "2024-01-08",
+      "state": "INCLUDED",
+      "reason": "TYPE_CHANGE",
+      "evidence_ids": [
+        "fixture-alpha-code-change"
+      ],
+      "provenance": {
+        "source_published_at": "2024-01-05T18:00:00+08:00",
+        "source_published_granularity": "SECOND",
+        "observed_at": "2024-01-05T18:10:00+08:00",
+        "known_at": "2024-01-05T18:10:00+08:00",
+        "usable_from": "2024-01-08T09:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/membership/alpha/code-change",
+        "evidence_ids": [
+          "fixture-alpha-code-change"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-ALPHA",
+      "symbol": "600101.SH",
+      "effective_date": "2024-01-08",
+      "state": "EXCLUDED",
+      "reason": "OUT_OF_SCOPE",
+      "evidence_ids": [
+        "fixture-alpha-future-correction"
+      ],
+      "provenance": {
+        "source_published_at": "2024-01-14T18:00:00+08:00",
+        "source_published_granularity": "SECOND",
+        "observed_at": "2024-01-14T18:05:00+08:00",
+        "known_at": "2024-01-14T18:05:00+08:00",
+        "usable_from": "2024-01-15T09:30:00+08:00",
+        "revision": 2,
+        "supersedes": 1,
+        "source_uri": "fixture://sse/membership/alpha/future-correction",
+        "evidence_ids": [
+          "fixture-alpha-future-correction"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-BETA",
+      "symbol": "600200.SH",
+      "effective_date": "2018-01-01",
+      "state": "INCLUDED",
+      "reason": "LISTED",
+      "evidence_ids": [
+        "fixture-beta-listing"
+      ],
+      "provenance": {
+        "source_published_at": "2017-12-20",
+        "source_published_granularity": "DATE",
+        "observed_at": "2024-01-02T08:00:00+08:00",
+        "known_at": "2024-01-02T08:00:00+08:00",
+        "usable_from": "2024-01-02T09:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/membership/beta/listed",
+        "evidence_ids": [
+          "fixture-beta-listing"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-BETA",
+      "symbol": "600200.SH",
+      "effective_date": "2023-12-20",
+      "state": "EXCLUDED",
+      "reason": "OUT_OF_SCOPE",
+      "evidence_ids": [
+        "fixture-beta-scope-exit"
+      ],
+      "provenance": {
+        "source_published_at": "2023-12-19T18:00:00+08:00",
+        "source_published_granularity": "SECOND",
+        "observed_at": "2024-01-02T08:00:00+08:00",
+        "known_at": "2024-01-02T08:00:00+08:00",
+        "usable_from": "2024-01-02T09:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/membership/beta/scope-exit",
+        "evidence_ids": [
+          "fixture-beta-scope-exit"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-BETA",
+      "symbol": "600200.SH",
+      "effective_date": "2024-01-02",
+      "state": "INCLUDED",
+      "reason": "RELISTED",
+      "evidence_ids": [
+        "fixture-beta-relisting"
+      ],
+      "provenance": {
+        "source_published_at": "2023-12-29T18:00:00+08:00",
+        "source_published_granularity": "SECOND",
+        "observed_at": "2024-01-02T08:00:00+08:00",
+        "known_at": "2024-01-02T08:00:00+08:00",
+        "usable_from": "2024-01-02T09:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/membership/beta/relisted",
+        "evidence_ids": [
+          "fixture-beta-relisting"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-BETA",
+      "symbol": "600200.SH",
+      "effective_date": "2024-01-12",
+      "state": "EXCLUDED",
+      "reason": "DELISTED",
+      "evidence_ids": [
+        "fixture-beta-formal-delisting"
+      ],
+      "provenance": {
+        "source_published_at": "2024-01-12T15:00:00+08:00",
+        "source_published_granularity": "SECOND",
+        "observed_at": "2024-01-12T15:05:00+08:00",
+        "known_at": "2024-01-12T15:05:00+08:00",
+        "usable_from": "2024-01-12T15:05:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/membership/beta/delisted",
+        "evidence_ids": [
+          "fixture-beta-formal-delisting"
+        ]
+      }
+    },
+    {
+      "source_security_id": "SSECID-GAMMA",
+      "symbol": "600300.SH",
+      "effective_date": "2021-01-01",
+      "state": "INCLUDED",
+      "reason": "LISTED",
+      "evidence_ids": [
+        "fixture-gamma-listing"
+      ],
+      "provenance": {
+        "source_published_at": "2020-12-20",
+        "source_published_granularity": "DATE",
+        "observed_at": "2024-01-02T08:00:00+08:00",
+        "known_at": "2024-01-02T08:00:00+08:00",
+        "usable_from": "2024-01-02T09:30:00+08:00",
+        "revision": 1,
+        "supersedes": null,
+        "source_uri": "fixture://sse/membership/gamma/listed",
+        "evidence_ids": [
+          "fixture-gamma-listing"
+        ]
+      }
+    }
+  ],
+  "coverage_evidence": {
+    "delisting_closures": [
+      {
+        "source_security_id": "SSECID-BETA",
+        "listing_announcement_ids": [
+          "fixture-beta-listing"
+        ],
+        "delisting_announcement_ids": [
+          "fixture-beta-formal-delisting"
+        ],
+        "exchange_delisted_list_ids": [
+          "fixture-sse-delisted-list"
+        ],
+        "chinaclear_termination_ids": [
+          "fixture-chinaclear-beta"
+        ]
+      }
+    ],
+    "quantity_continuity": [
+      {
+        "period": "fixture-2024-01",
+        "begin_count": 3,
+        "listings": 0,
+        "relistings": 1,
+        "delistings": 1,
+        "scope_changes": 0,
+        "end_count": 3
+      }
+    ],
+    "unparsed_attachments": [],
+    "cross_source_conflicts": []
+  }
+}

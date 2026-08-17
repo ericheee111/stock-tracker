@@ -1,0 +1,37 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_id": "cal-annual-notice-001",
+  "category": "calendar",
+  "boundary": "annual_notice",
+  "description": "Synthetic SSE-style annual trading-calendar arrangement covering a 3-day window. Exercises notice_type=ANNUAL producing a CalendarCoverage + per-day CalendarDay facts, including one CLOSED holiday.",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "source_owner": "SYNTHETIC_STAGE2_AUX",
+  "notice_type": "ANNUAL",
+  "raw_artifacts": [
+    {
+      "artifact_id": "raw:cal:annual:607001:1",
+      "media_type": "text/html",
+      "source_uri": "synthetic://sse/disclosure/dealinstruc/closed/list/annual-2025",
+      "retrieved_at_utc": "2024-12-23T09:00:00Z",
+      "source_published_at": "2024-12-23",
+      "source_published_granularity": "DATE",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "byte_length": 0,
+      "raw_text": "[SYNTHETIC] SSE annual trading arrangement (illustrative): 2025-01-01 CLOSED (New Year); 2025-01-02 OPEN; 2025-01-03 OPEN."
+    }
+  ],
+  "expected_facts": [
+    {"fact_type": "CalendarCoverage", "market": "A", "start_date": "2025-01-01", "end_date": "2025-01-03", "source": "SYNTHETIC_STAGE2_AUX", "calendar_version": "syn-annual-v1", "verified": false, "complete": false},
+    {"fact_type": "CalendarDay", "session_date": "2025-01-01", "status": "CLOSED", "session_kind": "REGULAR"},
+    {"fact_type": "CalendarDay", "session_date": "2025-01-02", "status": "OPEN", "open_time": "2025-01-02T09:30:00+08:00", "close_time": "2025-01-02T15:00:00+08:00"},
+    {"fact_type": "CalendarDay", "session_date": "2025-01-03", "status": "OPEN", "open_time": "2025-01-03T09:30:00+08:00", "close_time": "2025-01-03T15:00:00+08:00"}
+  ],
+  "expected_contract_outcome": "Parser emits one ANNUAL coverage plus 3 day facts; coverage.complete=false because a single annual notice cannot prove temporary/technical revisions are absent.",
+  "warnings": [
+    "SYNTHETIC_FIXTURE_ONLY: not real SSE data; sha256 is a placeholder.",
+    "Annual notice alone must not set complete=true (per Agent A audit 5.1)."
+  ]
+}

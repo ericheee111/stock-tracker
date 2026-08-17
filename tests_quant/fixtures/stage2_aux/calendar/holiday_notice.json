@@ -1,0 +1,34 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_id": "cal-holiday-notice-001",
+  "category": "calendar",
+  "boundary": "holiday_notice",
+  "description": "Synthetic separate holiday notice (notice_type=HOLIDAY) that augments the annual plan by closing an extra day. Exercises a later, independent notice overriding/augmenting a previously OPEN day.",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "source_owner": "SYNTHETIC_STAGE2_AUX",
+  "notice_type": "HOLIDAY",
+  "raw_artifacts": [
+    {
+      "artifact_id": "raw:cal:holiday:607001:1",
+      "media_type": "text/html",
+      "source_uri": "synthetic://sse/disclosure/announcement/general/c/syn-holiday-2025",
+      "retrieved_at_utc": "2025-01-05T09:00:00Z",
+      "source_published_at": "2025-01-05",
+      "source_published_granularity": "DATE",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "byte_length": 0,
+      "raw_text": "[SYNTHETIC] SSE holiday notice (illustrative): additional closed session 2025-02-10 for synthetic festival."
+    }
+  ],
+  "expected_facts": [
+    {"fact_type": "CalendarDay", "session_date": "2025-02-10", "status": "CLOSED", "session_kind": "SPECIAL", "revision": 2, "supersedes_revision_id": "rev:annual:2025-02-10:1"}
+  ],
+  "expected_contract_outcome": "Holiday notice produces a CLOSED day with a newer revision; it must not overwrite the annual raw artifact. Selection picks the visible latest revision at as_of.",
+  "warnings": [
+    "SYNTHETIC_FIXTURE_ONLY: not real SSE data; sha256 is a placeholder.",
+    "Holiday/temporary notices must be linked by explicit supersedes, not by mutating the annual raw bytes."
+  ]
+}

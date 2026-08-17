@@ -1,0 +1,27 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_id": "cal-missing-date-001",
+  "category": "calendar",
+  "boundary": "missing_date",
+  "description": "Synthetic coverage claims range 2025-05-01..2025-05-05 but the captured days omit 2025-05-03. Exercises the fail-closed incomplete-coverage rule.",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "source_owner": "SYNTHETIC_STAGE2_AUX",
+  "notice_type": "ANNUAL",
+  "raw_artifacts": [
+    {"artifact_id": "raw:cal:missing:607001:cov", "media_type": "text/html", "source_uri": "synthetic://sse/cal/missing-coverage", "retrieved_at_utc": "2025-05-01T09:00:00Z", "source_published_at": "2025-05-01", "source_published_granularity": "DATE", "sha256": "4444444444444444444444444444444444444444444444444444444444444444", "byte_length": 0, "raw_text": "[SYNTHETIC] Coverage claim 2025-05-01..2025-05-05 (one day missing in capture)."}
+  ],
+  "expected_facts": [
+    {"fact_type": "CalendarDay", "session_date": "2025-05-01", "status": "OPEN"},
+    {"fact_type": "CalendarDay", "session_date": "2025-05-02", "status": "OPEN"},
+    {"fact_type": "CalendarDay", "session_date": "2025-05-04", "status": "OPEN"},
+    {"fact_type": "CalendarDay", "session_date": "2025-05-05", "status": "OPEN"}
+  ],
+  "expected_contract_outcome": "Snapshot/contract must raise incomplete-coverage failure (every civil date in coverage must have a day). Missing 2025-05-03 is not silently skipped.",
+  "warnings": [
+    "SYNTHETIC_FIXTURE_ONLY: not real data; sha256 is a placeholder.",
+    "A coverage interval with a missing day must fail closed, never fill the gap."
+  ]
+}

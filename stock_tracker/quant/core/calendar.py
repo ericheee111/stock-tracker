@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Hashable, Iterable
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from enum import StrEnum
@@ -29,6 +29,25 @@ def _require_bool(value: object, name: str) -> bool:
     if type(value) is not bool:
         raise CalendarContractError(f"{name} must be a boolean")
     return value
+
+
+def _normalize_visibility(record: object) -> None:
+    known_at = getattr(record, "known_at")
+    usable_from = getattr(record, "usable_from")
+    effective_usable_from = known_at if usable_from is None else usable_from
+    known = to_utc(known_at, "known_at")
+    usable = to_utc(effective_usable_from, "usable_from")
+    if usable < known:
+        raise CalendarContractError("usable_from cannot precede known_at")
+    object.__setattr__(record, "usable_from", effective_usable_from)
+
+
+def _visible_at(record: object, cutoff: datetime) -> bool:
+    usable_from = getattr(record, "usable_from") or getattr(record, "known_at")
+    return (
+        to_utc(getattr(record, "known_at")) <= cutoff
+        and to_utc(usable_from) <= cutoff
+    )
 
 
 class CalendarStatus(StrEnum):
@@ -71,6 +90,8 @@ class CalendarDay:
     calendar_version: str
     verified: bool
     source_note: str
+    supersedes_revision: Revision | None = None
+    usable_from: datetime | None = None
 
     def __post_init__(self) -> None:
         _require_bool(self.verified, "verified")
@@ -78,8 +99,12 @@ class CalendarDay:
             raise CalendarContractError("calendar source and version must be non-empty")
         if self.verified and not self.source_note:
             raise CalendarContractError("verified calendar days require a source note")
-        to_utc(self.known_at, "known_at")
+        _normalize_visibility(self)
         revision_key(self.revision)
+        if self.supersedes_revision is not None:
+            revision_key(self.supersedes_revision)
+            if self.supersedes_revision == self.revision:
+                raise CalendarContractError("calendar revision cannot supersede itself")
         if self.status is CalendarStatus.OPEN:
             if self.open_time is None or self.close_time is None:
                 raise CalendarContractError("OPEN day requires open_time and close_time")
@@ -115,6 +140,7 @@ class CalendarCoverage:
     revision: Revision
     verified: bool
     source_note: str
+    usable_from: datetime | None = None
 
     def __post_init__(self) -> None:
         _require_bool(self.verified, "verified")
@@ -123,7 +149,7 @@ class CalendarCoverage:
             raise CalendarContractError("coverage source and version must be non-empty")
         if self.verified and not self.source_note:
             raise CalendarContractError("verified coverage requires a source note")
-        to_utc(self.known_at, "known_at")
+        _normalize_visibility(self)
         revision_key(self.revision)
 
     @property
@@ -144,6 +170,7 @@ class InstrumentSessionStatus:
     share_factor: float
     verified: bool
     source_note: str
+    usable_from: datetime | None = None
 
     def __post_init__(self) -> None:
         _require_bool(self.verified, "verified")
@@ -157,7 +184,7 @@ class InstrumentSessionStatus:
             raise CalendarContractError("share_factor must be explicitly positive")
         if self.verified and not self.source_note:
             raise CalendarContractError("verified instrument status requires source note")
-        to_utc(self.known_at, "known_at")
+        _normalize_visibility(self)
         revision_key(self.revision)
 
     @property
@@ -171,12 +198,114 @@ TRevisionFact = TypeVar(
     CalendarCoverage,
     InstrumentSessionStatus,
 )
+TGraphRevision = TypeVar("TGraphRevision")
+
+
+def select_superseding_revision(
+    records: Iterable[TGraphRevision],
+    *,
+    revision_of: Callable[[TGraphRevision], Hashable],
+    predecessor_of: Callable[[TGraphRevision], Hashable | None],
+    payload_of: Callable[[TGraphRevision], object],
+    identity_of: Callable[[TGraphRevision], str],
+    known_at_of: Callable[[TGraphRevision], datetime],
+) -> TGraphRevision:
+    """Select a terminal revision using only an explicit supersedes graph.
+
+    Every visible node is validated before selection. Cycles and missing
+    predecessors therefore fail closed even when their payload is identical to
+    the selected terminal. Revision string/numeric ordering is never used as a
+    substitute for ancestry.
+    """
+
+    candidates = tuple(records)
+    if not candidates:
+        raise LookupError("no visible revision")
+    grouped: dict[Hashable, list[TGraphRevision]] = defaultdict(list)
+    for record in candidates:
+        grouped[revision_of(record)].append(record)
+
+    representatives: dict[Hashable, TGraphRevision] = {}
+    for revision, values in grouped.items():
+        semantics = {
+            (
+                predecessor_of(value),
+                fingerprint(payload_of(value)),
+                to_utc(known_at_of(value)),
+            )
+            for value in values
+        }
+        if len(semantics) != 1:
+            raise PITConflictError(
+                f"revision {revision!r} maps to conflicting calendar semantics"
+            )
+        representatives[revision] = min(values, key=identity_of)
+
+    for revision, record in representatives.items():
+        predecessor = predecessor_of(record)
+        if predecessor is not None and predecessor not in representatives:
+            raise PITConflictError(
+                f"calendar revision {revision!r} references missing predecessor {predecessor!r}"
+            )
+
+    visiting: set[Hashable] = set()
+    visited: set[Hashable] = set()
+
+    def visit(revision: Hashable) -> None:
+        if revision in visiting:
+            raise PITConflictError("calendar revision graph contains a cycle")
+        if revision in visited:
+            return
+        visiting.add(revision)
+        predecessor = predecessor_of(representatives[revision])
+        if predecessor is not None:
+            visit(predecessor)
+        visiting.remove(revision)
+        visited.add(revision)
+
+    for revision in representatives:
+        visit(revision)
+
+    superseded = {
+        predecessor_of(record)
+        for record in representatives.values()
+        if predecessor_of(record) is not None
+    }
+    terminals = [
+        record
+        for revision, record in representatives.items()
+        if revision not in superseded
+    ]
+    if not terminals:
+        raise PITConflictError("calendar revision graph has no terminal revision")
+    if len(terminals) != 1:
+        raise PITConflictError(
+            "calendar revision graph has multiple terminal revisions without one explicit ancestry"
+        )
+    return terminals[0]
 
 
 def _select_revision(records: Iterable[TRevisionFact]) -> TRevisionFact:
     candidates = tuple(records)
     if not candidates:
         raise LookupError("no visible revision")
+    if all(isinstance(record, CalendarDay) for record in candidates) and any(
+        isinstance(record, CalendarDay) and record.supersedes_revision is not None
+        for record in candidates
+    ):
+        return select_superseding_revision(
+            candidates,
+            revision_of=lambda record: record.revision,
+            predecessor_of=lambda record: record.supersedes_revision,
+            payload_of=lambda record: {
+                "status": record.status,
+                "open_time": record.open_time,
+                "close_time": record.close_time,
+                "session_kind": record.session_kind,
+            },
+            identity_of=lambda record: record.fact_id,
+            known_at_of=lambda record: record.known_at,
+        )
     newest_known_at = max(to_utc(record.known_at) for record in candidates)
     newest = [
         record for record in candidates if to_utc(record.known_at) == newest_known_at
@@ -198,22 +327,49 @@ class CalendarSnapshot:
     coverage: CalendarCoverage
     days: tuple[CalendarDay, ...]
     snapshot_id: str
+    require_verified: bool = True
 
     def __post_init__(self) -> None:
         cutoff = to_utc(self.as_of, "as_of")
+        _require_bool(self.require_verified, "require_verified")
+        if self.require_verified and not self.coverage.verified:
+            raise CalendarContractError(
+                "verified snapshot requires verified calendar coverage"
+            )
+        if not _visible_at(self.coverage, cutoff):
+            raise CalendarContractError("future or unusable calendar coverage entered snapshot")
         expected = _dates(self.coverage.start_date, self.coverage.end_date)
         actual = tuple(day.session_date for day in self.days)
         if actual != expected:
             raise CalendarContractError("calendar coverage must include every civil date")
         for day in self.days:
+            if self.require_verified and not day.verified:
+                raise CalendarContractError(
+                    "unverified day entered verified calendar snapshot"
+                )
             if day.market is not self.market:
                 raise CalendarContractError("calendar day market mismatch")
             if day.source != self.coverage.source:
                 raise CalendarContractError("calendar day source differs from coverage")
             if day.calendar_version != self.coverage.calendar_version:
                 raise CalendarContractError("calendar day version differs from coverage")
-            if to_utc(day.known_at) > cutoff:
-                raise CalendarContractError("future calendar revision entered snapshot")
+            if not _visible_at(day, cutoff):
+                raise CalendarContractError(
+                    "future or unusable calendar revision entered snapshot"
+                )
+        expected_snapshot_id = fingerprint(
+            {
+                "schema": "calendar-snapshot-v1",
+                "as_of": cutoff,
+                "coverage": self.coverage.fact_id,
+                "days": [day.fact_id for day in self.days],
+                "require_verified": self.require_verified,
+            }
+        )
+        if self.snapshot_id != expected_snapshot_id:
+            raise CalendarContractError(
+                "calendar snapshot_id does not match snapshot content"
+            )
 
     @property
     def open_days(self) -> tuple[CalendarDay, ...]:
@@ -332,7 +488,7 @@ class TradingCalendar:
             if coverage.market is market
             and coverage.start_date <= start
             and coverage.end_date >= end
-            and to_utc(coverage.known_at) <= cutoff
+            and _visible_at(coverage, cutoff)
             and (coverage.verified or not require_verified)
         ]
         if not matching:
@@ -354,7 +510,7 @@ class TradingCalendar:
                 continue
             if day.source != effective.source or day.calendar_version != effective.calendar_version:
                 continue
-            if to_utc(day.known_at) > cutoff:
+            if not _visible_at(day, cutoff):
                 continue
             if require_verified and not day.verified:
                 continue
@@ -381,6 +537,7 @@ class TradingCalendar:
             coverage=effective,
             days=tuple(selected_days),
             snapshot_id=snapshot_id,
+            require_verified=require_verified,
         )
 
     def _status_map(
@@ -399,7 +556,7 @@ class TradingCalendar:
         for status in (*self._statuses, *tuple(extra_statuses)):
             if status.symbol != symbol or status.market is not market:
                 continue
-            if status.session_date not in wanted or to_utc(status.known_at) > cutoff:
+            if status.session_date not in wanted or not _visible_at(status, cutoff):
                 continue
             if require_verified and not status.verified:
                 continue

@@ -1,0 +1,24 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_id": "uni-included-001",
+  "category": "universe",
+  "boundary": "included",
+  "description": "Synthetic INCLUDED membership (normal inclusion). The basic positive case for UniverseMembershipState.INCLUDED.",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "source_owner": "SYNTHETIC_STAGE2_AUX",
+  "raw_artifacts": [
+    {"artifact_id": "raw:uni:incl:607001:1", "media_type": "application/json", "source_uri": "synthetic://sse/universe/included-607001", "retrieved_at_utc": "2025-01-01T09:00:00Z", "source_published_at": "2025-01-01", "source_published_granularity": "DATE", "sha256": "c111111111111111111111111111111111111111111111111111111111111111", "byte_length": 0, "raw_text": "[SYNTHETIC] 607001.SH INCLUDED in A_SHARE_SSE_ALL."}
+  ],
+  "expected_facts": [
+    {"fact_type": "UniverseMembershipFact", "universe_id": "A_SHARE_SSE_ALL", "instrument_id": "EXC:fixture:607001", "symbol": "607001.SH", "market": "A", "state": "INCLUDED", "effective_date": "2000-01-01", "reason": "LISTED"},
+    {"fact_type": "InstrumentIdentityFact", "instrument_id": "EXC:fixture:607001", "symbol": "607001.SH", "market": "A", "exchange": "SSE", "security_type": "COMMON_EQUITY", "effective_from": "2000-01-01", "effective_to": null},
+    {"fact_type": "SecurityStatusFact", "instrument_id": "EXC:fixture:607001", "symbol": "607001.SH", "market": "A", "session_date": "2025-01-02", "listing_state": "LISTED", "trading_state": "TRADABLE", "risk_designation": "NORMAL"}
+  ],
+  "expected_contract_outcome": "INCLUDED member appears in snapshot.member_symbols and (if TRADABLE) in snapshot.tradable_symbols. Requires a visible identity and status for the target session.",
+  "warnings": [
+    "SYNTHETIC_FIXTURE_ONLY: not real data; sha256 is a placeholder."
+  ]
+}

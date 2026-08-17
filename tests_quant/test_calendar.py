@@ -82,6 +82,35 @@ class TestCalendarDayContract(unittest.TestCase):
             ):
                 replace(record, verified=cast(bool, invalid))
 
+    def test_usable_from_defaults_to_known_at(self) -> None:
+        day = calendar_day(date(2025, 1, 2), status=CalendarStatus.OPEN)
+        coverage = calendar_coverage(date(2025, 1, 2), date(2025, 1, 2))
+        status = InstrumentSessionStatus(
+            symbol="600000.SH",
+            market=Market.A,
+            session_date=date(2025, 1, 2),
+            status=InstrumentSessionState.SUSPENDED,
+            known_at=utc_datetime(2025, 1, 2),
+            source="fixture-status",
+            revision=1,
+            reference_price=10.0,
+            share_factor=1.0,
+            verified=True,
+            source_note="synthetic fixture only",
+        )
+        self.assertEqual(day.usable_from, day.known_at)
+        self.assertEqual(coverage.usable_from, coverage.known_at)
+        self.assertEqual(status.usable_from, status.known_at)
+
+    def test_usable_from_cannot_precede_known_at(self) -> None:
+        original = calendar_day(date(2025, 1, 2), status=CalendarStatus.OPEN)
+        with self.assertRaisesRegex(CalendarContractError, "usable_from"):
+            replace(
+                original,
+                known_at=utc_datetime(2025, 1, 2),
+                usable_from=utc_datetime(2025, 1, 1),
+            )
+
 
 class TestTradingCalendar(unittest.TestCase):
     def setUp(self) -> None:
@@ -126,10 +155,32 @@ class TestTradingCalendar(unittest.TestCase):
             open_time=None,
             close_time=None,
             known_at=utc_datetime(2025, 1, 10),
+            usable_from=utc_datetime(2025, 1, 10),
             revision=2,
         )
         calendar = TradingCalendar((self.coverage,), (*self.days, revised))
         snapshot = calendar.snapshot(
+            Market.A,
+            self.start,
+            self.end,
+            utc_datetime(2025, 1, 7),
+        )
+        self.assertEqual(snapshot.days[0].status, CalendarStatus.OPEN)
+
+    def test_known_but_not_yet_usable_revision_is_not_visible(self) -> None:
+        delayed = replace(
+            self.days[0],
+            status=CalendarStatus.CLOSED,
+            open_time=None,
+            close_time=None,
+            known_at=utc_datetime(2025, 1, 2),
+            usable_from=utc_datetime(2025, 1, 10),
+            revision=2,
+        )
+        snapshot = TradingCalendar(
+            (self.coverage,),
+            (*self.days, delayed),
+        ).snapshot(
             Market.A,
             self.start,
             self.end,
@@ -171,6 +222,16 @@ class TestTradingCalendar(unittest.TestCase):
                 self.end,
                 utc_datetime(2025, 1, 7),
             )
+
+    def test_calendar_snapshot_id_cannot_be_relabelled(self) -> None:
+        snapshot = TradingCalendar((self.coverage,), self.days).snapshot(
+            Market.A,
+            self.start,
+            self.end,
+            utc_datetime(2025, 1, 7),
+        )
+        with self.assertRaisesRegex(CalendarContractError, "snapshot_id"):
+            replace(snapshot, snapshot_id="a" * 64)
 
     def test_advance_and_distance_count_open_sessions(self) -> None:
         snapshot = TradingCalendar((self.coverage,), self.days).snapshot(

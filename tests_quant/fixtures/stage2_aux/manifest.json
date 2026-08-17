@@ -1,0 +1,43 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_suite": "stage2_aux",
+  "generated_for": "Agent B/C mechanical parser/CLI boundary testing only",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "generated_at": "2026-08-14",
+  "based_on": [
+    "docs/STAGE2-PIT-IDENTITY-CONTRACT.md",
+    "docs/STAGE2-PARALLEL-EXECUTION-PLAN.md",
+    "docs/research/STAGE2-A-SHARE-AUTHORITATIVE-SOURCE-AUDIT.md"
+  ],
+  "coverage_matrix": [
+    {"category": "calendar", "boundary": "annual_notice",       "fixture": "calendar/annual_notice.json",        "covered_by_existing_contract_test": false},
+    {"category": "calendar", "boundary": "holiday_notice",      "fixture": "calendar/holiday_notice.json",       "covered_by_existing_contract_test": false},
+    {"category": "calendar", "boundary": "temporary_revision",  "fixture": "calendar/temporary_revision.json",   "covered_by_existing_contract_test": false},
+    {"category": "calendar", "boundary": "date_only_publication", "fixture": "calendar/date_only_publication.json", "covered_by_existing_contract_test": false},
+    {"category": "calendar", "boundary": "missing_date",        "fixture": "calendar/missing_date.json",         "covered_by_existing_contract_test": true},
+    {"category": "calendar", "boundary": "duplicate_date",      "fixture": "calendar/duplicate_date.json",        "covered_by_existing_contract_test": false},
+    {"category": "calendar", "boundary": "changed_raw_bytes",   "fixture": "calendar/changed_raw_bytes.json",     "covered_by_existing_contract_test": false},
+    {"category": "identity", "boundary": "symbol_rename",       "fixture": "identity/symbol_rename.json",         "covered_by_existing_contract_test": true},
+    {"category": "identity", "boundary": "same_symbol_reused",  "fixture": "identity/same_symbol_reused.json",    "covered_by_existing_contract_test": false},
+    {"category": "identity", "boundary": "listing",             "fixture": "identity/listing.json",               "covered_by_existing_contract_test": false},
+    {"category": "identity", "boundary": "delisting",           "fixture": "identity/delisting.json",             "covered_by_existing_contract_test": false},
+    {"category": "identity", "boundary": "relisting",           "fixture": "identity/relisting.json",             "covered_by_existing_contract_test": false},
+    {"category": "status",   "boundary": "st",                  "fixture": "status/st.json",                      "covered_by_existing_contract_test": false},
+    {"category": "status",   "boundary": "star_st",             "fixture": "status/star_st.json",                "covered_by_existing_contract_test": false},
+    {"category": "status",   "boundary": "suspension",          "fixture": "status/suspension.json",             "covered_by_existing_contract_test": true},
+    {"category": "status",   "boundary": "resume",              "fixture": "status/resume.json",                 "covered_by_existing_contract_test": false},
+    {"category": "status",   "boundary": "delisting_period",    "fixture": "status/delisting_period.json",        "covered_by_existing_contract_test": false},
+    {"category": "universe", "boundary": "included",            "fixture": "universe/included.json",              "covered_by_existing_contract_test": true},
+    {"category": "universe", "boundary": "excluded",            "fixture": "universe/excluded.json",             "covered_by_existing_contract_test": true},
+    {"category": "universe", "boundary": "missing_exit_history", "fixture": "universe/missing_exit_history.json", "covered_by_existing_contract_test": false},
+    {"category": "universe", "boundary": "delisted_retained",   "fixture": "universe/delisted_retained.json",     "covered_by_existing_contract_test": true}
+  ],
+  "contract_notes": [
+    "TradingState enum has no explicit RESUMED; resume is represented as trading_state=TRADABLE with reason_code=RESUME.",
+    "RiskDesignation enum has no explicit DELISTING_PERIOD; delisting period is mapped to listing_state=DELISTING + risk_designation=OTHER (or RISK_WARNING).",
+    "Membership reason is a free-text string in the contract; audit suggested values LISTED/RELISTED/DELISTED/TYPE_CHANGE/OUT_OF_SCOPE/UNKNOWN are used as hints only."
+  ]
+}

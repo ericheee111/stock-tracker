@@ -23,9 +23,9 @@ from stock_tracker.quant.storage import (
 
 
 class TestMigrationDiscovery(unittest.TestCase):
-    def test_two_ordered_checksum_verified_migrations_exist(self) -> None:
+    def test_three_ordered_checksum_verified_migrations_exist(self) -> None:
         migrations = load_migrations()
-        self.assertEqual(tuple(item.version for item in migrations), (1, 2))
+        self.assertEqual(tuple(item.version for item in migrations), (1, 2, 3))
         self.assertTrue(all(len(item.checksum) == 64 for item in migrations))
         self.assertTrue(all(iter_sql_statements(item.sql) for item in migrations))
 
@@ -34,7 +34,7 @@ class TestMigrationDiscovery(unittest.TestCase):
             path = Path(directory) / "missing.db"
             plan = plan_database(path)
             self.assertFalse(path.exists())
-            self.assertEqual(len(plan.pending), 2)
+            self.assertEqual(len(plan.pending), 3)
 
     def test_existing_database_dry_plan_is_read_only(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -45,7 +45,7 @@ class TestMigrationDiscovery(unittest.TestCase):
             plan = plan_database(path)
             after_stat = path.stat()
             after_entries = tuple(sorted(item.name for item in path.parent.iterdir()))
-            self.assertEqual(len(plan.pending), 2)
+            self.assertEqual(len(plan.pending), 3)
             self.assertEqual(before_stat.st_size, after_stat.st_size)
             self.assertEqual(before_stat.st_mtime_ns, after_stat.st_mtime_ns)
             self.assertEqual(before_entries, after_entries)
@@ -86,12 +86,12 @@ class TestMigrationApply(unittest.TestCase):
             second = apply_database(path)
             self.assertEqual(len(first.pending), 0)
             self.assertEqual(len(second.pending), 0)
-            self.assertEqual(len(second.applied), 2)
+            self.assertEqual(len(second.applied), 3)
 
     def test_expected_tables_and_foreign_keys_exist(self) -> None:
         with sqlite3.connect(":memory:") as connection:
             plan = apply_connection(connection)
-            self.assertEqual(len(plan.applied), 2)
+            self.assertEqual(len(plan.applied), 3)
             table_names = {
                 row[0]
                 for row in connection.execute(
@@ -111,8 +111,22 @@ class TestMigrationApply(unittest.TestCase):
                 "quant_calendar_coverage",
                 "quant_calendar_day",
                 "quant_instrument_session_status",
+                "quant_universe_coverage",
+                "quant_instrument_identity",
+                "quant_security_status",
+                "quant_universe_membership",
             }
             self.assertTrue(expected.issubset(table_names))
+            for table in (
+                "quant_calendar_coverage",
+                "quant_calendar_day",
+                "quant_instrument_session_status",
+            ):
+                columns = {
+                    row[1]
+                    for row in connection.execute(f"PRAGMA table_info({table})")
+                }
+                self.assertIn("usable_from", columns)
             with self.assertRaises(sqlite3.IntegrityError):
                 connection.execute(
                     """
@@ -162,6 +176,227 @@ class TestMigrationApply(unittest.TestCase):
                     ("a" * 64,),
                 )
 
+    def test_stage2_universe_tables_are_append_only_and_status_safe(self) -> None:
+        with sqlite3.connect(":memory:") as connection:
+            apply_connection(connection)
+            connection.execute(
+                """
+                INSERT INTO quant_universe_coverage(
+                    coverage_id, universe_id, market, start_date, end_date,
+                    source, universe_version, known_at, usable_from,
+                    revision_kind, revision_value, verified, complete,
+                    source_note, payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "c" * 64,
+                    "A_ALL_COMMON_EQUITY",
+                    "A",
+                    "2025-01-01",
+                    "2025-12-31",
+                    "fixture",
+                    "fixture-v1",
+                    "2025-01-01T00:00:00+00:00",
+                    "2025-01-01T00:00:00+00:00",
+                    "INTEGER",
+                    "1",
+                    1,
+                    1,
+                    "synthetic fixture only",
+                    "{}",
+                ),
+            )
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "append-only"):
+                connection.execute(
+                    "UPDATE quant_universe_coverage SET complete = 0 WHERE coverage_id = ?",
+                    ("c" * 64,),
+                )
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "append-only"):
+                connection.execute(
+                    "DELETE FROM quant_universe_coverage WHERE coverage_id = ?",
+                    ("c" * 64,),
+                )
+            calendar_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(quant_calendar_day)")
+            }
+            self.assertIn("supersedes_revision_kind", calendar_columns)
+            self.assertIn("supersedes_revision_value", calendar_columns)
+            connection.execute(
+                """
+                INSERT INTO quant_calendar_coverage(
+                    coverage_id, market, start_date, end_date, source,
+                    calendar_version, known_at, revision_kind, revision_value,
+                    verified, source_note, payload_json, usable_from
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "e" * 64,
+                    "A",
+                    "2025-01-02",
+                    "2025-01-02",
+                    "fixture",
+                    "fixture-calendar-v1",
+                    "2025-01-01T00:00:00+00:00",
+                    "STRING",
+                    "annual-r1",
+                    0,
+                    "synthetic fixture only",
+                    "{}",
+                    "2025-01-01T00:00:00+00:00",
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO quant_calendar_day(
+                    day_id, coverage_id, market, session_date, status,
+                    open_time, close_time, session_kind, known_at, source,
+                    calendar_version, revision_kind, revision_value,
+                    verified, source_note, payload_json, usable_from,
+                    supersedes_revision_kind, supersedes_revision_value
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "f" * 64,
+                    "e" * 64,
+                    "A",
+                    "2025-01-02",
+                    "CLOSED",
+                    None,
+                    None,
+                    "REGULAR",
+                    "2025-01-01T00:00:00+00:00",
+                    "fixture/SSE_OFFICIAL_NOTICE_DETAIL",
+                    "fixture-calendar-v1",
+                    "STRING",
+                    "r2",
+                    0,
+                    "synthetic fixture only",
+                    "{}",
+                    "2025-01-01T00:00:00+00:00",
+                    "STRING",
+                    "annual-r1",
+                ),
+            )
+            persisted_predecessor = connection.execute(
+                """
+                SELECT supersedes_revision_kind, supersedes_revision_value
+                FROM quant_calendar_day WHERE day_id = ?
+                """,
+                ("f" * 64,),
+            ).fetchone()
+            self.assertEqual(persisted_predecessor, ("STRING", "annual-r1"))
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "append-only"):
+                connection.execute(
+                    """
+                    UPDATE quant_calendar_day
+                    SET supersedes_revision_value = 'different-r1'
+                    WHERE day_id = ?
+                    """,
+                    ("f" * 64,),
+                )
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "append-only"):
+                connection.execute(
+                    "DELETE FROM quant_calendar_day WHERE day_id = ?",
+                    ("f" * 64,),
+                )
+
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "supersedes revision"):
+                connection.execute(
+                    """
+                    INSERT INTO quant_calendar_day(
+                        day_id, coverage_id, market, session_date, status,
+                        open_time, close_time, session_kind, known_at, source,
+                        calendar_version, revision_kind, revision_value,
+                        verified, source_note, payload_json, usable_from,
+                        supersedes_revision_kind, supersedes_revision_value
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "g" * 64,
+                        "e" * 64,
+                        "A",
+                        "2025-01-02",
+                        "CLOSED",
+                        None,
+                        None,
+                        "REGULAR",
+                        "2025-01-01T00:00:00+00:00",
+                        "fixture",
+                        "fixture-calendar-v1",
+                        "STRING",
+                        "r2",
+                        0,
+                        "synthetic fixture only",
+                        "{}",
+                        "2025-01-01T00:00:00+00:00",
+                        "STRING",
+                        None,
+                    ),
+                )
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "supersedes revision"):
+                connection.execute(
+                    """
+                    INSERT INTO quant_calendar_day(
+                        day_id, coverage_id, market, session_date, status,
+                        open_time, close_time, session_kind, known_at, source,
+                        calendar_version, revision_kind, revision_value,
+                        verified, source_note, payload_json, usable_from,
+                        supersedes_revision_kind, supersedes_revision_value
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "h" * 64,
+                        "e" * 64,
+                        "A",
+                        "2025-01-02",
+                        "CLOSED",
+                        None,
+                        None,
+                        "REGULAR",
+                        "2025-01-01T00:00:00+00:00",
+                        "fixture",
+                        "fixture-calendar-v1",
+                        "STRING",
+                        "r3",
+                        0,
+                        "synthetic fixture only",
+                        "{}",
+                        "2025-01-01T00:00:00+00:00",
+                        "INTEGER",
+                        "01",
+                    ),
+                )
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    """
+                    INSERT INTO quant_security_status(
+                        status_id, instrument_id, symbol, market, session_date,
+                        listing_state, trading_state, risk_designation,
+                        known_at, usable_from, source,
+                        revision_kind, revision_value, verified,
+                        source_note, payload_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "d" * 64,
+                        "SSE:fixture:600000",
+                        "600000.SH",
+                        "A",
+                        "2025-01-02",
+                        "DELISTED",
+                        "TRADABLE",
+                        "NORMAL",
+                        "2025-01-02T00:00:00+00:00",
+                        "2025-01-02T00:00:00+00:00",
+                        "fixture",
+                        "INTEGER",
+                        "1",
+                        1,
+                        "synthetic fixture only",
+                        "{}",
+                    ),
+                )
+
     def test_noncanonical_integer_revision_rejected_by_sql(self) -> None:
         with sqlite3.connect(":memory:") as connection:
             apply_connection(connection)
@@ -196,9 +431,9 @@ class TestMigrationApply(unittest.TestCase):
         real = load_migrations()
         sql = "CREATE TABLE quant_should_rollback(id INTEGER);\nTHIS IS INVALID;\n"
         bad = Migration(
-            version=3,
+            version=4,
             name="intentional_failure",
-            path=Path("0003_intentional_failure.sql"),
+            path=Path("0004_intentional_failure.sql"),
             sql=sql,
             checksum=hashlib.sha256(sql.encode("utf-8")).hexdigest(),
         )
@@ -210,7 +445,10 @@ class TestMigrationApply(unittest.TestCase):
                 "SELECT 1 FROM sqlite_master WHERE name = 'quant_should_rollback'"
             ).fetchone()
             self.assertIsNone(row)
-            self.assertEqual(len(plan_connection(connection, migrations=real).applied), 2)
+            self.assertEqual(
+                len(plan_connection(connection, migrations=real).applied),
+                len(real),
+            )
 
     def test_history_checksum_tamper_is_detected(self) -> None:
         with sqlite3.connect(":memory:") as connection:

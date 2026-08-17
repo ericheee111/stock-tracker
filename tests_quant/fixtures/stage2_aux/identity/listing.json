@@ -1,0 +1,25 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_id": "id-listing-001",
+  "category": "identity",
+  "boundary": "listing",
+  "description": "Synthetic listing event: a security first appears with a listing announcement. Exercises identity effective_from = listing date and an INCLUDED membership with reason LISTED.",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "source_owner": "SYNTHETIC_STAGE2_AUX",
+  "raw_artifacts": [
+    {"artifact_id": "raw:id:listing:607002:1", "media_type": "application/json", "source_uri": "synthetic://sse/disclosure/listedinfo/listing-607002", "retrieved_at_utc": "2020-07-01T16:00:00Z", "source_published_at": "2020-07-01", "source_published_granularity": "DATE", "sha256": "a444444444444444444444444444444444444444444444444444444444444444", "byte_length": 0, "raw_text": "[SYNTHETIC] 607002.SH listed 2020-07-01."}
+  ],
+  "expected_facts": [
+    {"fact_type": "InstrumentIdentityFact", "instrument_id": "EXC:fixture:607002", "symbol": "607002.SH", "market": "A", "exchange": "SSE", "security_type": "COMMON_EQUITY", "effective_from": "2020-07-01", "effective_to": null},
+    {"fact_type": "UniverseMembershipFact", "universe_id": "A_SHARE_SSE_ALL", "instrument_id": "EXC:fixture:607002", "symbol": "607002.SH", "market": "A", "state": "INCLUDED", "effective_date": "2020-07-01", "reason": "LISTED"},
+    {"fact_type": "SecurityStatusFact", "instrument_id": "EXC:fixture:607002", "symbol": "607002.SH", "market": "A", "session_date": "2020-07-02", "listing_state": "LISTED", "trading_state": "TRADABLE", "risk_designation": "NORMAL"}
+  ],
+  "expected_contract_outcome": "Listing creates an identity with effective_from = listing date, an INCLUDED membership (reason LISTED), and a LISTED/TRADABLE status. Before 2020-07-01 the instrument is absent, not silently EXCLUDED.",
+  "warnings": [
+    "SYNTHETIC_FIXTURE_ONLY: not real data; sha256 is a placeholder.",
+    "Absence before listing must not be interpreted as EXCLUDED."
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_id": "id-same-symbol-reused-001",
+  "category": "identity",
+  "boundary": "same_symbol_reused",
+  "description": "Two DIFFERENT instrument_ids use the SAME symbol string at non-overlapping periods (first delisted, later a different security reuses the code). Exercises permanent-key uniqueness and period non-overlap.",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "source_owner": "SYNTHETIC_STAGE2_AUX",
+  "raw_artifacts": [
+    {"artifact_id": "raw:id:reuse:607003a:1", "media_type": "application/json", "source_uri": "synthetic://sse/security-master/607003a", "retrieved_at_utc": "2001-01-02T16:00:00Z", "source_published_at": "2001-01-02", "source_published_granularity": "DATE", "sha256": "a222222222222222222222222222222222222222222222222222222222222222", "byte_length": 0, "raw_text": "[SYNTHETIC] Instrument A listed as 607003.SH 2001-01-01, delisted 2005-12-31."},
+    {"artifact_id": "raw:id:reuse:607003b:1", "media_type": "application/json", "source_uri": "synthetic://sse/security-master/607003b", "retrieved_at_utc": "2006-01-02T16:00:00Z", "source_published_at": "2006-01-02", "source_published_granularity": "DATE", "sha256": "a333333333333333333333333333333333333333333333333333333333333333", "byte_length": 0, "raw_text": "[SYNTHETIC] Instrument B listed as 607003.SH 2006-01-01 (code reused after A delisted)."}
+  ],
+  "expected_facts": [
+    {"fact_type": "InstrumentIdentityFact", "instrument_id": "EXC:fixture:607003a", "symbol": "607003.SH", "market": "A", "exchange": "SSE", "security_type": "COMMON_EQUITY", "effective_from": "2001-01-01", "effective_to": "2005-12-31"},
+    {"fact_type": "InstrumentIdentityFact", "instrument_id": "EXC:fixture:607003b", "symbol": "607003.SH", "market": "A", "exchange": "SSE", "security_type": "COMMON_EQUITY", "effective_from": "2006-01-01", "effective_to": null}
+  ],
+  "expected_contract_outcome": "Both identities are valid in their own periods. A snapshot must key on instrument_id, never on symbol; no collision. Overlapping periods for the same symbol would be a conflict.",
+  "warnings": [
+    "SYNTHETIC_FIXTURE_ONLY: not real data; sha256 values are placeholders.",
+    "Symbol reuse across different securities proves symbol is not a stable identity."
+  ]
+}

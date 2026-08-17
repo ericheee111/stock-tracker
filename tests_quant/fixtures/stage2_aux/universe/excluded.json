@@ -1,0 +1,25 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_id": "uni-excluded-001",
+  "category": "universe",
+  "boundary": "excluded",
+  "description": "Synthetic EXCLUDED membership (out of scope). The member is retained in the snapshot identity but must NOT appear in member_symbols.",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "source_owner": "SYNTHETIC_STAGE2_AUX",
+  "raw_artifacts": [
+    {"artifact_id": "raw:uni:excl:009001:1", "media_type": "application/json", "source_uri": "synthetic://szse/universe/excluded-009001", "retrieved_at_utc": "2025-01-01T09:00:00Z", "source_published_at": "2025-01-01", "source_published_granularity": "DATE", "sha256": "c222222222222222222222222222222222222222222222222222222222222222", "byte_length": 0, "raw_text": "[SYNTHETIC] 009001.SZ EXCLUDED from A_SHARE_SZSE_ALL, reason out of scope."}
+  ],
+  "expected_facts": [
+    {"fact_type": "UniverseMembershipFact", "universe_id": "A_SHARE_SZSE_ALL", "instrument_id": "EXC:fixture:009001", "symbol": "009001.SZ", "market": "A", "state": "EXCLUDED", "effective_date": "2025-01-01", "reason": "OUT_OF_SCOPE"},
+    {"fact_type": "InstrumentIdentityFact", "instrument_id": "EXC:fixture:009001", "symbol": "009001.SZ", "market": "A", "exchange": "SZSE", "security_type": "COMMON_EQUITY", "effective_from": "2000-01-01", "effective_to": null},
+    {"fact_type": "SecurityStatusFact", "instrument_id": "EXC:fixture:009001", "symbol": "009001.SZ", "market": "A", "session_date": "2025-01-02", "listing_state": "LISTED", "trading_state": "TRADABLE", "risk_designation": "NORMAL"}
+  ],
+  "expected_contract_outcome": "EXCLUDED member is retained in the snapshot (identity + status preserved) but excluded from member_symbols. EXCLUDED/DELISTED samples are never dropped.",
+  "warnings": [
+    "SYNTHETIC_FIXTURE_ONLY: not real data; sha256 is a placeholder.",
+    "EXCLUDED is an explicit event; absence of a row must NOT be auto-interpreted as EXCLUDED (Agent A audit 3.5 / 5.5)."
+  ]
+}

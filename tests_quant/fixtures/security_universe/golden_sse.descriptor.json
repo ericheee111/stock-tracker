@@ -1,0 +1,13 @@
+{
+  "schema": "a-share-security-universe-descriptor-v1",
+  "source": "fixture-sse-official-like",
+  "source_dataset": "synthetic-security-universe",
+  "source_version": "fixture-sse-v1",
+  "exchange": "SSE",
+  "schema_version": "a-share-security-universe-source-v1",
+  "parser_version": "security-universe-adapter-v1",
+  "retrieved_at": "2024-01-15T16:00:00+08:00",
+  "artifact_sha256": "0d4e1d93902f51fd978b47a5719f16a0b46c1c9a89195a26b188f2c2796dfcbe",
+  "byte_size": 22854,
+  "synthetic": true
+}

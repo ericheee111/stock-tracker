@@ -1,0 +1,26 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_id": "cal-changed-raw-bytes-001",
+  "category": "calendar",
+  "boundary": "changed_raw_bytes",
+  "description": "Synthetic same notice_id/URL returns DIFFERENT bytes at two retrieval times (silent server-side replacement). Exercises append-only capture: a new revision must be created, old bytes retained, never overwritten.",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "source_owner": "SYNTHETIC_STAGE2_AUX",
+  "notice_type": "HOLIDAY",
+  "raw_artifacts": [
+    {"artifact_id": "raw:cal:chg:607001:v1", "media_type": "text/html", "source_uri": "synthetic://sse/cal/notice-2025-07-01", "retrieved_at_utc": "2025-07-01T09:00:00Z", "source_published_at": "2025-07-01", "source_published_granularity": "DATE", "sha256": "7777777777777777777777777777777777777777777777777777777777777777", "byte_length": 10, "raw_text": "[SYNTHETIC] 2025-07-01 CLOSED (v1)."},
+    {"artifact_id": "raw:cal:chg:607001:v2", "media_type": "text/html", "source_uri": "synthetic://sse/cal/notice-2025-07-01", "retrieved_at_utc": "2025-07-10T09:00:00Z", "source_published_at": "2025-07-10", "source_published_granularity": "DATE", "sha256": "8888888888888888888888888888888888888888888888888888888888888888", "byte_length": 12, "raw_text": "[SYNTHETIC] 2025-07-01 CLOSED (v2, silently edited)."}
+  ],
+  "expected_facts": [
+    {"fact_type": "CalendarDay", "session_date": "2025-07-01", "status": "CLOSED", "revision": 1, "raw_artifact_id": "raw:cal:chg:607001:v1"},
+    {"fact_type": "CalendarDay", "session_date": "2025-07-01", "status": "CLOSED", "revision": 2, "raw_artifact_id": "raw:cal:chg:607001:v2"}
+  ],
+  "expected_contract_outcome": "Adapter must create a new revision (v2) and retain v1 bytes. Overwriting v1 with v2 is a contract violation. If only the latest bytes exist and v1 was never captured, revision_history must be marked PARTIAL and intraday replay for the changed window fails closed.",
+  "warnings": [
+    "SYNTHETIC_FIXTURE_ONLY: not real data; sha256 values are placeholders.",
+    "Silent raw-byte replacement is a normal A-share risk (Agent A audit 5.8); capture must be append-only."
+  ]
+}

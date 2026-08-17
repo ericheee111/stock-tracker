@@ -1,0 +1,24 @@
+{
+  "synthetic_fixture_only": true,
+  "no_real_strategy_claim": true,
+  "fixture_id": "st-status-resume-001",
+  "category": "status",
+  "boundary": "resume",
+  "description": "Synthetic resume (复牌) after a suspension. The contract TradingState enum has no explicit RESUMED; resume is represented as trading_state=TRADABLE with a resume reason_code on the later date.",
+  "trust_tier": null,
+  "verified": false,
+  "complete": false,
+  "source_owner": "SYNTHETIC_STAGE2_AUX",
+  "raw_artifacts": [
+    {"artifact_id": "raw:status:resume:607003:1", "media_type": "application/json", "source_uri": "synthetic://sse/disclosure/suspension/resume-607003", "retrieved_at_utc": "2025-07-10T16:00:00Z", "source_published_at": "2025-07-10", "source_published_granularity": "DATE", "sha256": "b444444444444444444444444444444444444444444444444444444444444444", "byte_length": 0, "raw_text": "[SYNTHETIC] 607003.SH resumed trading 2025-07-10."}
+  ],
+  "expected_facts": [
+    {"fact_type": "SecurityStatusFact", "instrument_id": "EXC:fixture:607003", "symbol": "607003.SH", "market": "A", "session_date": "2025-07-01", "listing_state": "LISTED", "trading_state": "SUSPENDED", "risk_designation": "NORMAL", "reason_code": "TEMP_SUSPEND"},
+    {"fact_type": "SecurityStatusFact", "instrument_id": "EXC:fixture:607003", "symbol": "607003.SH", "market": "A", "session_date": "2025-07-10", "listing_state": "LISTED", "trading_state": "TRADABLE", "risk_designation": "NORMAL", "reason_code": "RESUME"}
+  ],
+  "expected_contract_outcome": "Latest status at 2025-07-10 is TRADABLE (resumed). Resume is NOT a separate enum state; it is a TRADABLE status fact with reason_code=RESUME. (Contract gap: no explicit RESUMED state.)",
+  "warnings": [
+    "SYNTHETIC_FIXTURE_ONLY: not real data; sha256 is a placeholder.",
+    "Contract note: TradingState has no RESUMED; resume = TRADABLE + reason_code. Agent B/C/D should confirm this mapping."
+  ]
+}
