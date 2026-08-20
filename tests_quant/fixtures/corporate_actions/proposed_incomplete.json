@@ -1,0 +1,32 @@
+{
+  "schema": "stage2c-corporate-action-fixture-v1",
+  "synthetic_fixture": true,
+  "actions": [
+    {
+      "action_id": "fixture-proposal-1",
+      "instrument_id": "CN:SSE:fixture-security-1",
+      "identity_fact_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "symbol": "600000.SH",
+      "market": "A",
+      "exchange": "SSE",
+      "action_type": "RIGHTS_ISSUE",
+      "lifecycle": "PROPOSED",
+      "source_published_at": "2025-01-10",
+      "source_published_granularity": "DATE",
+      "ex_date": null,
+      "record_date": null,
+      "payment_date": null,
+      "share_listing_date": null,
+      "effective_date": null,
+      "automatic_share_ratio": null,
+      "cash_dividend_per_share": null,
+      "rights_entitlement_ratio": "0.1",
+      "rights_subscription_price": null,
+      "currency": null,
+      "reference_price": null,
+      "reference_price_snapshot_id": null,
+      "revision_id": "proposal-r1",
+      "supersedes_revision_id": null
+    }
+  ]
+}

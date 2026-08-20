@@ -1,0 +1,67 @@
+{
+  "schema": "stage3a-classification-source-v1",
+  "synthetic_fixture": true,
+  "taxonomy": {
+    "taxonomy_id": "CAPCO-INDUSTRY",
+    "name": "上市公司行业分类",
+    "kind": "INDUSTRY",
+    "authority": "OFFICIAL_REGULATOR",
+    "owner": "CAPCO",
+    "taxonomy_version": "2024H1-fixture",
+    "commercial_definition": false
+  },
+  "coverage": {
+    "start_date": "2024-01-01",
+    "end_date": "2024-06-30",
+    "revision": "coverage-r1",
+    "supersedes": null
+  },
+  "classifications": [
+    {
+      "classification_id": "C39",
+      "name": "计算机、通信和其他电子设备制造业",
+      "parent_classification_id": "C",
+      "effective_from": "2024-01-01",
+      "effective_to": null,
+      "revision": "class-c39-r1",
+      "supersedes": null
+    },
+    {
+      "classification_id": "I65",
+      "name": "软件和信息技术服务业",
+      "parent_classification_id": "I",
+      "effective_from": "2024-01-01",
+      "effective_to": null,
+      "revision": "class-i65-r1",
+      "supersedes": null
+    }
+  ],
+  "memberships": [
+    {
+      "classification_id": "C39",
+      "source_security_id": "SSECID-ALPHA",
+      "symbol": "600101.SH",
+      "exchange": "SSE",
+      "effective_from": "2024-01-08",
+      "effective_to": null,
+      "state": "INCLUDED",
+      "revision": "member-alpha-r1",
+      "supersedes": null
+    },
+    {
+      "classification_id": "I65",
+      "source_security_id": "SSECID-GAMMA",
+      "symbol": "600300.SH",
+      "exchange": "SSE",
+      "effective_from": "2024-01-01",
+      "effective_to": null,
+      "state": "INCLUDED",
+      "revision": "member-gamma-r1",
+      "supersedes": null
+    }
+  ],
+  "declared_gaps": [
+    "LICENSE_PENDING",
+    "REAL_HISTORY_COVERAGE_UNPROVEN"
+  ]
+}

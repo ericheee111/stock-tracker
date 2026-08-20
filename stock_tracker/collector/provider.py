@@ -90,13 +90,17 @@ class MarketDataProvider(ABC):
         """Whether exact provider bytes can be captured before normalization."""
         return False
 
+    def supports_adjustment(self, adjust: str) -> bool:
+        """Whether this provider can honestly satisfy the requested bar adjustment."""
+        return adjust in {"raw", "none", "qfq", "hfq"}
+
     def fetch_bars_raw(
         self,
         symbol: str,
         market: T.Market,
         interval: str = "1d",
-        start: "datetime | None" = None,
-        end: "datetime | None" = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
         adjust: str = "qfq",
     ) -> bytes:
         """Fetch exact bar-response bytes for immutable research capture."""
@@ -108,13 +112,19 @@ class MarketDataProvider(ABC):
         symbol: str,
         market: T.Market,
         interval: str = "1d",
-    ) -> "list[T.Bar]":
+    ) -> list[T.Bar]:
         """Deterministically parse exact provider bytes into normalized bars."""
         raise NotImplementedError(f"{self.name} 不支持确定性 K 线解析")
 
-    def fetch_bars(self, symbol: str, market: T.Market, interval: str = "1d",
-                   start: "datetime | None" = None, end: "datetime | None" = None,
-                   adjust: str = "qfq") -> "list[T.Bar]":
+    def fetch_bars(
+        self,
+        symbol: str,
+        market: T.Market,
+        interval: str = "1d",
+        start: datetime | None = None,
+        end: datetime | None = None,
+        adjust: str = "qfq",
+    ) -> list[T.Bar]:
         """拉取历史 K 线并归一化为 ``list[Bar]``。
 
         与 ``fetch_quotes`` 同风格：**失败直接上抛**，交由 ProviderRouter 做
@@ -141,18 +151,20 @@ class MarketDataProvider(ABC):
         t0 = time.perf_counter()
         raws = self._raw_quotes(symbols)  # list[(Market, payload)]
         latency_ms = (time.perf_counter() - t0) * 1000.0
-        received_at = datetime.now()
+        # Runtime Quote timestamps are still local-naive across existing providers;
+        # keep this boundary consistent until the product contract is migrated as a unit.
+        received_at = datetime.now()  # noqa: DTZ005
         out: list[T.Quote] = []
         for market, payload in raws:
             try:
                 q = self.normalize(payload, market)
                 q.source = self.name
                 q.received_at = received_at
-                q.computed_at = datetime.now()
+                q.computed_at = datetime.now()  # noqa: DTZ005
                 q.latency = latency_ms
                 q.observed_age_ms = max(0, int((q.received_at - q.timestamp).total_seconds() * 1000))
                 out.append(q)
-            except Exception:
+            except (ValueError, TypeError, KeyError, IndexError, AttributeError):
                 # 单条解析失败不影响其他标的
                 continue
         return out
@@ -164,18 +176,19 @@ class MarketDataProvider(ABC):
         t0 = time.perf_counter()
         raws = self._raw_snapshot()
         latency_ms = (time.perf_counter() - t0) * 1000.0
-        received_at = datetime.now()
+        # See ``fetch_quotes``: preserve the existing local-naive runtime contract.
+        received_at = datetime.now()  # noqa: DTZ005
         out: list[T.Quote] = []
         for market, payload in raws:
             try:
                 q = self.normalize(payload, market)
                 q.source = self.name
                 q.received_at = received_at
-                q.computed_at = datetime.now()
+                q.computed_at = datetime.now()  # noqa: DTZ005
                 q.latency = latency_ms
                 q.observed_age_ms = max(0, int((q.received_at - q.timestamp).total_seconds() * 1000))
                 out.append(q)
-            except Exception:
+            except (ValueError, TypeError, KeyError, IndexError, AttributeError):
                 continue
         return out
 

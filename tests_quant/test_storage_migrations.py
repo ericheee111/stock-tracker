@@ -23,9 +23,9 @@ from stock_tracker.quant.storage import (
 
 
 class TestMigrationDiscovery(unittest.TestCase):
-    def test_three_ordered_checksum_verified_migrations_exist(self) -> None:
+    def test_four_ordered_checksum_verified_migrations_exist(self) -> None:
         migrations = load_migrations()
-        self.assertEqual(tuple(item.version for item in migrations), (1, 2, 3))
+        self.assertEqual(tuple(item.version for item in migrations), (1, 2, 3, 4))
         self.assertTrue(all(len(item.checksum) == 64 for item in migrations))
         self.assertTrue(all(iter_sql_statements(item.sql) for item in migrations))
 
@@ -34,7 +34,7 @@ class TestMigrationDiscovery(unittest.TestCase):
             path = Path(directory) / "missing.db"
             plan = plan_database(path)
             self.assertFalse(path.exists())
-            self.assertEqual(len(plan.pending), 3)
+            self.assertEqual(len(plan.pending), 4)
 
     def test_existing_database_dry_plan_is_read_only(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -45,7 +45,7 @@ class TestMigrationDiscovery(unittest.TestCase):
             plan = plan_database(path)
             after_stat = path.stat()
             after_entries = tuple(sorted(item.name for item in path.parent.iterdir()))
-            self.assertEqual(len(plan.pending), 3)
+            self.assertEqual(len(plan.pending), 4)
             self.assertEqual(before_stat.st_size, after_stat.st_size)
             self.assertEqual(before_stat.st_mtime_ns, after_stat.st_mtime_ns)
             self.assertEqual(before_entries, after_entries)
@@ -86,12 +86,12 @@ class TestMigrationApply(unittest.TestCase):
             second = apply_database(path)
             self.assertEqual(len(first.pending), 0)
             self.assertEqual(len(second.pending), 0)
-            self.assertEqual(len(second.applied), 3)
+            self.assertEqual(len(second.applied), 4)
 
     def test_expected_tables_and_foreign_keys_exist(self) -> None:
         with sqlite3.connect(":memory:") as connection:
             plan = apply_connection(connection)
-            self.assertEqual(len(plan.applied), 3)
+            self.assertEqual(len(plan.applied), 4)
             table_names = {
                 row[0]
                 for row in connection.execute(
@@ -115,6 +115,8 @@ class TestMigrationApply(unittest.TestCase):
                 "quant_instrument_identity",
                 "quant_security_status",
                 "quant_universe_membership",
+                "quant_corporate_action_coverage",
+                "quant_corporate_action_fact",
             }
             self.assertTrue(expected.issubset(table_names))
             for table in (
@@ -397,6 +399,363 @@ class TestMigrationApply(unittest.TestCase):
                     ),
                 )
 
+    def test_stage2b_corporate_action_tables_are_append_only_and_term_safe(self) -> None:
+        with sqlite3.connect(":memory:") as connection:
+            apply_connection(connection)
+            connection.execute(
+                """
+                INSERT INTO quant_instrument_identity(
+                    identity_id, instrument_id, symbol, market, exchange,
+                    security_type, effective_from, effective_to,
+                    known_at, usable_from, source,
+                    revision_kind, revision_value, verified,
+                    source_note, payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "a" * 64,
+                    "CN:SSE:fixture-security-1",
+                    "600000.SH",
+                    "A",
+                    "SSE",
+                    "COMMON_EQUITY",
+                    "2020-01-01",
+                    None,
+                    "2024-12-01T00:00:00+00:00",
+                    "2024-12-01T00:00:00+00:00",
+                    "fixture-identity",
+                    "STRING",
+                    "identity-r1",
+                    1,
+                    "synthetic fixture identity",
+                    "{}",
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO quant_corporate_action_coverage(
+                    coverage_id, instrument_id, market, start_date, end_date,
+                    source, action_version, known_at, usable_from,
+                    revision_kind, revision_value,
+                    supersedes_revision_kind, supersedes_revision_value,
+                    verified, complete, source_note, payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "b" * 64,
+                    "CN:SSE:fixture-security-1",
+                    "A",
+                    "2025-01-01",
+                    "2025-01-31",
+                    "fixture-corporate-actions",
+                    "fixture-corporate-actions-v1",
+                    "2025-01-31T00:00:00+00:00",
+                    "2025-01-31T00:00:00+00:00",
+                    "STRING",
+                    "coverage-r2",
+                    "STRING",
+                    "coverage-r1",
+                    1,
+                    1,
+                    "synthetic complete action coverage",
+                    "{}",
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO quant_corporate_action_fact(
+                    fact_id, action_id, instrument_id, identity_fact_id,
+                    symbol, market, ex_date, record_date, payment_date,
+                    share_listing_date, lifecycle,
+                    automatic_share_ratio, cash_dividend_per_share,
+                    rights_entitlement_ratio, rights_subscription_price,
+                    currency, reference_price, reference_price_snapshot_id,
+                    known_at, usable_from,
+                    source, action_version, revision_kind, revision_value,
+                    supersedes_revision_kind, supersedes_revision_value,
+                    verified, source_note, payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "c" * 64,
+                    "action-plan-1",
+                    "CN:SSE:fixture-security-1",
+                    "a" * 64,
+                    "600000.SH",
+                    "A",
+                    "2025-01-15",
+                    "2025-01-14",
+                    "2025-01-20",
+                    "2025-01-15",
+                    "EFFECTIVE",
+                    "2",
+                    "0",
+                    "0",
+                    None,
+                    None,
+                    None,
+                    None,
+                    "2025-01-14T00:00:00+00:00",
+                    "2025-01-15T00:00:00+00:00",
+                    "fixture-corporate-actions",
+                    "fixture-corporate-actions-v1",
+                    "STRING",
+                    "action-r2",
+                    "STRING",
+                    "action-r1",
+                    1,
+                    "synthetic corporate action",
+                    "{}",
+                ),
+            )
+            persisted = connection.execute(
+                """
+                SELECT lifecycle, automatic_share_ratio,
+                       supersedes_revision_kind, supersedes_revision_value
+                FROM quant_corporate_action_fact WHERE fact_id = ?
+                """,
+                ("c" * 64,),
+            ).fetchone()
+            self.assertEqual(persisted, ("EFFECTIVE", "2", "STRING", "action-r1"))
+            for statement in (
+                "UPDATE quant_corporate_action_fact SET revision_value = 'r3' WHERE fact_id = ?",
+                "DELETE FROM quant_corporate_action_fact WHERE fact_id = ?",
+                "UPDATE quant_corporate_action_coverage SET complete = 0 WHERE coverage_id = ?",
+                "DELETE FROM quant_corporate_action_coverage WHERE coverage_id = ?",
+            ):
+                target = "c" * 64 if "fact" in statement else "b" * 64
+                with self.assertRaisesRegex(sqlite3.IntegrityError, "append-only"):
+                    connection.execute(statement, (target,))
+
+            invalid_cancelled = [
+                "d" * 64,
+                "cancelled-plan",
+                "CN:SSE:fixture-security-1",
+                "a" * 64,
+                "600000.SH",
+                "A",
+                "2025-01-16",
+                None,
+                None,
+                None,
+                "CANCELLED",
+                "1",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                "2025-01-16T00:00:00+00:00",
+                "2025-01-16T00:00:00+00:00",
+                "fixture-corporate-actions",
+                "fixture-corporate-actions-v1",
+                "STRING",
+                "cancel-r1",
+                None,
+                None,
+                0,
+                "synthetic cancellation",
+                "{}",
+            ]
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    """
+                    INSERT INTO quant_corporate_action_fact(
+                        fact_id, action_id, instrument_id, identity_fact_id,
+                        symbol, market, ex_date, record_date, payment_date,
+                        share_listing_date, lifecycle,
+                        automatic_share_ratio, cash_dividend_per_share,
+                        rights_entitlement_ratio, rights_subscription_price,
+                        currency, reference_price, reference_price_snapshot_id,
+                        known_at, usable_from,
+                        source, action_version, revision_kind, revision_value,
+                        supersedes_revision_kind, supersedes_revision_value,
+                        verified, source_note, payload_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    invalid_cancelled,
+                )
+
+            invalid_rights = invalid_cancelled.copy()
+            invalid_rights[0] = "e" * 64
+            invalid_rights[1] = "rights-plan"
+            invalid_rights[10] = "EFFECTIVE"
+            invalid_rights[11] = "1"
+            invalid_rights[12] = "0"
+            invalid_rights[13] = "0.1"
+            invalid_rights[14] = None
+            invalid_rights[15] = "CNY"
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    """
+                    INSERT INTO quant_corporate_action_fact(
+                        fact_id, action_id, instrument_id, identity_fact_id,
+                        symbol, market, ex_date, record_date, payment_date,
+                        share_listing_date, lifecycle,
+                        automatic_share_ratio, cash_dividend_per_share,
+                        rights_entitlement_ratio, rights_subscription_price,
+                        currency, reference_price, reference_price_snapshot_id,
+                        known_at, usable_from,
+                        source, action_version, revision_kind, revision_value,
+                        supersedes_revision_kind, supersedes_revision_value,
+                        verified, source_note, payload_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    invalid_rights,
+                )
+
+    def test_stage2b_sql_rejects_identity_time_term_and_provenance_bypass(self) -> None:
+        action_sql = """
+            INSERT INTO quant_corporate_action_fact(
+                fact_id, action_id, instrument_id, identity_fact_id,
+                symbol, market, ex_date, record_date, payment_date,
+                share_listing_date, lifecycle,
+                automatic_share_ratio, cash_dividend_per_share,
+                rights_entitlement_ratio, rights_subscription_price,
+                currency, reference_price, reference_price_snapshot_id,
+                known_at, usable_from,
+                source, action_version, revision_kind, revision_value,
+                supersedes_revision_kind, supersedes_revision_value,
+                verified, source_note, payload_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        with sqlite3.connect(":memory:") as connection:
+            apply_connection(connection)
+            connection.execute(
+                """
+                INSERT INTO quant_instrument_identity(
+                    identity_id, instrument_id, symbol, market, exchange,
+                    security_type, effective_from, effective_to,
+                    known_at, usable_from, source,
+                    revision_kind, revision_value, verified,
+                    source_note, payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "a" * 64,
+                    "CN:SSE:fixture-security-1",
+                    "600000.SH",
+                    "A",
+                    "SSE",
+                    "COMMON_EQUITY",
+                    "2020-01-01",
+                    None,
+                    "2024-12-01T00:00:00+00:00",
+                    "2024-12-01T00:00:00+00:00",
+                    "fixture-identity",
+                    "STRING",
+                    "identity-r1",
+                    1,
+                    "synthetic fixture identity",
+                    "{}",
+                ),
+            )
+            base = [
+                "f" * 64,
+                "action-plan-sql-guard",
+                "CN:SSE:fixture-security-1",
+                "a" * 64,
+                "600000.SH",
+                "A",
+                "2025-01-15",
+                "2025-01-14",
+                "2025-01-20",
+                "2025-01-15",
+                "EFFECTIVE",
+                "2",
+                "0",
+                "0",
+                None,
+                None,
+                None,
+                None,
+                "2025-01-14T00:00:00+00:00",
+                "2025-01-15T00:00:00+00:00",
+                "fixture-corporate-actions",
+                "fixture-corporate-actions-v1",
+                "STRING",
+                "action-r1",
+                None,
+                None,
+                0,
+                "",
+                "{}",
+            ]
+            cases: list[tuple[str, int, object]] = [
+                ("noncanonical decimal", 11, "2.0"),
+                ("identity mismatch", 4, "600001.SH"),
+                ("usable before known", 19, "2025-01-13T00:00:00+00:00"),
+                ("uppercase SHA", 0, "F" * 64),
+                ("zero rights price", 14, "0"),
+            ]
+            for name, index, value in cases:
+                row = base.copy()
+                row[index] = value
+                if name == "zero rights price":
+                    row[13] = "0.1"
+                    row[15] = "CNY"
+                with self.subTest(name=name), self.assertRaises(
+                    sqlite3.IntegrityError
+                ):
+                    connection.execute(action_sql, row)
+
+            no_op = base.copy()
+            no_op[11] = "1"
+            no_op[9] = None
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(action_sql, no_op)
+
+            self_superseding = base.copy()
+            self_superseding[24] = "STRING"
+            self_superseding[25] = "action-r1"
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(action_sql, self_superseding)
+
+            verified_without_note = base.copy()
+            verified_without_note[26] = 1
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(action_sql, verified_without_note)
+
+            reference_without_canonical_snapshot = base.copy()
+            reference_without_canonical_snapshot[15] = "CNY"
+            reference_without_canonical_snapshot[16] = "10"
+            reference_without_canonical_snapshot[17] = "A" * 64
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(action_sql, reference_without_canonical_snapshot)
+
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    """
+                    INSERT INTO quant_corporate_action_coverage(
+                        coverage_id, instrument_id, market, start_date, end_date,
+                        source, action_version, known_at, usable_from,
+                        revision_kind, revision_value,
+                        supersedes_revision_kind, supersedes_revision_value,
+                        verified, complete, source_note, payload_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "b" * 64,
+                        "CN:SSE:fixture-security-1",
+                        "A",
+                        "2025-01-01",
+                        "2025-01-31",
+                        "fixture-corporate-actions",
+                        "fixture-corporate-actions-v1",
+                        "2025-01-31T00:00:00+00:00",
+                        "2025-01-30T00:00:00+00:00",
+                        "STRING",
+                        "coverage-r1",
+                        None,
+                        None,
+                        1,
+                        1,
+                        "",
+                        "{}",
+                    ),
+                )
+
     def test_noncanonical_integer_revision_rejected_by_sql(self) -> None:
         with sqlite3.connect(":memory:") as connection:
             apply_connection(connection)
@@ -431,9 +790,9 @@ class TestMigrationApply(unittest.TestCase):
         real = load_migrations()
         sql = "CREATE TABLE quant_should_rollback(id INTEGER);\nTHIS IS INVALID;\n"
         bad = Migration(
-            version=4,
+            version=5,
             name="intentional_failure",
-            path=Path("0004_intentional_failure.sql"),
+            path=Path("0005_intentional_failure.sql"),
             sql=sql,
             checksum=hashlib.sha256(sql.encode("utf-8")).hexdigest(),
         )

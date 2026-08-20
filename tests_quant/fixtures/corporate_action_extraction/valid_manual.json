@@ -1,0 +1,35 @@
+{
+  "schema": "stage2d-corporate-action-extraction-v1",
+  "synthetic_fixture": true,
+  "extractor_name": "manual-audited-fixture",
+  "extractor_version": "fixture-v1",
+  "reviewer_note": "synthetic fixture; page 1 table 1",
+  "rows": [
+    {
+      "source_event_id": "sse-fixture-action-1",
+      "source_security_id": "SSE:600000",
+      "symbol": "600000.SH",
+      "market": "A",
+      "exchange": "SSE",
+      "action_type": "COMBINED",
+      "lifecycle": "EFFECTIVE",
+      "source_published_at": "2025-01-10T08:00:00+08:00",
+      "source_published_granularity": "SECOND",
+      "ex_date": "2025-01-15",
+      "record_date": "2025-01-14",
+      "payment_date": "2025-01-20",
+      "share_listing_date": "2025-01-18",
+      "effective_date": "2025-01-15",
+      "automatic_share_ratio": "1.2",
+      "cash_dividend_per_share": "1",
+      "rights_entitlement_ratio": "0.1",
+      "rights_subscription_price": "5",
+      "currency": "CNY",
+      "reference_price": "10",
+      "reference_price_snapshot_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "revision_id": "r1",
+      "supersedes_revision_id": "",
+      "source_locator": "html:table[1]/row[1]"
+    }
+  ]
+}

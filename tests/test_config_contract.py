@@ -45,7 +45,16 @@ class TestStrictBooleanConfig(unittest.TestCase):
                 load_strategies(str(path))
 
     def test_provider_safety_booleans_require_toml_boolean(self) -> None:
-        fields = ("primary", "supports_snapshot", "bars_fallback")
+        fields = (
+            "enabled",
+            "primary",
+            "supports_snapshot",
+            "bars_fallback",
+            "read_only",
+            "allow_live_decision",
+            "allow_model_training",
+            "allow_public_redistribution",
+        )
         with tempfile.TemporaryDirectory() as directory:
             for field in fields:
                 with self.subTest(field=field):
@@ -62,6 +71,52 @@ class TestStrictBooleanConfig(unittest.TestCase):
                     )
                     with self.assertRaisesRegex(ConfigError, field):
                         load_providers(str(path))
+
+    def test_provider_bars_priority_rejects_bool_string_and_out_of_range(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            for index, value in enumerate(("true", '"30"', "-1001", "1001")):
+                with self.subTest(value=value):
+                    path = self.write(
+                        directory,
+                        f"providers-priority-{index}.toml",
+                        (
+                            "[[providers]]\n"
+                            'name = "fixture"\n'
+                            'cls = "FixtureProvider"\n'
+                            'markets = ["a"]\n'
+                            f"bars_priority = {value}\n"
+                        ),
+                    )
+                    with self.assertRaisesRegex(ConfigError, "bars_priority"):
+                        load_providers(str(path))
+
+    def test_disabled_sidecar_policy_fields_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.write(
+                directory,
+                "providers-sidecar.toml",
+                (
+                    "[[providers]]\n"
+                    'name = "free_stockdb"\n'
+                    'cls = "FreeStockDbProvider"\n'
+                    'markets = ["a"]\n'
+                    "enabled = false\n"
+                    "read_only = true\n"
+                    'trust_tier = "T1_BEST_EFFORT"\n'
+                    "allow_live_decision = false\n"
+                    "allow_model_training = false\n"
+                    "allow_public_redistribution = false\n"
+                    "bars_priority = 30\n"
+                ),
+            )
+            provider = load_providers(str(path))[0]
+            self.assertFalse(provider.enabled)
+            self.assertTrue(provider.read_only)
+            self.assertEqual(provider.trust_tier, "T1_BEST_EFFORT")
+            self.assertFalse(provider.allow_live_decision)
+            self.assertFalse(provider.allow_model_training)
+            self.assertFalse(provider.allow_public_redistribution)
+            self.assertEqual(provider.bars_priority, 30)
 
     def test_risk_gate_boolean_rejects_integer(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -1,0 +1,93 @@
+{
+  "schema": "stage2f-adjusted-market-data-request-v1",
+  "synthetic_fixture": true,
+  "as_of": "2025-02-01T00:00:00Z",
+  "start_date": "2025-01-10",
+  "end_date": "2025-01-20",
+  "raw_artifact_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "identity": {
+    "instrument_id": "CN:SSE:stage2f-fixture-security",
+    "symbol": "600000.SH",
+    "market": "A",
+    "exchange": "SSE",
+    "security_type": "COMMON_EQUITY",
+    "effective_from": "2020-01-01",
+    "effective_to": null,
+    "known_at": "2024-12-01T00:00:00Z",
+    "revision": "identity-r1"
+  },
+  "calendar": {
+    "open_sessions": [
+      "2025-01-10",
+      "2025-01-15",
+      "2025-01-16",
+      "2025-01-20"
+    ]
+  },
+  "corporate_action": {
+    "action_id": "stage2f-action-1",
+    "ex_date": "2025-01-15",
+    "record_date": "2025-01-14",
+    "payment_date": "2025-01-20",
+    "share_listing_date": "2025-01-20",
+    "automatic_share_ratio": "2",
+    "cash_dividend_per_share": "0",
+    "rights_entitlement_ratio": "0",
+    "rights_subscription_price": null,
+    "currency": null,
+    "reference_price": null,
+    "reference_price_snapshot_id": null,
+    "known_at": "2025-01-14T00:00:00Z",
+    "usable_from": "2025-01-15T00:00:00Z",
+    "revision": "action-r1"
+  },
+  "bars": [
+    {
+      "timestamp": "2025-01-10T15:00:00+08:00",
+      "open": "10",
+      "high": "11",
+      "low": "9",
+      "close": "10",
+      "volume": 1000,
+      "amount": "10000",
+      "turnover": "1"
+    },
+    {
+      "timestamp": "2025-01-15T15:00:00+08:00",
+      "open": "10",
+      "high": "11",
+      "low": "9",
+      "close": "10",
+      "volume": 1000,
+      "amount": "10000",
+      "turnover": "1"
+    },
+    {
+      "timestamp": "2025-01-16T15:00:00+08:00",
+      "open": "10",
+      "high": "11",
+      "low": "9",
+      "close": "10",
+      "volume": 1000,
+      "amount": "10000",
+      "turnover": "1"
+    },
+    {
+      "timestamp": "2025-01-20T15:00:00+08:00",
+      "open": "10",
+      "high": "11",
+      "low": "9",
+      "close": "10",
+      "volume": 1000,
+      "amount": "10000",
+      "turnover": "1"
+    }
+  ],
+  "basis": "SHARE_CHANGE_ONLY",
+  "convention": "BACKWARD",
+  "policy": {
+    "policy_version": "stage2f-policy-v1",
+    "session_gap_policy": "REQUIRE_ALL_OPEN_SESSIONS"
+  },
+  "explicit_gap_sessions": []
+}

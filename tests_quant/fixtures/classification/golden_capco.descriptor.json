@@ -1,0 +1,12 @@
+{
+  "artifact_sha256": "2e153e52a4762d38abd619813d873138e6a505fe52218cbe8e0329f49b64c526",
+  "byte_size": 1749,
+  "parser_version": "stage3a-classification-adapter-v1",
+  "retrieved_at": "2024-01-10T08:00:00+08:00",
+  "schema": "stage3a-classification-descriptor-v1",
+  "schema_version": "stage3a-classification-source-v1",
+  "source": "CAPCO",
+  "source_dataset": "synthetic-capco-industry-result",
+  "source_version": "2024H1-fixture",
+  "synthetic": true
+}

@@ -230,7 +230,11 @@ UNKNOWN
 - `STALE` 或 `UNKNOWN` 不得产生新的强执行信号；
 - API 和 UI 必须诚实显示数据状态；
 - 免费源随时可能失效，Provider Adapter 必须可替换；
-- API 层不得自行访问上游，Collector 是唯一上游访问者。
+- API 层不得自行访问上游，Collector 是唯一上游访问者；
+- 本地行情 Sidecar 也属于外部 Provider，不因“本机读取”自动升级 Trust；
+- `free-stockdb` 等 Sidecar 默认关闭，只允许 loopback、只读和显式 RAW 查询；
+- Sidecar 的复权因子、板块成分和当前证券列表不得直接进入 PIT 回测、训练或模型晋级；
+- Sidecar 服务端口不得暴露公网，真实启用前必须固定发行版、二进制、manifest 和数据快照身份。
 
 ## 10. 事件和 LLM 边界
 
@@ -568,11 +572,13 @@ python -m stock_tracker --once
 2. Stage 1 核心：Today Action 决策合同、Portfolio 后端、真实 Brief API 与首页（已完成）；
 3. Stage 1.1：Portfolio 设置/持仓编辑 UI 与真实 REST CRUD 验收（当前下一步）；
 4. Stage 2：A 股数据与决策质量；
-5. Stage 3：Event Intelligence + Big Trend v1；
-6. Stage 4：Strategy Scoreboard + Replay；
-7. Stage 5：真实数据上的模型准确率迭代；
-8. Stage 6：港股通与美股独立扩展；
-9. Stage 7：可选券商只读能力及单独审批的执行路线。
+5. Stage 3A/3B：Event Intelligence + Big Trend v1；
+6. Stage 3C.1：可选本地行情 Sidecar 隔离合同，默认关闭；
+7. Stage 3C.2/3C.3：固定发行版与真实数据审计，通过后再进入 WARM/COLD Shadow；
+8. Stage 4：Strategy Scoreboard + Replay；
+9. Stage 5：真实数据上的模型准确率迭代；
+10. Stage 6：港股通与美股独立扩展；
+11. Stage 7：可选券商只读能力及单独审批的执行路线。
 
 不要因为已有旧 Wave 编号而跳过用户价值和依赖关系。
 

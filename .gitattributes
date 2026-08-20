@@ -1,0 +1,9 @@
+# Exact-raw research fixtures are content-addressed. Keep their repository,
+# checkout, archive, and CI bytes identical across Windows and Unix hosts.
+tests_quant/fixtures/**/*.json text eol=lf
+tests_quant/fixtures/**/*.html text eol=lf
+tests_quant/fixtures/**/*.csv text eol=lf
+tests_quant/fixtures/**/*.toml text eol=lf
+tests_quant/fixtures/**/*.md text eol=lf
+tests_quant/fixtures/**/*.txt text eol=lf
+tests_quant/fixtures/**/*.pdf binary

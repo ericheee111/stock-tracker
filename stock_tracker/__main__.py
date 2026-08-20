@@ -17,30 +17,31 @@ from __future__ import annotations
 import os
 import sys
 
+from .api.handlers import AppContext
+from .api.server import APIServer
+from .api.sse import SSEHub
 from .cli import parse_args
-from .core.config import load_configs
-from .core.logging import setup_logging, get_logger
-from .core.store import MarketStore
 from .collector import router as R
-from .collector.scheduler import Scheduler
-from .collector.tencent import TencentProvider
-from .collector.sina import SinaProvider
 from .collector.eastmoney import EastmoneyProvider
+from .collector.free_stockdb import FreeStockDbProvider
+from .collector.scheduler import Scheduler
+from .collector.sina import SinaProvider
+from .collector.tencent import TencentProvider
+from .core.config import load_configs
+from .core.eventbus import get_bus
+from .core.logging import setup_logging
+from .core.store import MarketStore
 from .data_quality.gate import DataQualityGate
 from .features.engine import FeatureEngine
 from .signals.manager import SignalManager
 from .storage.repository import Repository
-from .api.handlers import AppContext
-from .api.sse import SSEHub
-from .api.server import APIServer
-from .core.eventbus import get_bus
-
 
 # Provider 类注册表（由 providers.toml 的 cls 字段实例化）
 _PROVIDER_REGISTRY = {
-    "TencentProvider": TencentProvider,
-    "SinaProvider": SinaProvider,
     "EastmoneyProvider": EastmoneyProvider,
+    "FreeStockDbProvider": FreeStockDbProvider,
+    "SinaProvider": SinaProvider,
+    "TencentProvider": TencentProvider,
 }
 
 
@@ -48,6 +49,9 @@ def _build_providers(bundle, logger):
     """按 providers.toml 实例化 Provider 列表。"""
     providers = []
     for cfg in bundle.providers:
+        if not cfg.enabled:
+            logger.info("provider 已禁用：%s", cfg.name)
+            continue
         cls = _PROVIDER_REGISTRY.get(cfg.cls)
         if cls is None:
             logger.warning("未知 provider 类：%s（已跳过）", cfg.cls)
@@ -124,11 +128,14 @@ def _self_check(ctx, scheduler, logger) -> int:
     """--once 自检：拉一轮 COLD + HOT/WARM，打印摘要。"""
     logger.info("自检模式（--once）：执行一轮采集与信号扫描")
     # 预热 COLD
-    scheduler._run_cold()  # noqa: SLF001 自检专用
+    scheduler._run_cold()
     # WARM 扫描（含信号管线）
-    scheduler._run_pool("WARM", scheduler._warm_pool,  # noqa: SLF001
-                        ctx.bundle.app.collector.warm_pool_size)
-    scheduler._publish_health()  # noqa: SLF001
+    scheduler._run_pool(
+        "WARM",
+        scheduler._warm_pool,
+        ctx.bundle.app.collector.warm_pool_size,
+    )
+    scheduler._publish_health()
 
     quotes = ctx.store.get_quotes()
     signals = ctx.store.get_signals()
@@ -172,11 +179,11 @@ def main(argv: list[str] | None = None) -> int:
         try:
             scheduler.stop()
         except Exception:
-            pass
+            logger.exception("调度器关闭失败")
         try:
             api_server.shutdown_wait()
         except Exception:
-            pass
+            logger.exception("API 服务关闭失败")
     logger.info("已退出")
     return 0
 

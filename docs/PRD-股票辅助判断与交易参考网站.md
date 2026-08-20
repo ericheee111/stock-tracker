@@ -1822,6 +1822,8 @@ model_version
 
 ## Stage 4：真实策略战绩与 Replay
 
+> **工程状态（2026-08-20）**：Stage 4A Outcome/Scoreboard、Stage 4B PIT Replay 后端合同以及 Stage 4C 失败归因/同 cohort 版本比较已实现并进入测试与审查。Replay UI、用户解释页和真实 Outcome 持久化仍待产品实现；在真实独立样本不足时，Scoreboard 必须保持 `INSUFFICIENT_REAL_EVIDENCE`，正式 Replay 在 T3 快照链不完整时必须保持 `BLOCKED`。
+
 1. 信号 Outcome；
 2. Strategy Scoreboard；
 3. 最近窗口降权；
@@ -1832,6 +1834,8 @@ model_version
 8. 用户可查看系统当时为何判断。
 
 ## Stage 5：模型准确率正式迭代
+
+> **工程状态（2026-08-20）**：Stage 5A 统一 Decision Quality / Model Promotion Gate 与 Stage 5B 新样本 Shadow / 生命周期建议合同已实现并进入测试与审查。它们只生成可审计的 `PROMOTION_ELIGIBLE`、`WATCH`、`DOWNWEIGHTED`、`BLOCKED` 等建议，不写 Model Registry、不部署、不静默改生产权重。真实正式晋级仍受 `LICENSE_PENDING`、`T3_NOT_REACHED`、真实 Outcome 样本不足、正式 PIT Replay 不可用等门禁阻断；Big Trend、Event Continuation 与 Exit 风险模型仍是后续独立阶段。
 
 1. T3 真实研究数据；
 2. Rule / Logistic baseline；
@@ -1846,6 +1850,8 @@ model_version
 11. Champion-Challenger。
 
 ## Stage 6：港股通与美股扩展
+
+> **工程状态（2026-08-20）**：Stage 6A 跨市场隔离基础合同已实现并进入测试与审查，强制 A 股、港股通与美股使用独立的配置、日历、Universe、规则、成本、数据、特征、标签、模型、校准和 Strategy Scoreboard 身份。跨市场模型、阈值或校准最多只能进入目标市场验证后的零权重 Shadow，不能直接复用到生产。真实港股通/美股 Provider、PIT 数据、市场专属校准与真实战绩尚未上线。
 
 先港股通，后美股：
 

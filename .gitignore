@@ -27,6 +27,7 @@ Thumbs.db
 
 # Agent 工作记忆（非项目源码，绝不入库）
 .workbuddy/
+.ai-bridge/
 
 # Node 依赖（qa/ 下的测试工具依赖，非运行时）
 node_modules/

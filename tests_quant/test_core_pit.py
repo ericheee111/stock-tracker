@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import unittest
 from datetime import datetime
+from decimal import Decimal
 from typing import cast
 
 from _helpers import utc_datetime
@@ -50,6 +51,19 @@ class TestFingerprint(unittest.TestCase):
 
     def test_nan_and_infinity_rejected(self) -> None:
         for value in (math.nan, math.inf, -math.inf):
+            with self.subTest(value=value), self.assertRaises(FingerprintError):
+                fingerprint(value)
+
+    def test_decimal_values_are_exact_and_representation_independent(self) -> None:
+        self.assertEqual(
+            fingerprint({"ratio": Decimal("1.2300")}),
+            fingerprint({"ratio": Decimal("1.23")}),
+        )
+        self.assertNotEqual(
+            fingerprint({"ratio": Decimal("1.23")}),
+            fingerprint({"ratio": 1.23}),
+        )
+        for value in (Decimal("NaN"), Decimal("Infinity"), Decimal("-Infinity")):
             with self.subTest(value=value), self.assertRaises(FingerprintError):
                 fingerprint(value)
 

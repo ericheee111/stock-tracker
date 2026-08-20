@@ -7,9 +7,10 @@
 from __future__ import annotations
 
 import os
-import tomllib
 from dataclasses import dataclass, field
 from typing import Any
+
+import tomllib
 
 from . import types as T
 
@@ -104,6 +105,7 @@ class ProviderConfig:
     name: str = ""
     cls: str = ""
     markets: list[str] = field(default_factory=list)
+    enabled: bool = True
     primary: bool = False
     supports_snapshot: bool = False
     timeout_ms: int = 3000
@@ -113,6 +115,16 @@ class ProviderConfig:
     circuit_fail_threshold: int = 5
     host: str = ""               # 可选 host 覆盖（用于故障注入/自托管，默认用源码内置 BASE）
     bars_fallback: bool = False  # 是否作为 K 线兜底源（supports_bars=False 时仍可被 Router 选用）
+    bars_priority: int = 0       # 同类 K 线源的显式排序权重；越高越优先
+    read_only: bool = False
+    trust_tier: str = "T0_UNKNOWN"
+    allow_live_decision: bool = True
+    allow_model_training: bool = True
+    allow_public_redistribution: bool = True
+    release_version: str = ""
+    binary_inventory_sha256: str = ""
+    data_snapshot_manifest_sha256: str = ""
+    sync_manifest_sha256: str = ""
 
 
 @dataclass(slots=True)
@@ -161,6 +173,24 @@ def _expect_bool(value: object, name: str) -> bool:
 
     if type(value) is not bool:
         raise ConfigError(f"{name} 必须是 TOML boolean，不能使用字符串或 0/1")
+    return value
+
+
+def _expect_int(
+    value: object,
+    name: str,
+    *,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
+    """Require a bounded TOML integer and reject bool-as-int coercion."""
+
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(f"{name} 必须是 TOML integer，不能使用 boolean 或字符串")
+    if minimum is not None and value < minimum:
+        raise ConfigError(f"{name} 必须大于等于 {minimum}")
+    if maximum is not None and value > maximum:
+        raise ConfigError(f"{name} 必须小于等于 {maximum}")
     return value
 
 
@@ -256,17 +286,22 @@ def load_providers(path: str) -> list[ProviderConfig]:
     d = _read_toml(path)
     out: list[ProviderConfig] = []
     for item in _opt(d, "providers", []):
+        name = _opt(item, "name", "")
         out.append(ProviderConfig(
-            name=_opt(item, "name", ""),
+            name=name,
             cls=_opt(item, "cls", ""),
             markets=_opt(item, "markets", []),
+            enabled=_expect_bool(
+                _opt(item, "enabled", True),
+                f"providers[{name}].enabled",
+            ),
             primary=_expect_bool(
                 _opt(item, "primary", False),
-                f"providers[{_opt(item, 'name', '')}].primary",
+                f"providers[{name}].primary",
             ),
             supports_snapshot=_expect_bool(
                 _opt(item, "supports_snapshot", False),
-                f"providers[{_opt(item, 'name', '')}].supports_snapshot",
+                f"providers[{name}].supports_snapshot",
             ),
             timeout_ms=_opt(item, "timeout_ms", 3000),
             host=_opt(item, "host", ""),
@@ -276,8 +311,35 @@ def load_providers(path: str) -> list[ProviderConfig]:
             circuit_fail_threshold=_opt(item, "circuit_fail_threshold", 5),
             bars_fallback=_expect_bool(
                 _opt(item, "bars_fallback", False),
-                f"providers[{_opt(item, 'name', '')}].bars_fallback",
+                f"providers[{name}].bars_fallback",
             ),
+            bars_priority=_expect_int(
+                _opt(item, "bars_priority", 0),
+                f"providers[{name}].bars_priority",
+                minimum=-1000,
+                maximum=1000,
+            ),
+            read_only=_expect_bool(
+                _opt(item, "read_only", False),
+                f"providers[{name}].read_only",
+            ),
+            trust_tier=_opt(item, "trust_tier", "T0_UNKNOWN"),
+            allow_live_decision=_expect_bool(
+                _opt(item, "allow_live_decision", True),
+                f"providers[{name}].allow_live_decision",
+            ),
+            allow_model_training=_expect_bool(
+                _opt(item, "allow_model_training", True),
+                f"providers[{name}].allow_model_training",
+            ),
+            allow_public_redistribution=_expect_bool(
+                _opt(item, "allow_public_redistribution", True),
+                f"providers[{name}].allow_public_redistribution",
+            ),
+            release_version=_opt(item, "release_version", ""),
+            binary_inventory_sha256=_opt(item, "binary_inventory_sha256", ""),
+            data_snapshot_manifest_sha256=_opt(item, "data_snapshot_manifest_sha256", ""),
+            sync_manifest_sha256=_opt(item, "sync_manifest_sha256", ""),
         ))
     return out
 

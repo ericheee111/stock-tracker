@@ -1,5 +1,19 @@
 """Temporal evaluation, calibration and frozen holdout governance."""
 
+from .attribution import (
+    DEFAULT_OUTCOME_ATTRIBUTION_POLICY,
+    DEFAULT_VERSION_COMPARISON_POLICY,
+    AttributionCategory,
+    AttributionContractError,
+    AttributionFinding,
+    AttributionSeverity,
+    AttributionState,
+    OutcomeAttribution,
+    OutcomeAttributionPolicy,
+    StrategyVersionComparison,
+    VersionComparisonPolicy,
+    VersionComparisonState,
+)
 from .calibration import (
     CalibrationContractError,
     CalibrationMethod,
@@ -8,6 +22,15 @@ from .calibration import (
     PlattCalibrator,
     fit_temporal_calibrator,
     select_completed_rows,
+)
+from .decision_quality import (
+    DEFAULT_DECISION_QUALITY_POLICY,
+    DecisionQualityAssessment,
+    DecisionQualityContractError,
+    DecisionQualityEvidence,
+    DecisionQualityPolicy,
+    DecisionQualityState,
+    ResearchLicenseStatus,
 )
 from .holdout import (
     FrozenHoldout,
@@ -29,6 +52,15 @@ from .metrics import (
     profit_factor,
     top_k_net_expectancy,
 )
+from .shadow_lifecycle import (
+    DEFAULT_SHADOW_LIFECYCLE_POLICY,
+    ShadowEvidenceState,
+    ShadowLifecycleContractError,
+    ShadowLifecyclePolicy,
+    ShadowValidationEvidence,
+    StrategyLifecycleAssessment,
+    StrategyLifecycleState,
+)
 from .walk_forward import (
     TemporalSample,
     WalkForwardConfig,
@@ -40,19 +72,45 @@ from .walk_forward import (
 )
 
 __all__ = [
+    "DEFAULT_DECISION_QUALITY_POLICY",
+    "DEFAULT_OUTCOME_ATTRIBUTION_POLICY",
+    "DEFAULT_SHADOW_LIFECYCLE_POLICY",
+    "DEFAULT_VERSION_COMPARISON_POLICY",
+    "AttributionCategory",
+    "AttributionContractError",
+    "AttributionFinding",
+    "AttributionSeverity",
+    "AttributionState",
     "CalibrationBin",
     "CalibrationContractError",
     "CalibrationMethod",
     "CalibrationRow",
+    "DecisionQualityAssessment",
+    "DecisionQualityContractError",
+    "DecisionQualityEvidence",
+    "DecisionQualityPolicy",
+    "DecisionQualityState",
     "FrozenHoldout",
     "FrozenHoldoutRecord",
     "HoldoutContractError",
     "HoldoutState",
     "IsotonicCalibrator",
     "MetricContractError",
+    "OutcomeAttribution",
+    "OutcomeAttributionPolicy",
     "PlattCalibrator",
     "ProbabilityMetrics",
+    "ResearchLicenseStatus",
+    "ShadowEvidenceState",
+    "ShadowLifecycleContractError",
+    "ShadowLifecyclePolicy",
+    "ShadowValidationEvidence",
+    "StrategyLifecycleAssessment",
+    "StrategyLifecycleState",
+    "StrategyVersionComparison",
     "TemporalSample",
+    "VersionComparisonPolicy",
+    "VersionComparisonState",
     "WalkForwardConfig",
     "WalkForwardContractError",
     "WalkForwardFold",

@@ -8,6 +8,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
 from datetime import date, datetime
+from decimal import Decimal
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,15 @@ def _canonicalize(value: Any) -> Any:
         if not math.isfinite(value):
             raise FingerprintError("NaN and infinity are forbidden in fingerprints")
         return value
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise FingerprintError("non-finite Decimal values are forbidden in fingerprints")
+        text = format(value, "f")
+        if "." in text:
+            text = text.rstrip("0").rstrip(".")
+        if value == 0:
+            text = "0"
+        return {"__decimal__": text}
     if isinstance(value, Enum):
         return _canonicalize(value.value)
     if isinstance(value, datetime):

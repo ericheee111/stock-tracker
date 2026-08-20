@@ -38,3 +38,30 @@ max_rps = 5
 backoff_base_sec = 1.0
 backoff_max_sec = 60.0
 circuit_fail_threshold = 5
+
+# Stage 3C：可选本地行情 Sidecar。默认关闭；仅允许 localhost、只读、RAW Bar。
+# 启用前必须固定并填写实际 release 与本地数据/清单/二进制 SHA-256。
+[[providers]]
+name = "free_stockdb"
+cls = "FreeStockDbProvider"
+markets = ["a"]
+enabled = false
+primary = false
+supports_snapshot = false
+host = "127.0.0.1:7899"
+timeout_ms = 3000
+max_rps = 20
+backoff_base_sec = 1.0
+backoff_max_sec = 30.0
+circuit_fail_threshold = 3
+bars_fallback = false
+bars_priority = 30
+read_only = true
+trust_tier = "T1_BEST_EFFORT"
+allow_live_decision = false
+allow_model_training = false
+allow_public_redistribution = false
+release_version = ""
+binary_inventory_sha256 = ""
+data_snapshot_manifest_sha256 = ""
+sync_manifest_sha256 = ""
