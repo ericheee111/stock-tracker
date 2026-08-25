@@ -223,6 +223,23 @@ OPERATIONAL_DEVICE_ACCEPTANCE_PENDING
 
 The operational verdict remains pending because this host has no Tailscale CLI and the session has no second controllable Tailnet node. This does not block engineering merge/push, but it blocks any claim that real Serve or two-device acceptance passed.
 
-## 14. Remaining H0 task
+## 14. Task I — scoped Git delivery
 
-- Task I: create scoped commit(s), push `origin/main`, verify remote SHA equality and record the final delivery here.
+Status: `COMPLETED`
+
+- Created implementation commit `cf5b5f8eeae93c4147d6b607b30c3c569247a2b1` with message `feat: implement hybrid H0 private bootstrap`.
+- Pushed `main` to `origin` successfully.
+- Verified exact SHA equality across local `HEAD`, local remote-tracking `origin/main`, and `git ls-remote --heads origin main`:
+
+```text
+cf5b5f8eeae93c4147d6b607b30c3c569247a2b1
+```
+
+- The pushed commit contains only the PRD/hybrid architecture/H0 implementation, tests and review documents. Concurrent UI changes, `build/`, ZIP packages, QA screenshots, runtime data and the tracked Python cache artifact were not included.
+- The worktree intentionally remains dirty because those unrelated concurrent changes are preserved rather than reset, cleaned or swept into H0.
+- `OPERATIONAL_DEVICE_ACCEPTANCE` remains `PENDING` until Tailscale is installed and signed in on the server and a distinct Tailnet node runs the real `server/client` acceptance.
+
+## 15. Next continuation point
+
+- Complete real Tailscale Serve and two-distinct-node operational acceptance when the devices are available.
+- Continue the next code slice with Hybrid H1/H2: Runtime Config/API Base separation, exact CORS/`OPTIONS`, Runtime Health, version handshake and offline/auth state separation.

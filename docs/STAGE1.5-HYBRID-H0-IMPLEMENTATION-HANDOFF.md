@@ -203,9 +203,13 @@ production DB hash equal = true
 - H0 不实现 Cloudflare Pages/GitHub Pages，属于 H4；
 - 未获取真实行情，也未改变 Quant、信号、模型、概率或交易语义。
 
-## 6. 接续顺序
+## 6. Git 交付与接续顺序
 
-1. 精确 staging，排除并行 UI/build/ZIP/cache/data 工作；
-2. Git commit + push + 远端 SHA 一致性验证；
-3. 在目标宿主和第二台 Tailnet 设备补齐 operational 验收；
-4. 进入 Hybrid H1/H2。
+- H0 实现提交：`cf5b5f8eeae93c4147d6b607b30c3c569247a2b1`（`feat: implement hybrid H0 private bootstrap`）；
+- 已推送 `origin/main`，并验证 local `HEAD`、`origin/main`、远端 `refs/heads/main` 三者 SHA 完全一致；
+- 并行 UI/build/ZIP/cache/data/screenshot 工作未进入该提交。
+
+接续顺序：
+
+1. 在目标宿主和第二台 Tailnet 设备补齐 operational 验收；
+2. 进入 Hybrid H1/H2。
