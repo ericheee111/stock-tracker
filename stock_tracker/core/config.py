@@ -17,7 +17,7 @@ from . import types as T
 
 @dataclass(slots=True)
 class ServerConfig:
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8080
 
 
@@ -176,6 +176,18 @@ def _expect_bool(value: object, name: str) -> bool:
     return value
 
 
+def _expect_string(value: object, name: str, *, nonempty: bool = False) -> str:
+    """Require an actual TOML string and optionally reject blank values."""
+
+    if type(value) is not str:
+        raise ConfigError(f"{name} 必须是 TOML string")
+    if value != value.strip():
+        raise ConfigError(f"{name} 不能包含首尾空白")
+    if nonempty and not value:
+        raise ConfigError(f"{name} 不能为空")
+    return value
+
+
 def _expect_int(
     value: object,
     name: str,
@@ -196,10 +208,21 @@ def _expect_int(
 
 def load_app(path: str, root_dir: str) -> AppConfig:
     d = _read_toml(path)
-    srv = ServerConfig(**_opt(d, "server", {})) if isinstance(_opt(d, "server", {}), dict) else ServerConfig()
+    server_d = d.get("server", {})
+    if not isinstance(server_d, dict):
+        raise ConfigError("server 必须是 TOML table")
     srv = ServerConfig(
-        host=_opt(d.get("server", {}), "host", "0.0.0.0"),
-        port=_opt(d.get("server", {}), "port", 8080),
+        host=_expect_string(
+            _opt(server_d, "host", "127.0.0.1"),
+            "server.host",
+            nonempty=True,
+        ),
+        port=_expect_int(
+            _opt(server_d, "port", 8080),
+            "server.port",
+            minimum=1,
+            maximum=65535,
+        ),
     )
     log = LoggingConfig(
         level=_opt(d.get("logging", {}), "level", "INFO"),

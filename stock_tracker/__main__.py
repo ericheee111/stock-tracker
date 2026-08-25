@@ -30,6 +30,7 @@ from .collector.tencent import TencentProvider
 from .core.config import load_configs
 from .core.eventbus import get_bus
 from .core.logging import setup_logging
+from .core.network import UnsafeBindError, require_safe_bind
 from .core.store import MarketStore
 from .data_quality.gate import DataQualityGate
 from .features.engine import FeatureEngine
@@ -82,6 +83,11 @@ def build_context(args) -> tuple:
             except ValueError:
                 logger.warning("$PORT 非整数，忽略：%s", env_port)
 
+    require_safe_bind(
+        bundle.app.server.host,
+        allow_non_loopback=getattr(args, "allow_non_loopback", False),
+    )
+
     root_dir = bundle.app.root_dir or os.path.dirname(os.path.abspath(args.config_dir))
     web_root = os.path.join(root_dir, "web")
 
@@ -94,8 +100,13 @@ def build_context(args) -> tuple:
     # 不经 scripts/start.py 预建 data/ 目录；此处确保父目录存在，避免 SQLite 打开即崩溃。
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
-    logger.info("Stock Tracker 启动 | root=%s | db=%s | port=%s",
-                root_dir, db_path, bundle.app.server.port)
+    logger.info(
+        "Stock Tracker 启动 | root=%s | db=%s | bind=%s:%s",
+        root_dir,
+        db_path,
+        bundle.app.server.host,
+        bundle.app.server.port,
+    )
 
     store = MarketStore()
     repo = Repository(db_path)
@@ -120,7 +131,13 @@ def build_context(args) -> tuple:
 
     scheduler = Scheduler(bundle, store, repo, router, feature_engine,
                           signal_manager, gate, logger)
-    api_server = APIServer(bundle.app.server.host, bundle.app.server.port, ctx, logger)
+    api_server = APIServer(
+        bundle.app.server.host,
+        bundle.app.server.port,
+        ctx,
+        logger,
+        allow_non_loopback=getattr(args, "allow_non_loopback", False),
+    )
     return ctx, scheduler, api_server, logger
 
 
@@ -162,7 +179,11 @@ def _self_check(ctx, scheduler, logger) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    ctx, scheduler, api_server, logger = build_context(args)
+    try:
+        ctx, scheduler, api_server, logger = build_context(args)
+    except UnsafeBindError as exc:
+        print(f"Stock Tracker 启动被拒绝：{exc}", file=sys.stderr)
+        return 2
 
     if args.once:
         return _self_check(ctx, scheduler, logger)

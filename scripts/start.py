@@ -6,23 +6,32 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
 import time
 
-import argparse
-
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PID_FILE = os.path.join(ROOT, "data", "stock_tracker.pid")
 LOG_FILE = os.path.join(ROOT, "data", "startup.log")
+LOCAL_BIND_HOST = "127.0.0.1"
+
+
+def build_start_command(port: int | None = None) -> list[str]:
+    """Return the local-safe child command without starting a process."""
+
+    cmd = [sys.executable, "-m", "stock_tracker", "--host", LOCAL_BIND_HOST]
+    if port is not None:
+        cmd += ["--port", str(port)]
+    return cmd
 
 
 def _read_pid() -> int | None:
     try:
         with open(PID_FILE, "r", encoding="utf-8") as fh:
             return int(fh.read().strip())
-    except Exception:
+    except (OSError, ValueError):
         return None
 
 
@@ -39,7 +48,7 @@ def _is_running(pid: int) -> bool:
             kernel32.CloseHandle(handle)
             return True
         return False
-    except Exception:
+    except (AttributeError, OSError):
         # 非 Windows：用 os.kill 试探
         try:
             os.kill(pid, 0)
@@ -54,9 +63,8 @@ def start(port: int | None = None) -> int:
         print(f"[start] 已在运行 (pid={pid})，跳过启动。")
         return pid
     os.makedirs(os.path.dirname(PID_FILE), exist_ok=True)
-    cmd = [sys.executable, "-m", "stock_tracker"]
-    if port:
-        cmd += ["--port", str(port)]
+    # 本地一键启动始终显式绑定 loopback；纯云实验不得复用本脚本绕过确认门。
+    cmd = build_start_command(port)
     # 以项目根为工作目录，保证 config/ 与 data/ 相对路径正确
     with open(LOG_FILE, "a", encoding="utf-8") as lf:
         proc = subprocess.Popen(
@@ -85,11 +93,11 @@ def stop() -> None:
         if handle:
             kernel32.TerminateProcess(handle, 0)
             kernel32.CloseHandle(handle)
-    except Exception:
+    except (AttributeError, OSError):
         try:
             os.kill(pid, 9)
-        except Exception:
-            pass
+        except OSError as exc:
+            print(f"[stop] 无法终止 pid={pid}：{exc}")
     if os.path.exists(PID_FILE):
         os.remove(PID_FILE)
     print(f"[stop] 已停止 pid={pid}。")
@@ -101,17 +109,20 @@ def status() -> None:
     print(f"[status] pid={pid} running={running}")
     if running:
         # 简单端口探测
-        try:
-            import urllib.request
+        import urllib.request
 
-            for p in (8080,):
-                try:
-                    with urllib.request.urlopen(f"http://127.0.0.1:{p}/api/provider_health", timeout=3) as r:
-                        print(f"[status] http://127.0.0.1:{p} 可达 (HTTP {r.status})")
-                except Exception as e:
-                    print(f"[status] http://127.0.0.1:{p} 不可达：{e}")
-        except Exception:
-            pass
+        for p in (8080,):
+            try:
+                with urllib.request.urlopen(
+                    f"http://127.0.0.1:{p}/api/provider_health",
+                    timeout=3,
+                ) as response:
+                    print(
+                        f"[status] http://127.0.0.1:{p} 可达 "
+                        f"(HTTP {response.status})"
+                    )
+            except OSError as exc:
+                print(f"[status] http://127.0.0.1:{p} 不可达：{exc}")
 
 
 def main() -> None:

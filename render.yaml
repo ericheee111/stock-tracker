@@ -1,7 +1,9 @@
-# Render 部署清单（免费层 web 服务）
-# 部署方式：将本仓库连到 Render 的 Blueprint，自动据此创建服务。
-# 注意：本系统实时行情依赖中国大陆接口（腾讯/东财/新浪），
-#       建议选 ap-southeast（Singapore）以尽量靠近大陆、提升真实数据可达性。
+# Render 纯云实验清单（非默认生产部署）
+# 默认生产模式见 docs/HYBRID-DEPLOYMENT-ARCHITECTURE-v1.md：
+# Local Engine + Cloudflare Pages/GitHub Pages + Tailscale Serve。
+# 本清单仅用于 Demo、海外节点数据源可达性探测和纯云门禁实验。
+# A 股上游可达性、持续调度、持久化和私有数据安全未通过门禁前，
+# 不得把该免费 Render 服务标记为生产可用。Oracle Cloud 不作为备选依赖。
 services:
   - type: web
     name: stock-tracker
@@ -13,11 +15,13 @@ services:
     region: singapore
     # 健康检查：返回 200 即视为就绪
     healthCheckPath: /api/provider_health
-    # Render 会注入 PORT 环境变量；应用读取之并绑定 0.0.0.0
+    # Render 会注入 PORT；Docker CMD 通过 --host 0.0.0.0 +
+    # --allow-non-loopback 双重显式确认 PURE_CLOUD_EXPERIMENTAL 绑定。
     envVars:
       - key: PORT
         value: "8080"
       - key: PYTHONUNBUFFERED
         value: "1"
-# 免费层 web 服务在空闲约 15 分钟后会休眠；首次请求触发冷启动（约数秒），
-# 休眠期间实时采集会暂停，属已知限制。
+# 免费层 web 服务在空闲约 15 分钟后会休眠；重新唤醒通常需要约一分钟，
+# 休眠期间实时采集会暂停；本地文件系统为临时存储且免费实例不能挂持久磁盘。
+# 这些限制正是该清单不能成为默认生产后端的原因。

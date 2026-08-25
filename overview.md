@@ -1,9 +1,11 @@
-# Stock Tracker v1.0 项目概览
+# Stock Tracker v1.1 项目概览
 
 > **定位：A 股优先的个人交易决策驾驶舱**
 > 核心问题：**今天该怎么操作？**
 > 市场优先级：A 股第一、港股通第二、美股第三
 > 当前范围：辅助判断与手工执行；不承诺收益，不自动下单
+> 默认部署：`HYBRID_PRIVATE`（本地数据与决策引擎 + 云端静态网页 + Tailscale Serve）
+> 纯云后端：可选实验，不作为上线前置条件；Oracle Cloud 已排除
 
 ---
 
@@ -40,6 +42,27 @@ Stock Tracker 不把“指标很多”或“模型分数很高”当成最终答
 - Opportunity / Timing / Risk / Confidence；
 - Risk Gate、信号状态机、Next Trigger、What Changed、拥挤度；
 - REST、SSE 与原有驾驶舱页面。
+
+### 部署现状与目标
+
+当前已经具备：
+
+- 本地 Python 后端同时托管静态前端和 `/api/...`；
+- 私有 API 的 loopback 免认证与强 Bearer Token 安全边界；
+- fetch-stream SSE，可发送 Authorization Header；
+- Hybrid H0 loopback 默认安全、非 loopback 显式确认、Tailscale Serve 运维 CLI 与临时数据库验收工具；
+- 本地远程式静态页、REST、SSE、Profile/Position CRUD 验收通过；
+- Docker / Render Demo 配置只以 `PURE_CLOUD_EXPERIMENTAL` 显式 opt-in。
+
+当前尚未具备完整混合部署能力：
+
+- 前端 REST/SSE 仍写死同源相对路径；
+- 真实宿主上的 Tailscale Serve 尚未启用，且未在两台不同 Tailnet 设备上完成 operational 验收；
+- 尚无无密钥 Runtime Config 和统一 `apiBaseUrl`；
+- 尚无精确 CORS Allowlist、`OPTIONS` 和 `/api/runtime/health`；
+- 尚未完成 Cloudflare Pages/GitHub Pages、开机自启、休眠防护和断线恢复验收。
+
+因此 Render 免费后端只保留实验定位；默认目标是本地引擎承担采集、计算、SQLite 和私有持仓，云端只托管静态网页。
 
 ### Stage 1 Today Action
 
@@ -145,7 +168,7 @@ Stage 1 只实际启用已经有确定性证据支持的动作；部分止盈和
 - Web 端只从当前浏览器会话的 `sessionStorage.stockTrackerPrivateAccess` 读取访问值；
 - 私有访问值不得提交到 Git、写入公开前端或日志。
 
-本机浏览器无需额外设置。公网私有部署需由用户主动配置服务端环境变量，并在当前浏览器会话中设置相同访问值。
+本机浏览器无需额外设置。默认远程模式使用 Tailscale Serve，Backend 只监听 loopback，家庭路由器不做端口转发；访问设备加入 Tailnet，并继续使用强 Bearer Token 作为纵深防御。需要公开给少量朋友时，才评估 Tailscale Funnel 或自有域名 + Cloudflare Tunnel。云端静态站点不得保存账户、持仓、成本或私有访问值。
 
 ---
 
@@ -163,6 +186,7 @@ Stage 1 只实际启用已经有确定性证据支持的动作；部分止盈和
 - T3 研究级完整 A 股 Snapshot；
 - 模型已经真实击败简单基线；
 - 港股通和美股独立校准；
+- 混合部署所需的 Runtime Config、跨域 CORS、Runtime Health、Tailscale Serve 与云端静态部署验收；
 - 自动下单。
 
 因此：
@@ -221,31 +245,56 @@ python scripts/run_stage1_today_integration.py
 
 1. `AGENTS.md`
 2. `docs/PRD-股票辅助判断与交易参考网站.md`
-3. `docs/PRODUCT-GAP-MATRIX-v1.0.md`
-4. `docs/STAGE1-API-CONTRACT-v1.md`
-5. `docs/HANDOFF.md`
-6. `docs/VALIDATED-STRATEGY-ML-LIBRARY.md`
-7. `docs/CODEX-QUANT-FOUNDATION-INTEGRATION.md`
-8. `docs/STAGE2D-STAGE4-EXECUTION-ROADMAP.md`
-9. `docs/STAGE3C-FREE-STOCKDB-SIDECAR-CONTRACT.md`
-10. `docs/STAGE4C-STAGE6A-EXECUTION-ROADMAP.md`
-11. `docs/STAGE5A-DECISION-QUALITY-GATE.md`
-12. `docs/STAGE5B-SHADOW-LIFECYCLE-CONTRACT.md`
-13. `docs/STAGE6A-MARKET-ISOLATION-CONTRACT.md`
+3. `docs/HYBRID-DEPLOYMENT-ARCHITECTURE-v1.md`
+4. `docs/PRODUCT-GAP-MATRIX-v1.1.md`
+5. `docs/STAGE1-API-CONTRACT-v1.md`
+6. `docs/HANDOFF.md`
+7. `docs/VALIDATED-STRATEGY-ML-LIBRARY.md`
+8. `docs/CODEX-QUANT-FOUNDATION-INTEGRATION.md`
+9. `docs/STAGE2D-STAGE4-EXECUTION-ROADMAP.md`
+10. `docs/STAGE3C-FREE-STOCKDB-SIDECAR-CONTRACT.md`
+11. `docs/STAGE4C-STAGE6A-EXECUTION-ROADMAP.md`
+12. `docs/STAGE5A-DECISION-QUALITY-GATE.md`
+13. `docs/STAGE5B-SHADOW-LIFECYCLE-CONTRACT.md`
+14. `docs/STAGE6A-MARKET-ISOLATION-CONTRACT.md`
 
 ---
 
 ## 8. 当前下一步
 
-Stage 2B—6A 的后端工程合同已经形成。后续优先级按“先补真实证据，再扩产品表面”执行：
+Stage 2B—6A 的后端工程合同已经形成。考虑到纯云持续运行、持久化和 A 股数据源可达性的不确定性，接下来先形成可安全使用的混合部署基线，再继续补真实研究证据：
 
-1. **Stage 3C.2：固定真实 free-stockdb Release，审计二进制、首次运行网络、同步源、manifest 和数据许可；**
-2. **执行 50—100 个代表性标的的 RAW 日线/分钟线多源差异矩阵，审计通过后才进入 WARM/COLD Shadow Scanner 与 EOD Reconciliation；**
-3. **建设真实 Outcome 的追加式持久化与独立样本收集，达到门槛前 Strategy Scoreboard 保持 `INSUFFICIENT_REAL_EVIDENCE`；**
-4. **闭环 T3 A 股 Snapshot、正式 PIT Replay 和 Replay UI；**
-5. **建设真实新样本 Shadow 服务和受控模型部署流程，Stage 5A/5B 只提供建议，不直接改权重或部署；**
-6. **Stage 6B/6C：港股通权威 Universe、日历、状态、公司行为、成本、Provider、PIT 数据和独立校准；**
-7. **Stage 6D/6E：美股独立 Universe、退市/拆股/分红、交易规则、Provider、PIT 数据、Scoreboard 和 Shadow；**
-8. **Stage 6F：对港股通和美股分别做独立真实证据审查，未通过前不得进入 ACTIVE。**
+1. **补齐 Hybrid H0 operational 验收：在安装并登录 Tailscale 的服务端启用 Serve，并从第二台独立 Tailnet 设备验证静态页、REST、SSE 和临时 Portfolio CRUD；工程实现与本地远程式验收已经完成；**
+2. **Hybrid H1：前端新增无密钥 Runtime Config、固定 Allowed API Origin/Engine ID、统一 URL Builder，并按 API Origin 分区私有 Token；**
+3. **Hybrid H2：实现精确 CORS Allowlist、`OPTIONS`、`GET /api/runtime/health`、版本握手和离线/认证错误状态；**
+4. **Hybrid H3/H4：加固 Tailscale Serve Target Lane、开机自启和恢复，并将静态网页部署到 Cloudflare Pages（GitHub Pages 备选）；**
+5. **Hybrid H5：可信朋友优先加入 Tailnet；只有确需公开时才试用 Tailscale Funnel 或自有域名 + Cloudflare Tunnel；**
+6. **Stage 3C.2：固定真实 free-stockdb Release，审计二进制、首次运行网络、同步源、manifest 和数据许可；**
+7. **执行 50—100 个代表性标的的 RAW 日线/分钟线多源差异矩阵，审计通过后才进入 WARM/COLD Shadow Scanner 与 EOD Reconciliation；**
+8. **建设真实 Outcome 的追加式持久化与独立样本收集，达到门槛前 Strategy Scoreboard 保持 `INSUFFICIENT_REAL_EVIDENCE`；**
+9. **闭环 T3 A 股 Snapshot、正式 PIT Replay、Replay UI、真实新样本 Shadow 与受控模型部署；**
+10. **依次进入 Stage 6B—6F 的港股通、美股独立数据、校准、Scoreboard、Shadow 与真实证据审查。**
+
+默认方案不依赖 Oracle Cloud、付费域名或付费云后端。本地机器关闭、休眠、断网或 Tunnel 中断时，云端页面虽然仍可加载，但必须显示 `ENGINE_OFFLINE`/`STALE`，不得继续展示旧的可执行动作。
 
 在真实审计完成前，`free_stockdb.enabled` 保持 `false`；在真实 Outcome、许可和 T3 数据不足时，不展示真实胜率、真实 Big Trend 捕获率或正式模型晋级结论。跨市场阈值、校准和模型只能进入目标市场零权重 Shadow，不能直接复用到生产。
+
+---
+
+## 9. 部署规范来源（2026-08-24）
+
+默认正式路线不再要求完整后端常驻公有云：
+
+```text
+默认模式 `HYBRID_PRIVATE`：本地 Provider、free-stockdb、SQLite、Quant、Replay、持仓与私有 API
+云端：静态网页与无密钥 Runtime Config；可选脱敏快照仅为后续非默认能力
+连接：本地主动建立的安全出站通道，禁止直接暴露 Sidecar
+```
+
+规范模式名统一为 `LOCAL_ONLY / HYBRID_PRIVATE / HYBRID_PUBLIC_AUTH / PURE_CLOUD_EXPERIMENTAL`，其中 `HYBRID_PRIVATE` 是当前默认正式模式；可选 `HYBRID_SNAPSHOT` 仅为后续、非默认、脱敏只读能力。`PURE_CLOUD_EXPERIMENTAL` 只有在真实数据可达性、持久化、授权、成本和安全全部通过后才可升级。Oracle Cloud 因无法注册已移出候选和依赖链。
+
+详细架构与阶段见：
+
+```text
+docs/HYBRID-DEPLOYMENT-ARCHITECTURE-v1.md
+```

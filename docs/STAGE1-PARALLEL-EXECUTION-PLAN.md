@@ -23,7 +23,7 @@
 
 1. `AGENTS.md`
 2. `docs/PRD-股票辅助判断与交易参考网站.md`
-3. `docs/PRODUCT-GAP-MATRIX-v1.0.md`
+3. `docs/PRODUCT-GAP-MATRIX-v1.1.md`（该文件保留 Stage 1 历史审计并新增 v1.1 部署差距）
 4. `docs/STAGE1-PARALLEL-EXECUTION-PLAN.md`
 5. `docs/STAGE1-API-CONTRACT-v1.md`
 6. `docs/HANDOFF.md`

@@ -389,8 +389,14 @@ API/前端改动必须保持：
 - UI 不把合成战绩或 Model Score 写成真实成功率；
 - REST 只读本地状态，不因为页面刷新访问上游；
 - 含账户净值、持仓和建议股数的 `/api/brief/today`、`/api/portfolio*` 必须视为私有 API；本机免认证必须同时校验 loopback 客户端与 localhost Host，公网/反向代理必须认证或失败关闭；
-- 私有访问值只能来自运行环境或当前浏览器会话，禁止写入仓库、公开前端、日志和错误响应；
-- SSE 只推送有意义的状态变化，避免重复轰炸。
+- 默认部署是 `HYBRID_PRIVATE`：Local Engine 负责采集、计算、SQLite、Artifact、持仓和决策事实，云端只托管静态前端；Oracle Cloud 不得成为实现依赖；
+- Backend 默认只监听 loopback，禁止用家庭路由器端口转发或直接监听公网网卡替代安全访问层；
+- 混合部署的 REST、SSE 和 Health 必须通过统一 `apiBaseUrl`/URL Builder，未配置时才回退到 same-origin；
+- 跨域私有 API 必须使用精确 Origin Allowlist、`OPTIONS`、`Vary: Origin` 和 Authorization Header，禁止 `Access-Control-Allow-Origin: *`；
+- 私有访问值只能来自运行环境或当前浏览器会话，并按规范化 API Origin 分区；Origin 变化时必须清除并重新认证，禁止写入仓库、Runtime Config、公开前端、URL、日志和错误响应；
+- 云端静态站点不得持久化账户净值、现金、持仓、成本、备注或私有 DecisionBrief；
+- 页面可加载不代表 Engine 在线；Engine/Tunnel/Auth/CORS/Version/Stale 必须分开显示，旧数据不得继续标为 `EXECUTABLE`；
+- SSE 使用支持 Authorization Header 的 fetch-stream，只推送有意义的状态变化并避免重复轰炸。
 
 修改前端后，尽量运行 `qa/` 下相关契约或 Playwright 检查；不能运行时必须明确说明。
 
@@ -570,15 +576,19 @@ python -m stock_tracker --once
 
 1. Stage 0：PRD 冻结与现状 Gap Audit（已完成）；
 2. Stage 1 核心：Today Action 决策合同、Portfolio 后端、真实 Brief API 与首页（已完成）；
-3. Stage 1.1：Portfolio 设置/持仓编辑 UI 与真实 REST CRUD 验收（当前下一步）；
-4. Stage 2：A 股数据与决策质量；
-5. Stage 3A/3B：Event Intelligence + Big Trend v1；
-6. Stage 3C.1：可选本地行情 Sidecar 隔离合同，默认关闭；
-7. Stage 3C.2/3C.3：固定发行版与真实数据审计，通过后再进入 WARM/COLD Shadow；
-8. Stage 4：Strategy Scoreboard + Replay；
-9. Stage 5：真实数据上的模型准确率迭代；
-10. Stage 6：港股通与美股独立扩展；
-11. Stage 7：可选券商只读能力及单独审批的执行路线。
+3. Stage 1.1：Portfolio 设置/持仓编辑 UI 与真实 REST CRUD 验收；
+4. Stage 1.5 / Hybrid H0：Backend 显式 loopback + Tailscale Serve 整站同源 Bootstrap（工程实现与本地远程式验收已完成；真实 Serve/两设备 operational 验收待补）；
+5. Stage 1.5 / Hybrid H1：前端 Runtime Config、Allowed API Origin/Engine ID、统一 URL Builder 与 Origin-scoped Token；
+6. Stage 1.5 / Hybrid H2：精确 CORS、`OPTIONS`、Runtime Health、版本握手与离线状态；
+7. Stage 1.5 / Hybrid H3/H4：Tailscale Serve Target Lane、开机自启及 Cloudflare Pages/GitHub Pages 静态部署；
+8. Stage 2：A 股数据与决策质量；
+9. Stage 3A/3B：Event Intelligence + Big Trend v1；
+10. Stage 3C.1：可选本地行情 Sidecar 隔离合同，默认关闭；
+11. Stage 3C.2/3C.3：固定发行版与真实数据审计，通过后再进入 WARM/COLD Shadow；
+12. Stage 4：Strategy Scoreboard + Replay；
+13. Stage 5：真实数据上的模型准确率迭代；
+14. Stage 6：港股通与美股独立扩展；
+15. Stage 7：可选券商只读能力及单独审批的执行路线。
 
 不要因为已有旧 Wave 编号而跳过用户价值和依赖关系。
 
@@ -597,3 +607,23 @@ python -m stock_tracker --once
 - 下一步建议。
 
 不得声称未实际完成的动作，不得用历史测试结果替代当前验证，不得把“代码存在”写成“真实策略已验证”。
+
+## 23. Hybrid Deployment Boundaries
+
+部署实现以 `docs/HYBRID-DEPLOYMENT-ARCHITECTURE-v1.md` 和 PRD v1.1 为准；若旧文档或历史记录使用其他 Mode/Stage 名称，以该主规格为唯一规范来源：
+
+- 默认正式模式是 `HYBRID_PRIVATE`：本地 Backend/Collector/SQLite/Quant/Replay + 云端静态 Web + Tailscale Serve；
+- `LOCAL_ONLY` 必须始终可用，不能因云端、Tunnel 或域名不可用而阻塞核心功能；
+- `PURE_CLOUD_EXPERIMENTAL` 是独立可行性实验，不是 MVP 前置条件；
+- Oracle Cloud 已排除，不得将账号注册、实例或免费额度作为任何阶段依赖；
+- `render.yaml`、Dockerfile 和 Procfile 只代表可选 `PURE_CLOUD_EXPERIMENTAL` 探针，不代表默认部署方案；
+- 云端静态页面不得直连行情 Provider 或 `free-stockdb`；
+- `free-stockdb` 必须保持 localhost、只读、T1、默认关闭，不得通过公网直接暴露；
+- 持仓、账户净值、股数、成本、完整 SQLite 和服务端凭据默认留在本地；
+- 前端 API/SSE 地址必须运行时配置，禁止把私有 Endpoint 或 Token 编译到公开静态文件；
+- Engine 离线、Tunnel 故障、认证失败、Provider 故障和 Snapshot 过期必须是不同状态；
+- 断连或过期数据不得生成新的强执行动作；
+- Tunnel/Gateway、静态托管和 Snapshot Relay 必须是可替换适配层，不能侵入 Quant 核心；
+- 所有远程写接口必须保留认证、Origin、幂等和审计边界；
+- 可选 `HYBRID_SNAPSHOT` 只能作为后续非默认能力；云端 Snapshot 必须显式脱敏、签名、带 TTL、只读并支持删除，且不得包含账户级事实；
+- 任何纯云实现都必须先证明 Provider 可达性、持久化、授权、成本和恢复能力。

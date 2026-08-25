@@ -1,0 +1,17 @@
+# Never send local runtime/private artifacts into PURE_CLOUD_EXPERIMENTAL images.
+.git/
+.ai-bridge/
+.pytest_cache/
+**/__pycache__/
+**/*.py[cod]
+/data/
+/build/
+*.zip
+*.tar
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.pid
+/qa/shots/
+/qa/ui/shots/

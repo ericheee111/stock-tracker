@@ -1,18 +1,20 @@
-# Stock Tracker v1.0 产品需求与决策引擎设计书
+# Stock Tracker v1.1 产品需求、决策引擎与混合部署设计书
 
 > **副标题：A 股优先的个人交易决策驾驶舱**
 >
-> 文档版本：v1.0（Grill 对齐重构版）
+> 文档版本：v1.1（Grill 对齐 + 混合部署重构版）
 >
-> 文档状态：Design Freeze Candidate
+> 文档状态：Design Freeze（v1.1 产品与混合部署合同已冻结；实现验收按 Stage 路线继续）
 >
-> 对齐日期：2026-08-13
+> 对齐日期：2026-08-24
 >
 > 产品定位：个人交易辅助系统；不承诺收益，当前不直接下单
 >
 > 市场优先级：**A 股第一；港股通第二；美股第三**
 >
 > 成本原则：**先按零成本或接近零成本实现；只有在数据质量、覆盖率或时效性得到明确提升时，才考虑每月几十元级升级**
+>
+> 部署原则：**默认采用“本地数据与决策引擎 + 云端静态网页 + 安全远程访问”；纯云后端是可选升级，不是上线前置条件；Oracle Cloud 不再作为候选路径**
 >
 > 本文档是产品需求与交付优先级的主来源。量化正确性、Point-in-Time、数据可信等级、回测、模型晋级和失败关闭细节，继续受 `docs/VALIDATED-STRATEGY-ML-LIBRARY.md`、`docs/CODEX-QUANT-FOUNDATION-INTEGRATION.md` 和现有 Quant Foundation 合同约束。
 
@@ -49,7 +51,7 @@
 下一轮特征、策略与模型迭代
 ```
 
-旧 v0.4 中有价值的底层算法、数据治理和研究约束没有被否定；它们由算法库、Quant 合同、架构和 Git 历史继续保存。v1.0 的变化是重新确定产品中心、市场优先级、Feature 优先级和开发顺序。
+旧 v0.4 中有价值的底层算法、数据治理和研究约束没有被否定；它们由算法库、Quant 合同、架构和 Git 历史继续保存。v1.x 的变化是重新确定产品中心、市场优先级、Feature 优先级、部署形态和开发顺序。
 
 ---
 
@@ -115,7 +117,9 @@
 - 用大量高度相关指标堆出“高分”；
 - 因为模型名字高级就默认更准确；
 - 用缺少 Point-in-Time、公司行为、历史 Universe 或成本的数据声称真实策略有效；
-- 为了首页好看而伪造实时性、概率或数据完整性。
+- 为了首页好看而伪造实时性、概率或数据完整性；
+- 为追求“纯云”强行使用会休眠、无持久化或无法稳定访问 A 股上游的免费服务；
+- 将 Oracle Cloud 注册成功作为产品上线依赖。
 
 ---
 
@@ -267,6 +271,224 @@ flowchart TD
 ```
 
 模型不能替代市场规则和数据质量；规则也不能因为可解释就拒绝持续的模型改进。
+
+## 3.3 部署架构决策
+
+本项目默认采用：
+
+```text
+HYBRID_PRIVATE
+=
+本地数据与决策引擎
++
+云端静态网页
++
+安全远程访问
+```
+
+完整规格见 `docs/HYBRID-DEPLOYMENT-ARCHITECTURE-v1.md`。
+
+该决策的含义是：
+
+- 本地机器是行情、调度、SQLite、Artifact、模型、持仓和决策事实的权威来源；
+- 云端只托管 HTML、CSS、JavaScript 和无密钥 Runtime Config；
+- 云端网页可始终打开，但本地引擎离线时必须显示 `ENGINE_OFFLINE` 或 `STALE`；
+- 纯云部署保留为实验和未来升级，不作为 v1.1 上线前置条件；
+- Oracle Cloud 因实际注册不可用，明确从候选方案中移除。
+
+## 3.4 默认部署拓扑
+
+```mermaid
+flowchart LR
+    USER[浏览器 / PWA] --> WEB[Cloudflare Pages\nGitHub Pages 备选]
+    WEB --> CFG[无密钥 Runtime Config]
+
+    USER -->|HTTPS REST + fetch-stream SSE| ACCESS{安全访问层}
+    ACCESS -->|默认私有| TS[Tailscale Serve]
+    ACCESS -->|可选公开| TF[Tailscale Funnel]
+    ACCESS -->|可选稳定公开域名| CF[Cloudflare Tunnel]
+
+    TS --> ENGINE[127.0.0.1 Local Engine]
+    TF --> ENGINE
+    CF --> ENGINE
+
+    ENGINE --> COLLECT[Collector / Router / Scheduler]
+    ENGINE --> DECISION[Decision / Risk / Portfolio]
+    ENGINE --> QUANT[Quant / Replay / Research]
+    ENGINE --> DB[(Local SQLite / Artifacts)]
+```
+
+### 云端静态网页
+
+首选 Cloudflare Pages 的 `pages.dev` 默认域名，GitHub Pages 作为备选。静态网页不得包含任何 Token、账户、持仓、成本、券商凭据或 Model Registry 写权限；默认不加载未经独立安全 Review 的第三方脚本、Analytics、Tag Manager 或远程字体。
+
+### 本地引擎
+
+本地引擎必须：
+
+- 默认只监听 `127.0.0.1`；
+- 不要求公网 IP、家庭路由器端口映射或直接监听 `0.0.0.0`；
+- 在 Windows Task Scheduler、Windows Service、systemd 或 NAS 容器中开机自启；
+- 交易时段避免休眠；
+- 崩溃、断电或网络恢复后自动启动 Collector 和访问层；
+- 使用持久磁盘保存 SQLite、Artifact、Manifest、模型和日志；
+- 保留本地同源页面作为远程访问故障时的恢复入口。
+
+## 3.5 支持的部署模式
+
+| 模式 | 前端 | API/引擎 | 访问范围 | 产品定位 |
+|---|---|---|---|---|
+| `LOCAL_ONLY` | 本地同源 | 本地 | 单机/LAN 恢复 | 开发、调试、应急 |
+| `HYBRID_PRIVATE` | 云端静态 | 本地 | Tailnet 内 | **默认生产模式** |
+| `HYBRID_PUBLIC_AUTH` | 云端静态 | 本地 | 公开互联网 | 少量朋友、强认证 |
+| `PURE_CLOUD_EXPERIMENTAL` | 云端 | 云端 | 公开/私有 | 通过门禁后才可升级 |
+
+### 默认远程访问：Tailscale Serve
+
+`HYBRID_PRIVATE` 优先使用 Tailscale Serve：
+
+- 只有加入 Tailnet 且通过 ACL 的设备和用户才能连接；
+- 不需要购买域名；
+- 后端仍保留 `STOCK_TRACKER_PRIVATE_ACCESS` 作为纵深防御，直到 Tailscale 身份认证完成独立 Review；
+- 适合用户本人多设备和少量可信朋友。
+
+允许先落地 Bootstrap Lane：Tailscale Serve 直接代理现有本地整站，使前端与 API 保持 same-origin，不需要等待 CORS 即可获得私有远程访问。完成 H1/H2 后再进入 Target Lane，把静态前端部署到 Cloudflare Pages/GitHub Pages，并跨域连接同一 Local Engine。Bootstrap Lane 不能冒充云端静态部署已完成；实际网络若无法稳定访问 Pages/GitHub Pages，也可以长期使用 Tailscale Serve 整站同源模式。
+
+### 可选公开访问
+
+当朋友不方便加入 Tailnet 时，可以选择：
+
+1. Tailscale Funnel：无需自有域名，但入口公开，必须启用强 Bearer Token、精确 CORS、限流和审计；
+2. Cloudflare Tunnel + 自有域名：适合需要稳定公开 Hostname 时使用，可叠加 Cloudflare Access；
+3. Quick Tunnel 只能开发测试，不得用于生产，因为 URL 不稳定且不支持 SSE。
+
+## 3.6 前端与 API 解耦合同
+
+当前前端不能长期依赖写死的相对路径 `/api/...`。目标 Runtime Config：
+
+```javascript
+window.STOCK_TRACKER_RUNTIME = Object.freeze({
+  deploymentMode: "HYBRID_PRIVATE",
+  apiBaseUrl: "https://device.tailnet-name.ts.net",
+  allowedApiOrigins: ["https://device.tailnet-name.ts.net"],
+  ssePath: "/api/stream",
+  frontendBuild: "<commit-sha>",
+  expectedApiMajor: 1,
+  expectedEngineId: "<local-engine-id>",
+  allowApiOriginOverride: false,
+  allowPrivateBrowserCache: false
+});
+```
+
+要求：
+
+- `apiBaseUrl`、`allowedApiOrigins` 和 `expectedEngineId` 不是密钥；
+- Token 不得进入 Runtime Config；
+- 未配置 `apiBaseUrl` 时才回退到同源；
+- 生产构建的 API Origin 必须被固定在 `allowedApiOrigins`，默认禁止任意覆盖；
+- REST、SSE 和健康检查使用同一个 URL Builder；
+- Token 按规范化 API Origin 分区保存在当前会话，Origin 变化时清除并重新认证；
+- UI 明确显示当前 Engine Host、Engine ID、Commit、数据时间和连接模式；
+- 前端必须验证 API Major、Engine ID 和部署 Commit；
+- 配置或版本不兼容时失败关闭，不静默连接其他后端，也不把 Token 发往未固定 Origin。
+
+## 3.7 CORS、认证与 SSE
+
+混合部署默认跨域，Backend 必须提供正式 CORS：
+
+```text
+OPTIONS preflight
+精确 Access-Control-Allow-Origin
+Vary: Origin
+允许 Authorization / Content-Type / Accept
+允许 GET / POST / PUT / PATCH / DELETE / OPTIONS
+```
+
+约束：
+
+- 私有 API 不得使用 `Access-Control-Allow-Origin: *`；
+- 非 Allowlist Origin、`null` Origin 和未知 Host 默认拒绝；
+- Allowlist 只能来自本地配置；
+- 家庭路由器不得做端口转发；
+- Token 只保存在当前浏览器 `sessionStorage`，不得进入 URL、日志、Git 或静态 Bundle；
+- SSE 继续使用 `fetch + ReadableStream + Authorization Header`，不回退到无法发送 Header 的原生 `EventSource`；
+- 401、CORS、Backend Offline、Tunnel Offline 和数据过期必须显示不同状态。
+
+## 3.8 私有数据边界
+
+以下数据默认只能留在本地引擎：
+
+```text
+account_equity
+available_cash
+positions
+average_cost
+optional_notes
+private watchlist
+private DecisionBrief / TradePlan
+SQLite
+raw artifacts
+model registry write path
+broker credentials（未来）
+```
+
+云端只允许保存：
+
+- 静态前端资源；
+- 无密钥 Runtime Config；
+- Build/Commit Metadata；
+- 不含账户与持仓的公开说明。
+
+浏览器默认不得把私有 API 响应持久化到 `localStorage`、IndexedDB 或 Service Worker Cache。最后一次公共市场摘要可以本地缓存，但必须带 `as_of`，并且不能被当成当前可执行建议。
+
+## 3.9 离线与过期语义
+
+云端网页“能打开”不等于引擎在线。前端必须区分：
+
+```text
+ONLINE
+DEGRADED
+STALE
+ENGINE_OFFLINE
+NETWORK_OFFLINE
+AUTH_REQUIRED
+AUTH_FAILED
+CORS_BLOCKED
+API_VERSION_MISMATCH
+TUNNEL_UNAVAILABLE
+```
+
+当本地引擎不可达或数据过期时：
+
+- 页面顶部显示明显状态；
+- 所有 `EXECUTABLE` 降级为 `DATA_BLOCKED` 或 `STALE`；
+- 不继续展示上一次私有持仓建议为当前建议；
+- 可以显示最后公共摘要，但必须显示真实时间；
+- 禁止用云端页面时间伪造数据更新时间。
+
+目标健康端点：
+
+```text
+GET /api/runtime/health
+```
+
+至少返回 `engine_id`、`engine_version`、`commit_id`、`deployment_mode`、`started_at`、`last_collection_at`、`data_as_of`、`scheduler_state`、`provider_summary`、`database_state`、`sse_available` 和 `api_major`。
+
+## 3.10 纯云升级门禁
+
+纯云只有同时满足以下条件，才允许从 `EXPERIMENTAL` 升级为主模式：
+
+1. 至少连续 10 个 A 股交易日真实运行验证；
+2. 目标区域内主要 Provider 可达，错误率和延迟符合配置门槛；
+3. HOT/WARM/COLD 在交易时段不会休眠；
+4. SQLite、Artifact、Manifest 和模型使用可靠持久存储；
+5. 重启、重部署和节点迁移不丢数据；
+6. 私有 API、CORS、认证、日志脱敏和备份通过安全 Review；
+7. 端到端延迟不显著差于本地；
+8. 月成本符合“几十元级且价值可证明”的原则；
+9. 有从纯云回退到本地的恢复方案。
+
+Render 免费 Web Service、Cloudflare Workers/Pages Functions 等仍可用于 Demo 或轻量无状态能力，但不能直接承担持续 Collector、SQLite 和完整研究任务。
 
 ---
 
@@ -792,7 +1014,7 @@ position:
 - optional_notes
 ```
 
-默认本地保存，不上传券商凭据。
+默认由本地引擎保存，不上传券商凭据。混合部署下，账户净值、现金、持仓、股数、成本、备注、私有 Watchlist、私有 DecisionBrief 和建议股数均不得进入云端静态站点、公开日志或默认浏览器持久缓存。
 
 ## 9.2 持仓页必须回答
 
@@ -1301,6 +1523,15 @@ promotion_decision
 
 运行缓存不能自动升级为正式训练数据。
 
+混合部署增加一条同等重要的边界：
+
+```text
+云端静态网页 = 展示与控制入口
+本地引擎 = 运行事实、私有数据与决策事实权威来源
+```
+
+云端网页成功加载不能升级数据可信等级，也不能证明 Collector 在线。只有本地引擎返回的 `as_of`、`data_status`、`freshness`、`evidence_id` 和 Runtime Health 才能决定页面是否允许显示当前动作。
+
 ## 14.2 数据可信等级
 
 | Tier | 含义 | 允许用途 |
@@ -1399,7 +1630,7 @@ MANUAL_CONFIRM_EXECUTION
 AUTOMATED_EXECUTION
 ```
 
-自动执行不属于 v1.0 范围，必须另立安全、权限、风控、审计和回滚规格。
+自动执行不属于 v1.1 范围，必须另立安全、权限、风控、审计和回滚规格。
 
 ---
 
@@ -1413,6 +1644,8 @@ AUTOMATED_EXECUTION
 - 全市场候选发现：几十秒至数分钟；
 - 日线和研究数据：按收盘完整性优先；
 - 港股通和美股：按真实源能力，不伪装实时。
+
+这些目标只在本地引擎、Scheduler、Provider 和安全访问层均在线时成立。云端静态网页的加载延迟不得被当作行情延迟；本地引擎离线、休眠或 Tunnel 中断时，页面必须在健康检查超时后进入 `ENGINE_OFFLINE`、`TUNNEL_UNAVAILABLE` 或 `STALE`。
 
 ## 15.2 HOT / WARM / COLD
 
@@ -1454,7 +1687,7 @@ AUTOMATED_EXECUTION
 
 ## 15.4 默认提醒渠道
 
-v1.0 优先：
+v1.1 优先：
 
 - 站内提醒；
 - 浏览器通知；
@@ -1671,6 +1904,7 @@ evidence_id
 # 18. API 产品合同建议
 
 ```text
+GET  /api/runtime/health
 GET  /api/brief/today
 GET  /api/opportunities/core
 GET  /api/trends/big
@@ -1700,6 +1934,35 @@ model_version
 
 这些是目标合同，不代表当前 API 已全部实现。实际状态必须在 Gap Matrix 中标注。
 
+## 18.1 混合部署 API 基线
+
+所有前端请求必须通过统一 `apiBaseUrl + path` 构造，禁止在 `api.js`、`sse.js` 和业务页面分别写死不同 Host。目标配置来自无密钥 Runtime Config；未配置时才回退到同源。
+
+`GET /api/runtime/health` 是远程页面的第一握手接口，必须在不泄露私有账户数据的前提下返回 Engine、Commit、API Major、Scheduler、Provider、数据库和数据时间状态。
+
+跨域调用必须满足：
+
+- 精确 Origin Allowlist；
+- `OPTIONS` 预检；
+- `Vary: Origin`；
+- 私有 API 禁止 CORS `*`；
+- Bearer Token 只来自当前 `sessionStorage`；
+- fetch-stream SSE 支持 Authorization Header；
+- CORS、认证、版本不兼容、Backend 离线和数据过期使用不同错误码；
+- Tunnel/Proxy Header 不得被未验证地信任为客户端身份。
+
+目标错误状态至少包括：
+
+```text
+ENGINE_OFFLINE
+TUNNEL_UNAVAILABLE
+AUTH_REQUIRED
+AUTH_FAILED
+CORS_BLOCKED
+API_VERSION_MISMATCH
+DATA_STALE
+```
+
 ---
 
 # 19. KPI 与验收指标
@@ -1717,7 +1980,11 @@ model_version
 7. 主升浪过早退出率；
 8. 持仓风险和组合集中度；
 9. 决策输出完整率；
-10. 数据有效率和真实时效。
+10. 数据有效率和真实时效；
+11. Local Engine 交易时段可用率；
+12. Tunnel/Serve 重连时间与远程 API 成功率；
+13. Backend 离线或数据过期后的状态切换延迟；
+14. 云端静态站点私有数据与密钥泄漏事件数（目标为 0）。
 
 ## 19.2 产品使用指标
 
@@ -1728,7 +1995,10 @@ model_version
 - Next Trigger 命中率；
 - 无意义重复提醒率；
 - 持仓动作覆盖率；
-- Replay 可复现率。
+- Replay 可复现率；
+- 云端页面到 Local Engine 的连接成功率；
+- Offline/Stale 状态识别准确率；
+- 本地引擎重启后的自动恢复时间。
 
 ## 19.3 Guardrails
 
@@ -1740,7 +2010,11 @@ model_version
 - 不伪造概率；
 - 不用免费源延迟数据输出实时文案；
 - 不允许模型绕过硬门；
-- 不允许策略战绩缺少样本数和数据等级。
+- 不允许策略战绩缺少样本数和数据等级；
+- 不因云端网页可访问就把本地旧数据标为 LIVE；
+- 不在云端静态资源、URL、Git、日志或 Runtime Config 中保存私有 Token；
+- 不通过家庭路由器端口转发或直接监听公网网卡暴露 Backend；
+- 不把会休眠或无持久化的免费云服务标为生产可用。
 
 ---
 
@@ -1760,7 +2034,7 @@ model_version
 
 交付：
 
-- v1.0 PRD；
+- v1.1 PRD；
 - Gap Matrix；
 - 新路线图；
 - 任务分工；
@@ -1768,7 +2042,7 @@ model_version
 
 ## Stage 1：Today Action MVP
 
-这是下一产品切片。
+Stage 1 核心决策链已实现；Portfolio 设置/持仓编辑 UI 仍可与 Stage 1.5 并行补齐。Hybrid H0 工程实现与本地远程式验收已通过，真实 Tailscale/两设备 operational 验收待执行；当前下一代码切片是 H1/H2。
 
 ### 必须实现
 
@@ -1789,6 +2063,74 @@ model_version
 - Model Score 只显示倾向；
 - 策略战绩可先标 `INSUFFICIENT_REAL_EVIDENCE`；
 - 不声称真实投资表现。
+
+## Stage 1.5：混合部署与远程访问基线
+
+该阶段不改变金融判断逻辑，而是把现有“本地同源应用”升级为可安全远程使用的正式产品形态。
+
+### H0：私有同源 Bootstrap
+
+1. Local Engine 显式监听 `127.0.0.1`；
+2. Tailscale Serve 直接代理现有本地整站；
+3. 前端与 API 继续 same-origin，不新增 CORS；
+4. 远程私有 API 继续要求强 Bearer Token；
+5. Tailnet ACL 仅允许本人和明确授权设备；
+6. 两台不同网络设备验证页面、REST、SSE 和 Portfolio CRUD；
+7. 明确标记为 Bootstrap Lane，不声称 Cloudflare Pages/GitHub Pages 已完成。
+
+当前状态：H0 已实现 loopback 默认安全、非 loopback 双重显式确认、Tailscale Serve 运维 CLI、既有 Serve 配置冲突保护，以及临时 SQLite 的静态页/REST/SSE/Portfolio CRUD 本地远程式验收。当前宿主没有 Tailscale CLI，真实 Serve 和两台不同 Tailnet 设备验收仍为 `PENDING`，不得用本地模拟替代。
+
+### H1：前端 API Base 解耦
+
+1. 新增无密钥 Runtime Config；
+2. 固定 `allowedApiOrigins` 与 `expectedEngineId`；
+3. REST、SSE 和 Health 统一使用 URL Builder；
+4. Bearer Token 按 API Origin 分区，Origin 改变时清除并重新认证；
+5. 生产模式禁止任意 API Origin Override；
+6. 保留同源模式兼容；
+7. 页面显示当前 Engine Host、Engine ID、Commit 和数据时间；
+8. API Major、Engine ID 或 Commit 不兼容时失败关闭。
+
+### H2：Backend CORS 与 Runtime Health
+
+1. 精确 Origin Allowlist；
+2. `OPTIONS` 预检；
+3. Authorization Header；
+4. `GET /api/runtime/health`；
+5. 认证、CORS、离线、Tunnel 和版本错误码分离；
+6. 安全和回归测试。
+
+### H3：Tailscale Serve Target Lane 与运行加固
+
+1. 复验并固化 H0 已完成的 loopback 合同，禁止 Target Lane 回退到公网监听；
+2. Serve HTTPS 可从整站代理切换为固定 API Target；
+3. Tailnet ACL、设备撤销和 Token 轮换流程落盘；
+4. Engine 与 Tailscale 开机自启、崩溃恢复和休眠防护；
+5. 在独立 Review 前不直接信任代理身份 Header 替代 Bearer Token；
+6. 两台不同网络设备验证 REST、SSE、Portfolio CRUD、断线和重启恢复。
+
+### H4：云端静态网页
+
+1. Cloudflare Pages 为首选；
+2. GitHub Pages 为备选；
+3. `pages.dev` 或 `github.io` 默认域名即可，不要求购买域名；
+4. 云端构建不包含任何私有 Token；
+5. CSP `connect-src` 只允许精确 API Origin，不使用宽泛 `*`；
+6. Backend 离线时网页仍能加载并明确显示状态；
+7. 加入 Referrer Policy 和 No-Secret Build Review。
+
+### H5：可选公开访问
+
+优先顺序：
+
+```text
+可信朋友加入 Tailnet
+→ Tailscale Funnel 小流量试用
+→ 自有域名 + Cloudflare Tunnel
+→ 通过纯云门禁后再评估云后端
+```
+
+Render 免费 Web Service 只保留 Demo/可达性实验定位，不作为默认生产后端。Oracle Cloud 不再进入路线图。
 
 ## Stage 2：A 股数据与决策质量
 
@@ -1891,6 +2233,11 @@ model_version
 - SQLite；
 - API / SSE；
 - 静态前端；
+- 当前前端和 API 以同源相对路径 `/api/...` 运行；
+- 当前私有 API 已有 Bearer Token 与 loopback 请求判断安全边界；
+- Hybrid H0 已把本地默认监听统一为 `127.0.0.1`；非 loopback 必须显式提供 Host 与 `--allow-non-loopback`，Docker/Procfile 只为 `PURE_CLOUD_EXPERIMENTAL` 双重 opt-in；
+- H0 已提供 Tailscale Serve `preflight/enable/status/disable` 和临时数据库 `local/server/client` 验收工具；本地远程式验收通过，真实 Tailscale/两设备验收待补；
+- 当前仓库有 Docker / Render Demo 配置，但免费 Render 不再视为默认生产后端；
 - Quant Foundation：
   - Point-in-Time；
   - Manifest；
@@ -1916,7 +2263,14 @@ model_version
 - Replay；
 - 校准成功概率；
 - 模型晋级后的生产信号；
-- 港股通和美股独立验证。
+- 港股通和美股独立验证；
+- 前端可配置 `apiBaseUrl` 与统一 URL Builder；
+- 精确 CORS Allowlist 和 `OPTIONS`；
+- `GET /api/runtime/health`；
+- Tailscale Serve 正式远程路径；
+- Cloudflare Pages / GitHub Pages 静态部署；
+- 本地引擎开机自启、断线恢复和休眠防护；
+- Engine Offline / Tunnel Offline / Auth / CORS / Stale 的 UI 状态区分。
 
 任何 UI 或报告必须区分：
 
@@ -2021,7 +2375,26 @@ PRODUCTION_APPROVED
 - 复杂模型必须证明新增信息；
 - 晋级过程可审计。
 
-## 22.9 发布门禁
+## 22.9 混合部署
+
+完成标准：
+
+- 云端静态网页在 Local Engine 关闭时仍可加载；
+- Backend 在线后 REST 和 fetch-stream SSE 可恢复；
+- `LOCAL_ONLY` 同源模式继续兼容；
+- `HYBRID_PRIVATE` 通过 Tailscale Serve 在至少两台不同网络设备上验收；
+- Backend 只监听 loopback，家庭路由器无端口转发；
+- 精确 CORS Allowlist、`OPTIONS` 和 Authorization Header 通过安全测试；
+- 非 Allowlist Origin、`null` Origin 和错误 Host 失败关闭；
+- 页面显示 Engine Host、Commit、API Major、数据时间和连接状态；
+- Engine/Tunnel/Network/Auth/CORS/Version/Stale 状态可区分；
+- Engine 离线或数据过期时不显示当前可执行动作；
+- 云端构建、Runtime Config、页面源码和日志中没有私有 Token；
+- 云端不保存账户净值、现金、持仓、成本或私有 DecisionBrief；
+- Windows 或目标本地宿主重启后 Engine 和安全访问层自动恢复；
+- 不依赖 Oracle Cloud、付费域名或付费云后端即可完成默认部署。
+
+## 22.10 发布门禁
 
 每次合并或部署至少要求：
 
@@ -2110,8 +2483,18 @@ evidence commit == deployed commit
 | D24 | 当前不接券商，未来先只读行情，再评估执行 |
 | D25 | 不做高频，但 A 股关键机会希望数秒至数十秒内更新 |
 | D26 | LLM 只抽取和解释，不直接决定买卖 |
-| D27 | 自动交易不属于 v1.0 |
+| D27 | 自动交易不属于 v1.1 |
 | D28 | 现有工程合同不等于真实投资表现证据 |
+| D29 | 默认生产部署为 `HYBRID_PRIVATE`，不是纯云后端 |
+| D30 | Local Engine 是行情、调度、SQLite、Artifact、持仓和决策事实权威来源 |
+| D31 | 云端只托管静态网页；Cloudflare Pages 首选，GitHub Pages 备选 |
+| D32 | 默认远程访问使用 Tailscale Serve，少量朋友优先加入 Tailnet |
+| D33 | Tailscale Funnel 仅用于强认证的小流量公开访问；Quick Tunnel 禁止生产使用 |
+| D34 | 需要稳定公开域名时可使用自有域名 + Cloudflare Tunnel |
+| D35 | Oracle Cloud 因注册不可用，明确从候选和应急依赖中移除 |
+| D36 | 纯云后端必须通过 Provider、持续运行、持久化、安全、延迟和成本门禁 |
+| D37 | Backend 默认只监听 loopback，不做家庭路由器端口转发 |
+| D38 | 云端网页可访问不代表数据在线；Engine Offline/Stale 时必须失败关闭 |
 
 ---
 
@@ -2129,7 +2512,13 @@ evidence commit == deployed commit
 - Trend Runner 比例；
 - 各类提醒冷却时间；
 - 未来是否使用券商行情；
-- 哪类低成本数据值得付费。
+- 哪类低成本数据值得付费；
+- 云端静态前端使用 Cloudflare Pages 还是 GitHub Pages；
+- Local Engine 运行在日常电脑、低功耗小主机还是 NAS；
+- 远程访问使用 Tailscale Serve、Funnel 还是 Cloudflare Tunnel；
+- 是否购买自有域名；
+- 精确 CORS Origin Allowlist；
+- Runtime Health 超时、Tunnel 重连和 Stale 降级阈值。
 
 所有默认值必须配置化，不能写死为“永远正确”。
 
@@ -2156,6 +2545,148 @@ evidence commit == deployed commit
 > **持仓 XX：建议部分止盈并保留 Trend Runner。**
 > 原趋势仍成立，但拥挤度上升；若板块进入 `DISTRIBUTING`，将动作升级为 TRIM。
 
-这就是 Stock Tracker v1.0 的核心：
+这就是 Stock Tracker v1.1 的核心：
 
 > **持续提高模型准确率，但不把模型分数当答案；把可信数据、概率、事件、主升浪、交易计划、持仓风险和真实战绩组合成“今天该怎么操作”的可执行决策。**
+
+---
+
+## 附录 A：已退役部署草稿（仅历史追溯，不具规范性）
+
+> 本附录保留自中断会话，仅用于审计历史，不再构成需求或实现依据。PRD 主干与 `docs/HYBRID-DEPLOYMENT-ARCHITECTURE-v1.md` 是唯一规范来源；下方旧 `LOCAL/HYBRID/SNAPSHOT/CLOUD`、D0–D4、状态和 Runtime Config 名称均已退役，不得覆盖当前 `LOCAL_ONLY/HYBRID_PRIVATE/HYBRID_PUBLIC_AUTH/PURE_CLOUD_EXPERIMENTAL` 与 H0–H5 合同。
+
+<details>
+<summary>查看已退役的 2026-08-24 草稿（不可作为实现依据）</summary>
+
+### 历史草稿：架构决策
+
+系统支持 `LOCAL`、`HYBRID`、`SNAPSHOT`、`CLOUD` 四种部署模式，正式默认路线调整为：
+
+```text
+HYBRID = 本地核心运行时 + 云端静态网页 + 安全出站连接
+```
+
+本地核心运行时默认承载：
+
+- Provider 采集与健康检查；
+- `free-stockdb` localhost Sidecar；
+- SQLite、历史 Bar、PIT Snapshot 与本地备份；
+- Quant、Replay、模型评估和定时任务；
+- 持仓、账户净值、风险预算、私有配置和访问令牌；
+- 私有 REST/SSE API。
+
+云端默认只承载：
+
+- HTML/CSS/JavaScript/PWA 静态资源；
+- 运行时 API/SSE Endpoint 配置；
+- Agent 离线、认证失败、数据陈旧和 Snapshot 过期状态；
+- 可选的脱敏、签名、短 TTL、只读摘要快照。
+
+### 纯云定位
+
+完整云后端保留为可选能力，不再阻塞 MVP、正式个人使用或后续 Quant 阶段。只有 Provider 可达性、持久化、授权、成本、私有数据保护和备份恢复全部通过后，才允许进入 `CLOUD` 模式。
+
+以下判断必须分开：
+
+```text
+云端网页可访问 != Local Agent 在线
+Local Agent 在线 != Provider 健康
+Provider 健康 != 数据达到 T2/T3
+网页已部署 != 交易决策系统已可用
+```
+
+### Oracle Cloud
+
+Oracle Cloud 因当前无法完成注册，立即从候选方案、阶段依赖、成本基线和灾备假设中移除。任何阶段不得以获得 Oracle 账号作为前置条件，也不得暂停 Hybrid 路线等待 Oracle。
+
+### 网络与安全边界
+
+- 本地 Backend 默认绑定 loopback；
+- 远程访问使用本地主动建立的加密出站隧道或受控反向网关；
+- 禁止直接把本地 Backend、SQLite 或 `free-stockdb` 端口映射到公网；
+- 云端静态网页不得直接访问行情 Provider 或 Sidecar；
+- API Endpoint 必须运行时配置，不得把私有地址或令牌编译进公开静态文件；
+- 私有 API 必须认证，并采用严格 Origin、代理边界和幂等写入检查；
+- Mode H 默认不上传持仓、股数、成本、账户净值和建议买入股数；
+- Mode S 只允许版本化白名单字段，必须有签名、TTL、删除和过期展示规则。
+
+### 用户可见状态
+
+Hybrid UI 至少区分：
+
+```text
+ONLINE_LIVE
+ONLINE_DELAYED
+LOCAL_AGENT_OFFLINE
+TUNNEL_UNAVAILABLE
+SNAPSHOT_ONLY
+SNAPSHOT_EXPIRED
+AUTH_REQUIRED
+AUTH_FAILED
+BACKEND_MISCONFIGURED
+```
+
+Local Agent 离线或隧道断开时，不得沿用缓存内容生成新的 `EXECUTABLE`、`EXIT` 或伪实时建议。
+
+### 新增非功能要求
+
+1. Web 前端支持运行时 `apiBaseUrl` 与 `sseBaseUrl`；
+2. 静态托管、Tunnel/Gateway 和 Snapshot Relay 均为可替换适配层；
+3. 本地服务可一键启动，并提供可选开机自启、状态页、备份和磁盘告警；
+4. Hybrid 断连不影响本地采集与计算；
+5. Cloud Web 可访问但本地不可用时必须显式降级；
+6. 不承诺第三方平台永久免费，持续成本必须可见、可关停、可迁移；
+7. 更换云静态托管或安全连接供应商不得修改 Quant 核心；
+8. 生产数据库不得因部署探针或只读验收被修改。
+
+### Deployment Stage
+
+#### D0：Hybrid 架构冻结
+
+- 完成 PRD、Overview 和部署合同对齐；
+- 移除 Oracle 依赖；
+- 冻结本地/云端职责和私有字段边界。
+
+#### D1：Local Agent 产品化
+
+- 一键启动与状态页；
+- 可选开机自启；
+- 备份恢复与磁盘治理；
+- loopback 默认安全；
+- 本地故障和 Provider 故障可诊断。
+
+#### D2：Cloud Web + Secure Endpoint
+
+- 云端静态网页；
+- 运行时 Endpoint；
+- REST/SSE 认证、重连和严格 Origin；
+- Agent 离线与数据陈旧 UI；
+- 手机与桌面端验收。
+
+#### D3：Optional Snapshot
+
+- 脱敏白名单 Schema；
+- 签名、TTL、只读和删除；
+- 上传失败不影响本地运行；
+- 默认不含账户级数据。
+
+#### D4：Full Cloud Feasibility Probe
+
+- 独立实验，不阻塞 D1–D3；
+- 验证真实 Provider 可达性、持久化、授权、月度成本和恢复；
+- 失败则继续以 Hybrid 作为正式部署；
+- 不再包含 Oracle 注册路线。
+
+### Hybrid 正式验收
+
+- 云端网页可以打开，但后端不可用时准确显示离线；
+- Local Agent 在线时 REST/SSE 可用；
+- Token 错误、Tunnel 断开、Provider 故障和数据过期可区分；
+- 前端静态文件、日志和 Git 不含私密令牌；
+- 公网无法直接访问 Sidecar；
+- 未认证私有 API 失败关闭；
+- 前端不能绕过本地 Agent 访问行情源；
+- 完整本地能力不依赖 Oracle Cloud；
+- Full Cloud 未通过时不影响 Hybrid 发布。
+
+</details>

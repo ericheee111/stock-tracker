@@ -2,7 +2,7 @@
 # 零第三方依赖：仅标准库。所有路径相对项目根目录解析。
 
 [server]
-host = "0.0.0.0"
+host = "127.0.0.1"  # LOCAL_ONLY / HYBRID_PRIVATE 默认只监听 loopback
 port = 8080
 
 [logging]

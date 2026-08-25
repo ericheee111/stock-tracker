@@ -507,7 +507,7 @@ loop(由 COLD/WARM 触发或定时):
 ### 10.1 `app.toml`
 | 段/键 | 类型 | 说明 |
 |---|---|---|
-| `[server] host` | str | 绑定地址，默认 `0.0.0.0` |
+| `[server] host` | str | 绑定地址，`LOCAL_ONLY/HYBRID_PRIVATE` 默认 `127.0.0.1`；非 loopback 必须显式 `--allow-non-loopback` |
 | `[server] port` | int | 默认 `8080` |
 | `[logging] level` | str | DEBUG/INFO/WARNING |
 | `[logging] file` / `max_bytes` / `backup` | str/int/int | 日志轮转 |

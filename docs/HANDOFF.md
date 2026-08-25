@@ -1,19 +1,19 @@
 # stock-tracker 交接文档（HANDOFF）
 
 > 主理人：齐活林（Delivery Director）｜团队：许清楚(PM) / 高见远(Architect) / 寇豆码(Engineer) / 严过关(QA)
-> 对应 PRD：`docs/PRD-股票辅助判断与交易参考网站.md`（v1.0；A 股优先的个人交易决策驾驶舱）
-> 日期：2026-08-14
-> 用途：供其他 Agent / 开发者按 v1.0 Stage 0–7 路线接续工作。
+> 对应 PRD：`docs/PRD-股票辅助判断与交易参考网站.md`（v1.1；A 股优先的个人交易决策驾驶舱）
+> 最新对齐日期：2026-08-24
+> 用途：供其他 Agent / 开发者按 v1.1 产品优先级、Hybrid H0–H5 与后续 Stage 路线接续工作。
 
 ---
 
 ## 0. TL;DR
 
-stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + 独立 Quant Foundation** 的真实可运行系统。v1.0 将产品中心冻结为“今天该怎么操作”，市场资源按 A 股、港股通、美股排序，并把 Core Opportunity、Big Trend、Event Intelligence、持仓/Exit、Strategy Scoreboard 与 Replay 设为主线。Stage 1 的严格决策合同、Action Mapper、PositionSizer、TradePlan、Core 3—5、Portfolio REST、真实 `/api/brief/today` 和 Today Action 首页已经接线，并通过真实 Python API + Web Playwright 集成；概率仍严格为 `null`，Big Trend 返回 `NOT_AVAILABLE`，策略战绩返回 `INSUFFICIENT_REAL_EVIDENCE`。下一产品切片是 Portfolio 设置/持仓编辑 UI；这些工程能力仍不等于真实投资表现。
+stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + 独立 Quant Foundation** 的真实可运行系统。v1.1 将产品中心冻结为“今天该怎么操作”，市场资源按 A 股、港股通、美股排序，并把 Core Opportunity、Big Trend、Event Intelligence、持仓/Exit、Strategy Scoreboard、Replay 与混合部署设为主线。Stage 1 的严格决策合同、Action Mapper、PositionSizer、TradePlan、Core 3—5、Portfolio REST、真实 `/api/brief/today` 和 Today Action 首页已经接线。Hybrid H0 现已完成 loopback 默认安全、Tailscale Serve 运维 CLI、冲突保护和临时数据库本地远程式验收；当前宿主未安装 Tailscale，因此真实 Serve/两设备 operational 验收仍待补。下一代码切片是 H1/H2；当前前端仍是同源 `/api/...`，尚无正式 CORS、Runtime Health 或 Pages 验收。概率、Big Trend 和策略战绩仍诚实降级，这些工程能力不等于真实投资表现。
 
-> **路线覆盖规则：** 下文保留的 v0.4 Wave、T1–T15 和历史提交记录用于追溯；若与新版产品优先级冲突，以 PRD v1.0、根 `AGENTS.md` 和 `docs/PRODUCT-GAP-MATRIX-v1.0.md` 为准。
+> **路线覆盖规则：** 下文保留的 v0.4 Wave、T1–T15 和历史提交记录用于追溯；若与新版产品优先级冲突，以 PRD v1.1、根 `AGENTS.md`、`docs/HYBRID-DEPLOYMENT-ARCHITECTURE-v1.md` 和 `docs/PRODUCT-GAP-MATRIX-v1.1.md` 为准。
 
-### 0.1 v1.0 当前状态覆盖说明
+### 0.1 v1.1 当前状态覆盖说明
 
 本节优先级高于下文保留的历史会话记录：
 
@@ -21,8 +21,9 @@ stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + �
 - `GET /api/brief/today` 已真实接线，只读 Store/Repository，不调用 Provider、LLM 或 Quant 训练链；单条合同损坏信号会跳过而不是拖垮整页；
 - Portfolio Profile 与 Position CRUD 已接入临时 SQLite 验证；持仓事实允许零碎股，新开仓建议仍按市场 lot size 向下取整；
 - `/api/brief/today` 与 `/api/portfolio*` 属于私有 API：本机直连可用，公网未配置私有访问时失败关闭，反向代理不能用本机 TCP 来源绕过认证；
+- v1.1 默认目标是 `HYBRID_PRIVATE`；H0 已将本地默认监听改为 `127.0.0.1`，非 loopback 需显式 Host + `--allow-non-loopback`，并提供 Tailscale Serve 运维与临时 DB 验收工具；真实 Serve/两设备验收仍待执行，前端仍写死同源 `/api/...`，尚无 Runtime Config、精确 CORS、Runtime Health 或 Pages 验收；
 - Today Web 已支持 object blocker、概率空值、0—1 仓位比例、null 行情和 3—5 个 Core；Mock QA 与真实 API/Web QA 均通过；
-- 当前发布门禁：运行产品 335 项通过、1 项未启动本地服务的活体探针跳过；Quant 173 项通过；Mock UI 17/17；真实 API/Web 16/16；compileall、pip check、Quant smoke、fixture benchmark、migration dry-run 和 `git diff --check` 均通过；
+- 2026-08-24 Hybrid H0 最终发布门禁：运行产品 380 项通过、1 项活体探针跳过；Quant 560 项通过（迁移负向路径仍输出既有 SQLite `ResourceWarning`，退出码为 0）；H0 专项 16/16；H0 本地远程式验收 12/12；Mock Today UI 17/17；真实 API/Web Today 17/17；Portfolio CRUD 13/13；compileall、ruff check、pip check、Quant contract smoke、synthetic fixture benchmark、production migration dry-run 和 `git diff --check` 均通过；Review 为 `ENGINEERING_READY_FOR_MERGE / OPERATIONAL_DEVICE_ACCEPTANCE_PENDING`；
 - Quant migration checksum 已按 UTF-8 SQL 的规范化 LF 字节计算；新记录在 Windows/Linux 一致，旧 LF/CRLF/CR 原始 checksum 仍可读取，任何非行尾内容变化继续失败关闭；
 - 生产 `data/stock_tracker.db` 验证前后 SHA-256 均为 `1cde40aa66846630d89b10d080a8837d204266c5ce32001a45d3b0c0c06197b1`；
 - 当前仍未实现 Portfolio 编辑 UI、Big Trend、正式 Event Intelligence、真实 Strategy Scoreboard、Replay 和真实校准概率；
@@ -75,7 +76,7 @@ stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + �
   - 状态机非法迁移回退：`TRIGGERED→WATCH` 非法 → 维持 `TRIGGERED`。
   - 端到端管线：归一化 Quote → 特征 → 策略 → 评分 → 风险闸门 → 状态机 → SQLite 落库回读（进程内，无网络依赖）。
   - 数据新鲜度不伪造：陈旧 A 股行情 → `observed_age_ms>0` 且 `data_status` 为 DELAYED/STALE，**绝不 LIVE**。
-- **环境限制说明**：本开发沙箱拦截 Python 外网出口，故未做"活体"端到端真实行情 curl。在可联网宿主 / Render 上代码可正常取真实数据（G10 回环阻断已修复）。
+- **环境限制说明**：本开发沙箱拦截 Python 外网出口，故未做“活体”端到端真实行情 curl。可联网本地主机和任何 Render/纯云实验都必须分别实测 Provider 可达性，不能仅凭代码路径声称真实数据可用（G10 回环阻断已修复）。
 
 ---
 
@@ -119,16 +120,29 @@ stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + �
 
 ## 6. 运行与部署
 
-### 本地
-- 一键：`scripts/start.bat`（Windows）/ `scripts/start.py`（跨平台，写 PID 文件 + 建 `data/`）。
-- 手动：`python -m stock_tracker --host 0.0.0.0 --port 8080`
-- 自检：`python -m stock_tracker --once`（拉 COLD+WARM 打印摘要）
-- 脚本：`scripts/{start,stop,restart,status}.bat`
+最新部署主规格见 `docs/HYBRID-DEPLOYMENT-ARCHITECTURE-v1.md`。默认模式已调整为 `HYBRID_PRIVATE`，Oracle Cloud 不再作为候选依赖。
 
-### 部署（Render）
-- `Dockerfile`（python:3.13-slim，零依赖）+ `render.yaml`（free，region singapore，healthCheckPath `/api/provider_health`）+ `Procfile`（web: `python -m stock_tracker`）。
-- **关键**：已支持 `$PORT` 环境变量（Render 注入）；启动前自建 `data/`。
-- 部署后**必须验证腾讯源从 Singapore 节点可达**（中国行情源从海外节点可能受限，需实测；不可达时仅新浪兜底 A 股，HK/US 无数据）。
+### 本地引擎
+
+- 一键：`scripts/start.bat`（Windows）/ `scripts/start.py`（跨平台，写 PID 文件 + 建 `data/`）。
+- 生产混合模式手动启动：`python -m stock_tracker --host 127.0.0.1 --port 8080`。
+- 自检：`python -m stock_tracker --once`（拉 COLD+WARM 打印摘要）。
+- 脚本：`scripts/{start,stop,restart,status}.bat`。
+- 远程访问必须通过 Tailscale Serve 等安全访问层；不要用家庭路由器端口转发或直接监听公网网卡；
+- H0 运维：先设置强 `STOCK_TRACKER_PRIVATE_ACCESS`，再运行 `python scripts/hybrid_h0.py preflight` 与 `enable`；工具只接受 `http://127.0.0.1:<port>`，发现已有其他 Serve backend 时失败关闭；
+- H0 验收：本机先运行 `python scripts/run_hybrid_h0_acceptance.py local`；真实两设备验收使用服务端 `server --enable-serve` 和第二台 Tailnet 设备 `client --base-url ... --fixture-id ...`，写操作只发生在随机 marker 保护的临时 SQLite。
+
+### 云端静态网页
+
+- 首选 Cloudflare Pages 的 `pages.dev` 默认域名；GitHub Pages 作为备选。
+- 云端只部署 `web/` 静态资产与无密钥 Runtime Config，不保存账户、持仓、成本或访问 Token。
+- 当前前端仍写死同源 `/api/...`，尚需先完成 Runtime Config、统一 API Base、精确 CORS 和 `/api/runtime/health`。
+
+### Render 纯云实验
+
+- `Dockerfile` + `render.yaml` + `Procfile` 保留用于 Demo、海外节点数据源可达性和纯云门禁实验。
+- 免费 Render 会休眠且本地文件系统不适合作为权威持久存储，因此不能标记为默认生产后端。
+- 实验部署后仍必须验证腾讯/东财/新浪在 Singapore 节点的真实可达性、持续调度和数据持久化。
 
 ---
 

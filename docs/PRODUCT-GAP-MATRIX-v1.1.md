@@ -1,13 +1,51 @@
-# Stock Tracker v1.0 产品 Gap Matrix 与 Stage 1 实施入口
+# Stock Tracker v1.1 产品 Gap Matrix 与 Stage 1/1.5 实施入口
 
-> 审计日期：2026-08-14
+> 初始审计日期：2026-08-14
+> 最新对齐日期：2026-08-24
 > 工作区：`D:\Projects\stock-tracker`
 > 分支：`main`
-> 产品基准：`docs/PRD-股票辅助判断与交易参考网站.md` v1.0
+> 产品基准：`docs/PRD-股票辅助判断与交易参考网站.md` v1.1
+> 部署基准：`docs/HYBRID-DEPLOYMENT-ARCHITECTURE-v1.md`
 > Agent 规则：根目录 `AGENTS.md`
-> 状态：Stage 0 完成；Stage 1 核心决策链已实现并通过真实 API/Web 集成，Portfolio 编辑 UI 尚待完成
+> 状态：Stage 1 核心决策链已实现；Stage 1.5 H0 工程实现与本地远程式验收已通过，真实 Tailscale/两设备验收待执行；H1–H5 尚未实现
 
 ---
+
+## 0. 2026-08-24 v1.1 混合部署更新
+
+默认部署已经从“尝试免费纯云后端”调整为：
+
+```text
+HYBRID_PRIVATE
+=
+Local Engine
++
+Cloudflare Pages / GitHub Pages 静态前端
++
+Tailscale Serve 私有远程访问
+```
+
+Oracle Cloud 因实际无法注册，已从候选和应急依赖中移除。Render 免费服务只保留 Demo、海外 Provider 可达性和纯云门禁实验定位。
+
+| 能力 | 当前状态 | 当前证据 | 剩余缺口 |
+|---|---|---|---|
+| 本地同源 Web + API | `IMPLEMENTED` | Python Backend 同时托管 `web/` 与 `/api/...` | 保留为 `LOCAL_ONLY` 恢复路径 |
+| 私有 API Bearer / loopback 判断 | `IMPLEMENTED` | `stock_tracker/api/server.py`、私有 API 测试 | 远程模式仍需 CORS 与访问层验收 |
+| fetch-stream SSE Authorization | `IMPLEMENTED` | `web/js/sse.js` | 当前 URL 仍写死 `/api/stream` |
+| 无密钥 Runtime Config | `NOT_IMPLEMENTED` | 无 `window.STOCK_TRACKER_RUNTIME` | Hybrid H1 |
+| 统一 `apiBaseUrl` / URL Builder | `NOT_IMPLEMENTED` | `api.js` 与 `sse.js` 使用相对路径 | Hybrid H1 |
+| 部署模式化监听地址 | `IMPLEMENTED` | `config/app.toml`、`ServerConfig` 与本地启动脚本默认 `127.0.0.1`；非 loopback 需 `--allow-non-loopback`；Docker/Procfile 显式 opt-in | 真实宿主复验监听地址 |
+| 精确 CORS Allowlist / `OPTIONS` | `NOT_IMPLEMENTED` | API Server 未实现正式 CORS | Hybrid H2 |
+| `/api/runtime/health` / API Major | `NOT_IMPLEMENTED` | 仅有 `/api/provider_health` | Hybrid H2 |
+| Engine/Tunnel/Auth/CORS/Stale UI | `NOT_IMPLEMENTED` | 当前错误与离线状态未完整区分 | Hybrid H1/H2 |
+| Tailscale Serve 私有访问 | `PARTIAL` | H0 提供 preflight/enable/status/disable、冲突配置失败关闭及临时 DB server/client 验收工具；本地远程式 REST/SSE/Portfolio CRUD 已通过 | 当前宿主未安装 Tailscale；真实 Serve 与两台不同 Tailnet 设备验收待执行 |
+| 开机自启、休眠与崩溃恢复 | `PARTIAL` | 有 start/stop 脚本 | 缺受支持的 Windows Service/Task Scheduler 验收 |
+| Cloudflare Pages 静态部署 | `NOT_IMPLEMENTED` | `web/` 已是静态资源 | Hybrid H4 |
+| GitHub Pages 静态备选 | `NOT_IMPLEMENTED` | `web/` 已是静态资源 | Hybrid H4 |
+| Tailscale Funnel / Cloudflare Tunnel | `NOT_IMPLEMENTED` | 无公开访问配置 | Hybrid H5，可选而非默认 |
+| Render 纯云部署 | `EXPERIMENTAL` | Docker/Blueprint 存在 | 休眠、持久化、Provider 可达性和安全门禁未通过 |
+
+当前部署切片顺序是：**H0 Tailscale Serve 整站同源 Bootstrap → H1 前端解耦 → H2 CORS/Health → H3 Serve Target Lane 加固 → H4 静态云部署 → H5 可选公开访问**。H0 的工程实现和本地远程式验收已经完成，但只有真实 Serve 与两台不同 Tailnet 设备运行 `server/client` 验收后，才可把 H0 的 operational 状态改为 `PASSED`；在 H1/H2/H4 完成前，也不能声称云端静态网页已经可以安全连接本地 Backend。
 
 ## 0.1 2026-08-14 Stage 1 集成更新
 
@@ -32,7 +70,7 @@
 
 私有数据安全：`/api/brief/today` 与 `/api/portfolio*` 本机直连可用；公网部署未配置私有访问时失败关闭。反向代理不能通过本机 TCP 来源绕过认证。
 
-当前下一产品切片是：**完成 Portfolio 设置/持仓编辑 UI，并用真实 REST API 做端到端 CRUD 验收**。在此之前不进入 Big Trend 或真实概率展示。
+当前下一代码切片是：**Stage 1.5 Hybrid H1/H2（Runtime Config、统一 API Base、精确 CORS、Runtime Health 和离线状态）**；在进入正式远程使用前，仍需在安装并登录 Tailscale 的服务端和第二台独立 Tailnet 设备上补齐 H0 operational 验收。Portfolio 设置/持仓编辑 UI 可以并行完成。所有切片都不得改变 Big Trend、真实概率和模型晋级的证据门禁。
 
 ---
 
@@ -40,7 +78,7 @@
 
 本文件回答四个问题：
 
-1. PRD v1.0 要求的产品能力，当前仓库究竟实现到什么程度；
+1. PRD v1.1 要求的产品能力，当前仓库究竟实现到什么程度；
 2. 哪些只是工程合同或 synthetic fixture，不能当成真实策略能力；
 3. Stage 1 Today Action MVP 应该按什么顺序实现；
 4. 哪些模块必须继续保持失败关闭，不能为了快速展示而伪造。
@@ -54,7 +92,7 @@
 | 状态 | 含义 |
 |---|---|
 | `IMPLEMENTED` | 当前运行代码已接线，并有至少基础测试或真实运行证据 |
-| `PARTIAL` | 有部分数据结构、API、UI 或算法，但未达到 v1.0 完整合同 |
+| `PARTIAL` | 有部分数据结构、API、UI 或算法，但未达到 v1.1 完整合同 |
 | `CONTRACT_ONLY` | 正确性合同、接口或基础类存在，但尚未接入真实产品链路 |
 | `SYNTHETIC_VALIDATED` | 合成 fixture 已证明工程行为，不代表真实投资表现 |
 | `REAL_DATA_RESEARCH` | 使用真实、用途合格的数据做离线研究，但尚未影响生产信号 |
@@ -123,7 +161,7 @@ CONTRACT_ONLY + SYNTHETIC_VALIDATED
 
 ### 3.3 当前产品核心缺口
 
-v1.0 最重要但尚未完整实现的能力是：
+v1.1 最重要但尚未完整实现的能力是：
 
 1. 今日作战简报；
 2. 账户净值和现金配置；
@@ -144,11 +182,11 @@ v1.0 最重要但尚未完整实现的能力是：
 
 ## 4.1 首页与决策输出
 
-| v1.0 能力 | 当前状态 | 当前证据 | 主要缺口 | 建议阶段 |
+| v1.1 能力 | 当前状态 | 当前证据 | 主要缺口 | 建议阶段 |
 |---|---|---|---|---|
 | 今日作战简报 | `PARTIAL` | `/api/overview` 已返回 regime、portfolio heat、top opportunities、holding signals、breadth、risk events、markets | 缺统一 `DecisionBrief`、市场姿态、结构化 action、今日不要做、Big Trend、证据状态和 AI 摘要输入合同 | Stage 1 |
 | AI 交易参谋摘要 | `NOT_IMPLEMENTED` | 当前后端未见基于结构化决策的摘要对象 | 需要先有确定性 Brief；LLM 只能解释，不可自行决策 | Stage 1 后半 |
-| 首页动作优先 | `PARTIAL` | 当前已有 signal state、next trigger、why-not-buy 部分字段 | 首页仍主要围绕机会分、指标和旧状态；没有 v1.0 动作合同 | Stage 1 |
+| 首页动作优先 | `PARTIAL` | 当前已有 signal state、next trigger、why-not-buy 部分字段 | 首页仍主要围绕机会分、指标和旧状态；没有 v1.1 动作合同 | Stage 1 |
 | 首页 Core 3—5 个 | `PARTIAL` | `_top_opportunities()` 支持 limit，按 symbol 去重 | 默认仍为 12；只按 Opportunity 排序；无多样性、Expected R、安全概率模式和状态分组 | Stage 1 |
 | 今日不要做 | `PARTIAL` | negative reasons、Risk Gate、crowding 已存在 | 未汇总为市场级/账户级 avoid list；没有 hard/soft blocker 分类 | Stage 1 |
 | 数据与模型证据状态 | `PARTIAL` | data_status、observed_age、success_probability=None 已存在 | 缺 evidence level、data trust tier、model status 和可见的“真实证据不足”合同 | Stage 1 |
@@ -190,7 +228,7 @@ stock_tracker/signals/crowding.py
 
 | 能力 | 当前状态 | 当前实现 | 缺口 |
 |---|---|---|---|
-| 入场区间 | `IMPLEMENTED` | Signal 有 `entry_low/entry_high` | 需要 v1.0 TradePlan identity 和有效期 |
+| 入场区间 | `IMPLEMENTED` | Signal 有 `entry_low/entry_high` | 需要 v1.1 TradePlan identity 和有效期 |
 | 触发价 | `IMPLEMENTED` | `trigger_price`、`next_trigger` | 缺结构化 trigger 条件集合 |
 | 失效位 | `IMPLEMENTED` | `invalidation_price` | 缺持仓后的移动保护和失效类型 |
 | 目标 1/2 | `IMPLEMENTED` | Signal 已持久化 | 缺部分止盈和 Trend Runner 合同 |
@@ -233,7 +271,7 @@ added_at
 closed_at
 ```
 
-v1.0 需要新增独立账户 Profile，而不是把账户字段塞进每条 Position。
+v1.1 需要新增独立账户 Profile，而不是把账户字段塞进每条 Position。
 
 ---
 
@@ -244,7 +282,7 @@ v1.0 需要新增独立账户 Profile，而不是把账户字段塞进每条 Pos
 | `TRIM/EXIT` 枚举与迁移 | `PARTIAL` | `SignalState` 和 `VALID_TRANSITIONS` 已包含 | 只表示状态能力，不等于有退出算法 |
 | 入场后维持 ACTIVE | `PARTIAL` | 状态机支持 ACTIVE | 当前 `decide()` 主要处理 DQ、overextension、entry trigger 和 armed expiration |
 | 失效位触发 EXIT | `NOT_IMPLEMENTED` | 未见 `last <= invalidation` 的 ACTIVE 退出分支 | Stage 1 必须补最低安全退出 |
-| WARNING | `NOT_IMPLEMENTED` | 旧状态机无独立 WARNING | 需 v1.0 ActionState 或兼容映射 |
+| WARNING | `NOT_IMPLEMENTED` | 旧状态机无独立 WARNING | 需 v1.1 ActionState 或兼容映射 |
 | 部分止盈 | `NOT_IMPLEMENTED` | 无状态、比例或持久化 | Stage 2/3 |
 | Trend Runner | `NOT_IMPLEMENTED` | 无状态、仓位切片或退出规则 | 依赖 Big Trend，Stage 3 |
 | 重大事件直接退出 | `NOT_IMPLEMENTED` | 事件仅人工注入弱占位 | 依赖 Event Intelligence |
@@ -252,7 +290,7 @@ v1.0 需要新增独立账户 Profile，而不是把账户字段塞进每条 Pos
 
 结论：
 
-> 当前仓库有退出“词汇”和迁移表，但没有达到 v1.0 的完整 Exit Engine。不能在 UI 中声称系统已经能可靠管理退出。
+> 当前仓库有退出“词汇”和迁移表，但没有达到 v1.1 的完整 Exit Engine。不能在 UI 中声称系统已经能可靠管理退出。
 
 ---
 
@@ -408,7 +446,7 @@ DATA_INVALID
 EXPIRED
 ```
 
-v1.0 产品动作需要：
+v1.1 产品动作需要：
 
 ```text
 WATCH
@@ -497,7 +535,7 @@ portfolio_profile
 success_probability = None
 ```
 
-这与 v1.0 设计一致。Stage 1 不应为了首页完整而填入伪概率。
+这与 v1.1 设计一致。Stage 1 不应为了首页完整而填入伪概率。
 
 首页应展示：
 
@@ -578,7 +616,7 @@ DecisionBrief
 
 ### Slice 3：Action Mapper
 
-确定性地将现有运行状态映射为 v1.0 动作：
+确定性地将现有运行状态映射为 v1.1 动作：
 
 ```text
 ARMED_PULLBACK  -> WAIT_PULLBACK
@@ -867,7 +905,7 @@ Stage 0 文档交付完成后，下一安全动作是：
 
 当前项目不是从零开始：运行采集、信号骨架和 Quant Foundation 已经提供了良好基础。
 
-但从 v1.0 产品视角看，当前成熟度更准确地描述为：
+但从 v1.1 产品视角看，当前成熟度更准确地描述为：
 
 ```text
 运行交易驾驶舱骨架：已实现

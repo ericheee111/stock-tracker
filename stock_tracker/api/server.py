@@ -17,15 +17,19 @@ import os
 import queue
 import re
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlparse
 
+from ..core.network import require_safe_bind
+from ..core.security import (
+    MIN_PRIVATE_ACCESS_LENGTH,
+    PRIVATE_ACCESS_ENV,
+    private_access_value_valid,
+)
+from ..storage.db import close_all
 from . import handlers as H
 from .handlers import AppContext
-from ..storage.db import close_all
-
 
 # 路由表：前缀 → handler 函数（GET）
 _GET_ROUTES: list[tuple[str, Any]] = [
@@ -62,19 +66,8 @@ _PRIVATE_API_PREFIXES = (
     "/api/portfolio/positions/",
     "/api/signal/",
 )
-_PRIVATE_ACCESS_ENV = "STOCK_TRACKER_PRIVATE_ACCESS"
-_MIN_PRIVATE_ACCESS_LENGTH = 32
 _MAX_JSON_BODY_BYTES = 64 * 1024
 _MAX_OVERSIZE_DRAIN_BYTES = 1024 * 1024
-
-
-def _private_access_value_valid(value: str) -> bool:
-    return (
-        type(value) is str
-        and len(value) >= _MIN_PRIVATE_ACCESS_LENGTH
-        and value == value.strip()
-        and not any(ord(char) < 33 or ord(char) == 127 for char in value)
-    )
 
 
 def _private_api_access_allowed(
@@ -123,7 +116,7 @@ def _private_api_access_allowed(
         and not request_is_cross_site
     ):
         return True
-    if not _private_access_value_valid(configured_access):
+    if not private_access_value_valid(configured_access):
         return False
     prefix = "Bearer "
     if not authorization.startswith(prefix):
@@ -138,7 +131,7 @@ class APIHandler(BaseHTTPRequestHandler):
     """请求分发。"""
 
     # 不向 stderr 打印默认日志，改用统一 logger（在 server 中注入）
-    def log_message(self, fmt: str, *args: Any) -> None:  # noqa: D401
+    def log_message(self, fmt: str, *args: Any) -> None:
         if getattr(self.server, "logger", None) is not None:
             self.server.logger.debug("HTTP %s - %s", self.address_string(), fmt % args)
 
@@ -169,14 +162,14 @@ class APIHandler(BaseHTTPRequestHandler):
             request_origin=self.headers.get("Origin", ""),
             sec_fetch_site=self.headers.get("Sec-Fetch-Site", ""),
             authorization=self.headers.get("Authorization", ""),
-            configured_access=os.environ.get(_PRIVATE_ACCESS_ENV, ""),
+            configured_access=os.environ.get(PRIVATE_ACCESS_ENV, ""),
         )
 
     def _require_private_api(self, path: str) -> bool:
         if self._private_api_authorized(path):
             return True
-        configured_value = os.environ.get(_PRIVATE_ACCESS_ENV, "")
-        configured = _private_access_value_valid(configured_value)
+        configured_value = os.environ.get(PRIVATE_ACCESS_ENV, "")
+        configured = private_access_value_valid(configured_value)
         misconfigured = bool(configured_value) and not configured
         code = (
             "PRIVATE_API_AUTH_REQUIRED"
@@ -191,7 +184,7 @@ class APIHandler(BaseHTTPRequestHandler):
             "private API authorization is required"
             if configured
             else (
-                f"private access must contain at least {_MIN_PRIVATE_ACCESS_LENGTH} visible characters"
+                f"private access must contain at least {MIN_PRIVATE_ACCESS_LENGTH} visible characters"
                 if misconfigured
                 else "private API is local-only until private access is configured"
             )
@@ -220,7 +213,7 @@ class APIHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     # ---- GET ----
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path
         ctx = self._ctx()
@@ -241,7 +234,7 @@ class APIHandler(BaseHTTPRequestHandler):
             if path == prefix or path.startswith(prefix + "/"):
                 try:
                     self._send_json(fn(ctx))
-                except Exception:
+                except Exception:  # noqa: BLE001 - HTTP boundary logs and returns a fixed 500
                     self._internal_error()
                 return
 
@@ -268,7 +261,7 @@ class APIHandler(BaseHTTPRequestHandler):
         self._serve_static(ctx, path)
 
     # ---- POST ----
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         ctx = self._ctx()
         parsed = urlparse(self.path)
         path = parsed.path
@@ -304,7 +297,7 @@ class APIHandler(BaseHTTPRequestHandler):
 
         self._send_json({"error": "not found"}, status=404)
 
-    def do_PUT(self) -> None:  # noqa: N802
+    def do_PUT(self) -> None:
         path = urlparse(self.path).path
         if not self._require_private_api(path):
             return
@@ -315,7 +308,7 @@ class APIHandler(BaseHTTPRequestHandler):
         if payload is not None:
             self._call_json(H.put_portfolio_profile, self._ctx(), payload)
 
-    def do_PATCH(self) -> None:  # noqa: N802
+    def do_PATCH(self) -> None:
         path = urlparse(self.path).path
         if not self._require_private_api(path):
             return
@@ -327,7 +320,7 @@ class APIHandler(BaseHTTPRequestHandler):
         if payload is not None:
             self._call_json(H.patch_portfolio_position, self._ctx(), match.group(1), payload)
 
-    def do_DELETE(self) -> None:  # noqa: N802
+    def do_DELETE(self) -> None:
         path = urlparse(self.path).path
         if not self._require_private_api(path):
             return
@@ -401,7 +394,7 @@ class APIHandler(BaseHTTPRequestHandler):
             self._send_json(fn(*args), status=status)
         except H.APIError as exc:
             self._send_json(exc.response(), status=exc.status)
-        except Exception:
+        except Exception:  # noqa: BLE001 - HTTP boundary logs and returns a fixed 500
             self._internal_error()
 
     def _internal_error(self) -> None:
@@ -455,7 +448,7 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
 
-        q: "queue.Queue" = queue.Queue()
+        q: queue.Queue = queue.Queue()
         hub.add_client(q)
         try:
             self.wfile.write(b": connected\n\n")
@@ -472,7 +465,7 @@ class APIHandler(BaseHTTPRequestHandler):
                         break
                     continue
                 data = json.dumps(payload, ensure_ascii=False)
-                frame = f"event: {topic}\ndata: {data}\n\n".encode("utf-8")
+                frame = f"event: {topic}\ndata: {data}\n\n".encode()
                 try:
                     self.wfile.write(frame)
                     self.wfile.flush()
@@ -485,8 +478,17 @@ class APIHandler(BaseHTTPRequestHandler):
 class APIServer(ThreadingHTTPServer):
     """HTTP 服务（持有 AppContext 与全局 shutdown 事件）。"""
 
-    def __init__(self, host: str, port: int, ctx: AppContext, logger) -> None:
-        super().__init__((host, port), APIHandler)
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        ctx: AppContext,
+        logger: Any,
+        *,
+        allow_non_loopback: bool = False,
+    ) -> None:
+        safe_host = require_safe_bind(host, allow_non_loopback=allow_non_loopback)
+        super().__init__((safe_host, port), APIHandler)
         self.ctx = ctx
         self.logger = logger
         self._shutdown = threading.Event()

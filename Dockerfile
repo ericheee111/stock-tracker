@@ -8,7 +8,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt || true
 
-# 复制源码与配置（data/ 已被 .gitignore 排除，不会进入构建上下文）
+# 复制源码与配置（本地 data/build/cache/归档由 .dockerignore 排除）
 COPY . .
 
 # 确保运行时数据目录存在（应用启动也会自建）
@@ -17,4 +17,5 @@ RUN mkdir -p data
 # 应用读取环境变量 PORT（Render 注入），默认 8080
 EXPOSE 8080
 
-CMD ["python", "-m", "stock_tracker"]
+# 该镜像只用于 PURE_CLOUD_EXPERIMENTAL；非 loopback 必须双重显式确认。
+CMD ["python", "-m", "stock_tracker", "--host", "0.0.0.0", "--allow-non-loopback"]
