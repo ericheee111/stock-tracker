@@ -259,11 +259,11 @@ Status: `COMPLETED`
 
 ## 17. Task K — local repository hygiene review
 
-Status: `READY_FOR_GIT_DELIVERY`
+Status: `COMPLETED`
 
 - Reviewed the remaining dirty worktree after the Signal Ledger push.
 - `AGENTS.md` contains a valid roadmap-state correction: Stage 1.1 is completed and Hybrid H1 is the current next engineering slice; it is safe to commit.
 - `.gitignore` now excludes current reproducible local artifacts: `/build/`, `/stock-tracker-web*.zip`, and the generated QA screenshot families `01-dark-*`, `02-dark-*`, `_min.png`, `aurora-*`, and `v2-*`; existing tracked golden screenshots are not removed.
 - Python bytecode is already covered by `__pycache__/` and `*.pyc`. Five historical `.pyc` files are still tracked by Git; the currently modified `stock_tracker/quant/data/__pycache__/__init__.cpython-314.pyc` must not be pushed. CodexPro blocked `git rm --cached` as a high-risk operation, so this session does not bypass the guard or delete local cache files.
-- After the ignore update, the only remaining worktree paths are `.gitignore`, `AGENTS.md`, and the legacy tracked `.pyc`; generated build/ZIP/screenshot artifacts are correctly hidden from status.
-- Final Git delivery and remote SHA verification remain to be completed below.
+- After the hygiene commit, generated build/ZIP/screenshot artifacts are correctly hidden from status; after this handoff-only completion commit, the only expected dirty path is the legacy tracked `.pyc` noted above.
+- Hygiene/roadmap commit `2dca0fd809127678c4767bf723eff44a498ea2fc` (`chore: ignore local generated artifacts`) was pushed to `origin/main`; local `HEAD`, local `origin/main`, and remote `refs/heads/main` were verified equal at that SHA before this handoff-only completion update.
