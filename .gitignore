@@ -36,4 +36,13 @@ node_modules/
 qa/ui/shots/
 /qa/shots/today-*.png
 /qa/shots/page-*.png
+/qa/shots/01-dark-*.png
+/qa/shots/02-dark-*.png
+/qa/shots/_min.png
+/qa/shots/aurora-*.png
+/qa/shots/v2-*.png
 /qa/shots/today-shot-report.json
+
+# 本地前端打包/发布产物（可由源码重新生成，不入库）
+/build/
+/stock-tracker-web*.zip

@@ -256,3 +256,14 @@ Status: `COMPLETED`
 - Fresh verification before Git delivery: Mock Today QA `17/17`; real Python API/Web Today `17/17`; Portfolio CRUD `13/13`; 390 / 768 / 1280 screenshot checks all report `overflowPx=0`; overview/watch/radar/research routes all activate successfully; `git diff --check` passes for the redesign source set.
 - No remote fonts, font binaries, analytics or third-party visual scripts were added; generated screenshots and local ZIP/build artifacts remain outside the source commit unless explicitly requested.
 - UI implementation commit `370317b` (`feat(web): redesign decision terminal UI`) was pushed successfully to `origin/main`; this handoff update records the completed delivery.
+
+## 17. Task K — local repository hygiene review
+
+Status: `READY_FOR_GIT_DELIVERY`
+
+- Reviewed the remaining dirty worktree after the Signal Ledger push.
+- `AGENTS.md` contains a valid roadmap-state correction: Stage 1.1 is completed and Hybrid H1 is the current next engineering slice; it is safe to commit.
+- `.gitignore` now excludes current reproducible local artifacts: `/build/`, `/stock-tracker-web*.zip`, and the generated QA screenshot families `01-dark-*`, `02-dark-*`, `_min.png`, `aurora-*`, and `v2-*`; existing tracked golden screenshots are not removed.
+- Python bytecode is already covered by `__pycache__/` and `*.pyc`. Five historical `.pyc` files are still tracked by Git; the currently modified `stock_tracker/quant/data/__pycache__/__init__.cpython-314.pyc` must not be pushed. CodexPro blocked `git rm --cached` as a high-risk operation, so this session does not bypass the guard or delete local cache files.
+- After the ignore update, the only remaining worktree paths are `.gitignore`, `AGENTS.md`, and the legacy tracked `.pyc`; generated build/ZIP/screenshot artifacts are correctly hidden from status.
+- Final Git delivery and remote SHA verification remain to be completed below.
