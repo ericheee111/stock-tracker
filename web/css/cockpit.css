@@ -14,15 +14,15 @@
   margin-bottom: 14px;
 }
 .index-card {
-  background: var(--bg-surface);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 45%), var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 10px 8px;
   text-align: center;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  transition: background var(--dur) var(--ease), transform var(--dur) var(--ease);
+  box-shadow: var(--hairline-2), var(--shadow-card);
+  transition: background var(--dur) var(--ease), transform var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-.index-card:hover { background: #444446; transform: translateY(-1px); }
+.index-card:hover { background: var(--surface-hover); transform: translateY(-2px); border-color: var(--border-strong); }
 .index-name { font-size: 12px; color: var(--text-3); }
 .index-value { font-size: 16px; font-weight: 700; margin: 4px 0; color: var(--text); font-family: var(--font-mono); }
 .index-chg { font-size: 12px; font-weight: 700; font-family: var(--font-mono); }
@@ -90,7 +90,7 @@
   background: var(--bg-surface); border: 1px solid var(--border);
   border-left: 3px solid var(--status-stale);
   border-radius: var(--radius-sm); padding: 9px 11px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow: var(--hairline-2), var(--shadow-card);
 }
 .risk-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .risk-sym { font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: var(--text); }
@@ -118,7 +118,7 @@
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
   cursor: pointer; transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
-.opp-card:hover { background: #444446; border-color: var(--border-strong); transform: translateY(-1px); }
+.opp-card:hover { background: var(--surface-hover); border-color: var(--border-strong); transform: translateY(-1px); }
 .opp-main { flex: 1; min-width: 0; }
 .opp-name { font-size: 15px; font-weight: 600; color: var(--text); }
 .opp-code { font-size: 11px; color: var(--text-3); margin-left: 6px; }
@@ -152,7 +152,7 @@
   cursor: pointer;
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
-.hl-card:hover { background: #444446; border-color: var(--border-strong); transform: translateY(-1px); }
+.hl-card:hover { background: var(--surface-hover); border-color: var(--border-strong); transform: translateY(-1px); }
 .hl-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .hl-name { font-size: 15px; font-weight: 600; color: var(--text); }
 .hl-code { font-size: 11px; color: var(--text-3); }
@@ -199,7 +199,7 @@
   cursor: pointer;
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
-.wl-card:hover { background: #444446; border-color: var(--border-strong); transform: translateY(-1px); }
+.wl-card:hover { background: var(--surface-hover); border-color: var(--border-strong); transform: translateY(-1px); }
 .wl-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .wl-name { font-size: 15px; font-weight: 600; color: var(--text); }
 .wl-code { font-size: 11px; color: var(--text-3); }
@@ -214,11 +214,14 @@
 }
 .score-cell { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .score-circle {
-  width: 46px; height: 46px; border-radius: 50%;
+  width: 48px; height: 48px; border-radius: 50%;
   border: 3px solid var(--sc, var(--text-3));
   display: flex; align-items: center; justify-content: center;
   font-family: var(--font-mono); font-weight: 700; font-size: 15px; color: var(--text);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
+  box-shadow: inset 0 1px 2px rgba(255,255,255,0.10), 0 2px 6px rgba(0,0,0,0.22);
+  background:
+    radial-gradient(circle at 32% 26%, rgba(255,255,255,0.12), transparent 60%),
+    var(--bg-surface);
 }
 .score-label { font-size: 11px; color: var(--text-3); }
 
@@ -299,7 +302,7 @@
   cursor: pointer;
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
-.radar-card:hover { background: #444446; border-color: var(--border-strong); transform: translateY(-1px); }
+.radar-card:hover { background: var(--surface-hover); border-color: var(--border-strong); transform: translateY(-1px); }
 .radar-card.g-exec { border-left-color: var(--status-live); }
 .radar-card.g-watch { border-left-color: #64d2ff; }
 .radar-card.g-breakout { border-left-color: #bf5af2; }

@@ -37,14 +37,27 @@
   const $$ = function (sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); };
 
   let toastTimer = null;
+  let toastHideTimer = null;
   let todayRefreshTimer = null;
+  function hideToast() {
+    const t = $('#toast');
+    if (!t) return;
+    t.classList.remove('show');          // 对称退场：沿同一边缘下滑淡出
+    toastHideTimer = setTimeout(function () {
+      if (!t.classList.contains('show')) t.hidden = true;
+    }, 260);
+    toastTimer = null;
+  }
   function toast(msg) {
     const t = $('#toast');
     if (!t) return;
+    clearTimeout(toastHideTimer);
     t.textContent = msg;
     t.hidden = false;
+    void t.offsetWidth;                 // 强制 reflow，确保入场过渡触发
+    t.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.hidden = true; }, 1400);
+    toastTimer = setTimeout(hideToast, 1400);
   }
 
   /* ---------------- 路由 ---------------- */
@@ -55,16 +68,65 @@
       if (page) page.classList.toggle('active', p === name);
     });
     $$('.nav-btn').forEach(function (b) { b.classList.toggle('active', b.dataset.page === name); });
+    positionNavIndicator();
   }
 
   function setMarket(m) {
     state.market = m;
     $$('.market-tab').forEach(function (t) { t.classList.toggle('active', t.dataset.market === m); });
+    positionMarketIndicator();
     // 重渲染所有受市场影响的区块；重点机会 topList 按当前市场过滤
     const idx = $('#indexGrid'); if (idx) idx.innerHTML = UI.renderIndexGrid(state.markets, m);
     renderWatch();
     renderRadar(); // 雷达可按需过滤，这里不过滤保持全量；自选/持仓按市场过滤
     renderTopList(); // 重点机会列表随市场切换刷新（按 market 过滤）
+  }
+
+  /* ---------------- 弹性滑动指示（分段控件 / 底部导航） ---------------- */
+  function positionMarketIndicator() {
+    const wrap = $('#marketTabs');
+    if (!wrap) return;
+    let ind = wrap.querySelector('.market-tabs-indicator');
+    if (!ind) {
+      ind = document.createElement('span');
+      ind.className = 'market-tabs-indicator';
+      wrap.appendChild(ind);
+    }
+    const active = wrap.querySelector('.market-tab.active');
+    if (!active) return;
+    ind.style.width = active.offsetWidth + 'px';
+    ind.style.transform = 'translateX(' + active.offsetLeft + 'px)';
+  }
+  function positionNavIndicator() {
+    const nav = $('.bottom-nav');
+    if (!nav) return;
+    let ind = nav.querySelector('.nav-indicator');
+    if (!ind) {
+      ind = document.createElement('span');
+      ind.className = 'nav-indicator';
+      nav.appendChild(ind);
+    }
+    const active = nav.querySelector('.nav-btn.active');
+    if (!active) return;
+    ind.style.width = active.offsetWidth + 'px';
+    ind.style.transform = 'translateX(' + active.offsetLeft + 'px)';
+  }
+  function initIndicators() {
+    positionMarketIndicator();
+    positionNavIndicator();
+    // 双 rAF：等首帧布局稳定后再校正一次，消除初值偏差
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () { positionMarketIndicator(); positionNavIndicator(); });
+    });
+    // 字体就绪后再次校正（字体影响 Tab 文字宽度）
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(function () { positionMarketIndicator(); positionNavIndicator(); });
+    }
+    let rAF = null;
+    window.addEventListener('resize', function () {
+      if (rAF) cancelAnimationFrame(rAF);
+      rAF = requestAnimationFrame(function () { positionMarketIndicator(); positionNavIndicator(); });
+    });
   }
 
   /* ---------------- 初始拉取 ---------------- */
@@ -237,7 +299,7 @@
     sheet.innerHTML = UI.renderSignalDetail(cached) ||
       '<div class="sheet-body"><div class="loading-box">加载信号详情…</div></div>' +
       '<div class="sheet-footer"><button class="sheet-close" id="sheetClose">关闭</button></div>';
-    mask.hidden = false;
+    openSheetMask(mask);
     bindSheetClose();
     // 缓存信号带 signal_id 时，从 REST 取最新完整详情（含入场/止损/目标/history）
     if (cached && cached.signal_id) {
@@ -332,9 +394,22 @@
     const btn = $('#sheetClose');
     if (btn) btn.onclick = closeSheet;
   }
+  let sheetCloseTimer = null;
   function closeSheet() {
     const mask = $('#sheetMask');
-    if (mask) mask.hidden = true;
+    if (!mask || mask.hidden || mask.classList.contains('closing')) return;
+    mask.classList.add('closing');              // 触发退场过渡（遮罩淡出 + 弹层下滑）
+    clearTimeout(sheetCloseTimer);
+    sheetCloseTimer = setTimeout(function () {
+      mask.hidden = true;
+      mask.classList.remove('closing');
+    }, 340);
+  }
+  function openSheetMask(mask) {
+    if (!mask) return;
+    clearTimeout(sheetCloseTimer);
+    mask.classList.remove('closing');           // 复位退场态，确保新弹层正常入场
+    mask.hidden = false;
   }
 
   /* ---------------- Stage 1.1：Portfolio 私有 CRUD ---------------- */
@@ -344,7 +419,7 @@
     const sheet = $('#sheet');
     if (!P || !mask || !sheet) return;
     sheet.innerHTML = P.renderSheet(state.portfolio, state.privateError);
-    mask.hidden = false;
+    openSheetMask(mask);
     bindSheetClose();
   }
 
@@ -647,8 +722,50 @@
     });
   }
 
+  /* ---------------- 主题切换（深/浅） ---------------- */
+  function initTheme() {
+    const KEY = 'stk-theme';
+    const root = document.documentElement;
+    let stored = null;
+    try { stored = localStorage.getItem(KEY); } catch (e) { stored = null; }
+    if (stored === 'light' || stored === 'dark') root.setAttribute('data-theme', stored);
+
+    const btn = $('#themeToggle');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      const cur = root.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+      const next = cur === 'light' ? 'dark' : 'light';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+    });
+  }
+
+  /* ---------------- 轻触涟漪（移动端反馈） ---------------- */
+  function initRipple() {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const hosts = '.ripple-host, .market-tab, .nav-btn, .icon-btn, .sheet-close, .pf-primary, .pf-secondary, .pf-danger, .act-badge, .card, .opp-card, .wl-card, .radar-card, .hl-card, .pos-card, .tb-card, .tb-do';
+    document.addEventListener('pointerdown', function (e) {
+      if (e.button !== undefined && e.button !== 0) return;
+      const el = e.target.closest(hosts);
+      if (!el || el.disabled) return;
+      const rect = el.getBoundingClientRect();
+      if (!rect.width) return;
+      const size = Math.max(rect.width, rect.height);
+      const dot = document.createElement('span');
+      dot.className = 'ripple-dot';
+      dot.style.width = dot.style.height = size + 'px';
+      dot.style.left = (e.clientX - rect.left - size / 2) + 'px';
+      dot.style.top = (e.clientY - rect.top - size / 2) + 'px';
+      el.appendChild(dot);
+      setTimeout(function () { if (dot.parentNode) dot.parentNode.removeChild(dot); }, 560);
+    });
+  }
+
   /* ---------------- 启动 ---------------- */
   function init() {
+    initTheme();
+    initRipple();
+    initIndicators();
     bindEvents();
     // 先渲染占位加载态，避免白屏
     const pp = $('#portfolioPanel'); if (pp) pp.innerHTML = UI.loadingBox('加载账户与持仓…');

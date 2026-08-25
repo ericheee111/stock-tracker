@@ -243,3 +243,16 @@ cf5b5f8eeae93c4147d6b607b30c3c569247a2b1
 
 - Complete real Tailscale Serve and two-distinct-node operational acceptance when the devices are available.
 - Continue the next code slice with Hybrid H1/H2: Runtime Config/API Base separation, exact CORS/`OPTIONS`, Runtime Health, version handshake and offline/auth state separation.
+
+## 16. Task J — Signal Ledger UI redesign
+
+Status: `IMPLEMENTED_AND_VERIFIED`
+
+- Redesigned the current static frontend from the previous aurora/glass treatment into a restrained `Signal Ledger` decision terminal.
+- The UI source set for this release is `web/index.html`, `web/css/base.css`, `web/css/cockpit.css`, `web/css/today.css`, `web/css/portfolio.css`, new `web/css/terminal.css`, and `web/js/app.js`; existing DOM target IDs, API paths and financial-decision semantics remain unchanged.
+- The visual hierarchy now prioritizes the daily action summary, blockers, position sizing, market posture and data status; scores and decorative effects are secondary.
+- The design uses matte ledger panels, a restrained grid background, tabular numerics, compact system chrome, desktop side navigation and mobile bottom navigation.
+- Existing runtime/cache and unrelated repository changes are preserved and will not be reset or swept into this UI commit.
+- Fresh verification before Git delivery: Mock Today QA `17/17`; real Python API/Web Today `17/17`; Portfolio CRUD `13/13`; 390 / 768 / 1280 screenshot checks all report `overflowPx=0`; overview/watch/radar/research routes all activate successfully; `git diff --check` passes for the redesign source set.
+- No remote fonts, font binaries, analytics or third-party visual scripts were added; generated screenshots and local ZIP/build artifacts remain outside the source commit unless explicitly requested.
+- Git delivery is the remaining step for this task.

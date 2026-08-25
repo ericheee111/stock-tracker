@@ -54,7 +54,10 @@
   padding: 8px 12px;
   font: 600 13px var(--font-sans);
   cursor: pointer;
-  transition: opacity var(--dur) var(--ease), border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.20);
+  transition: opacity var(--dur) var(--ease), border-color var(--dur) var(--ease), background var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
 .pf-primary {
   border: 1px solid rgba(100, 210, 255, 0.42);
@@ -73,7 +76,7 @@
 }
 .pf-primary:hover,
 .pf-secondary:hover,
-.pf-danger:hover { border-color: currentColor; }
+.pf-danger:hover { border-color: currentColor; transform: translateY(-1px); }
 .pf-primary:disabled,
 .pf-secondary:disabled,
 .pf-danger:disabled { cursor: wait; opacity: 0.55; }
@@ -108,6 +111,7 @@
   border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.025);
   padding: 12px;
+  box-shadow: var(--hairline-2), var(--shadow-card);
 }
 .pf-sheet-section h3 {
   margin: 0 0 7px;
@@ -169,6 +173,7 @@
   border-radius: var(--radius-xs);
   background: var(--bg-surface);
   padding: 10px;
+  box-shadow: var(--hairline-2), var(--shadow-card);
 }
 .pf-position-head {
   display: flex;

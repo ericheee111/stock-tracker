@@ -3,87 +3,108 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Stock Tracker · 交易驾驶舱</title>
+  <meta name="theme-color" content="#090b0f" />
+  <title>Stock Tracker · 决策终端</title>
   <link rel="stylesheet" href="css/base.css" />
   <link rel="stylesheet" href="css/cockpit.css" />
   <link rel="stylesheet" href="css/today.css" />
   <link rel="stylesheet" href="css/portfolio.css" />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300d4ff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2L2 9l10 13 10-13L12 2z'/%3E%3Cpath d='M2 9l10 4 10-4'/%3E%3Cpath d='M12 13v9'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="css/terminal.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2377a7ff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 18V7M9 18V11M14 18V5M19 18V9M3 20h18M5 9l4 2 5-5 5 3'/%3E%3C/svg%3E" />
 </head>
 <body>
-  <!-- ===== 顶部：产品名 + 市场切换 + 数据模式横幅（统一 sticky 头部） ===== -->
   <header class="topbar">
     <div class="topbar-row">
       <div class="brand">
-        <span class="brand-logo"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 9l10 13 10-13L12 2z"/><path d="M2 9l10 4 10-4"/><path d="M12 13v9"/></svg></span>
+        <span class="brand-logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 18V7"/><path d="M9 18V11"/><path d="M14 18V5"/><path d="M19 18V9"/><path d="M3 20h18"/><path d="M5 9l4 2 5-5 5 3"/></svg></span>
         <div class="brand-text">
           <div class="brand-name">Stock Tracker</div>
-          <div class="brand-sub">系统化股票决策 · 交易驾驶舱</div>
+          <div class="brand-sub">Private decision terminal · Action first</div>
         </div>
       </div>
-      <!-- 市场 Tab 切换：A股 / 港股 / 美股 -->
-      <nav class="market-tabs" id="marketTabs">
+      <div class="topbar-context" aria-hidden="true"><span>Local first</span><span>Evidence gated</span></div>
+      <nav class="market-tabs" id="marketTabs" aria-label="切换市场">
         <button class="market-tab active" data-market="A">A股</button>
         <button class="market-tab" data-market="HK">港股</button>
         <button class="market-tab" data-market="US">美股</button>
       </nav>
+      <button class="icon-btn theme-toggle" id="themeToggle" type="button" aria-label="切换深/浅色主题" title="切换深/浅色主题">
+        <svg class="ico-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="ico-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+      </button>
     </div>
-
-    <!-- 数据模式横幅：真实/延迟/过期/测试 可见（LIVE/DEGRADED/DEMO） -->
     <div id="banner" class="banner" aria-live="polite">
       <div class="banner-loading">正在连接后端，加载真实行情…</div>
     </div>
   </header>
 
-  <!-- ===== 主体：页面 section，靠 JS 显隐 ===== -->
   <main class="content">
-
-    <!-- ① 市场总览 -->
-    <!-- ⓪ 今日作战简报（Stage 1 首页：今天该怎么操作？） -->
     <section class="page active" id="page-today">
-      <h2 class="page-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg> 今日作战简报</h2>
+      <div class="page-heading">
+        <div class="page-heading-main">
+          <div class="page-eyebrow">Daily brief · Action first</div>
+          <h1 class="page-title">今日作战简报</h1>
+          <p class="page-description">先看动作、阻断与仓位，再看分数和价格。所有结论都受数据新鲜度与风险闸门约束。</p>
+        </div>
+        <div class="page-heading-tags" aria-hidden="true"><span>动作优先</span><span>风险先行</span><span>证据约束</span></div>
+      </div>
       <div id="portfolioPanel"></div>
       <div id="todayBrief"></div>
     </section>
 
-    <!-- ① 市场总览 -->
     <section class="page" id="page-overview">
-      <h2 class="page-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg> 市场总览</h2>
-
-      <!-- 三大市场指数卡片 -->
+      <div class="page-heading">
+        <div class="page-heading-main">
+          <div class="page-eyebrow">Market state · Breadth & risk</div>
+          <h1 class="page-title">市场总览</h1>
+          <p class="page-description">把指数、市场状态、板块生命周期和风险事件压缩为一张可执行的市场地图。</p>
+        </div>
+        <div class="page-heading-tags" aria-hidden="true"><span>Regime</span><span>板块</span><span>风险</span></div>
+      </div>
       <div class="index-grid" id="indexGrid"></div>
-
-      <!-- 市场状态卡：Regime + 强势板块 + 宽度 + 风险事件 -->
       <div class="overview-grid" id="overviewGrid"></div>
-
-      <!-- Top 机会 -->
       <div class="section-label"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> 重点机会</div>
       <div class="top-list" id="topList"></div>
-
-      <!-- 收市态面板：中长线持仓信号（仅三市场全收市时显示，前端按持仓周期分组展示） -->
       <div id="holdingPanel" hidden></div>
     </section>
 
-    <!-- ② 自选 / 持仓 -->
     <section class="page" id="page-watch">
-      <h2 class="page-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> 自选 / 持仓</h2>
+      <div class="page-heading">
+        <div class="page-heading-main">
+          <div class="page-eyebrow">Portfolio watch · Position truth</div>
+          <h1 class="page-title">自选 / 持仓</h1>
+          <p class="page-description">自选负责等待条件，持仓负责风险与退出；两种语义分开呈现，不混成普通行情列表。</p>
+        </div>
+        <div class="page-heading-tags" aria-hidden="true"><span>自选</span><span>持仓</span><span>退出</span></div>
+      </div>
       <div class="signal-summary" id="watchSummary"></div>
       <div id="watchGroups"></div>
       <div class="section-label"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 9l-5 5-3-3-4 4"/></svg> 持仓</div>
       <div id="positionList"></div>
     </section>
 
-    <!-- ③ 机会雷达 -->
     <section class="page" id="page-radar">
-      <h2 class="page-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg> 机会雷达</h2>
+      <div class="page-heading">
+        <div class="page-heading-main">
+          <div class="page-eyebrow">Signal radar · State hierarchy</div>
+          <h1 class="page-title">机会雷达</h1>
+          <p class="page-description">按可执行、等待、回避与数据阻断分层，避免把所有高分标的都展示成“可以买”。</p>
+        </div>
+        <div class="page-heading-tags" aria-hidden="true"><span>状态分层</span><span>下一触发</span></div>
+      </div>
       <div class="section-label">按信号状态分层（可执行 / 等回踩 / 等突破 / 禁止追高 / 早期观察 / 数据不足）</div>
       <div id="radarGroups"></div>
     </section>
 
-    <!-- ④ 信号详情：以底部弹层（sheet）呈现，非独立 tab -->
-    <!-- ⑤ 研究室（占位） -->
     <section class="page" id="page-research">
-      <h2 class="page-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6l-4 9a2 2 0 002 3h10a2 2 0 002-3l-4-9V2"/><path d="M9 2h6"/></svg> 研究室</h2>
+      <div class="page-heading">
+        <div class="page-heading-main">
+          <div class="page-eyebrow">Research lab · Evidence before claims</div>
+          <h1 class="page-title">研究室</h1>
+          <p class="page-description">回测、校准、Replay 与模型晋级只在证据达到门槛后进入正式产品叙事。</p>
+        </div>
+        <div class="page-heading-tags" aria-hidden="true"><span>PIT</span><span>Replay</span><span>Calibration</span></div>
+      </div>
       <div class="card research-card">
         <div class="research-ico"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6l-4 9a2 2 0 002 3h10a2 2 0 002-3l-4-9V2"/><path d="M9 2h6"/></svg></div>
         <div class="research-title">概率模型 · 回测 · 组合优化</div>
@@ -95,17 +116,13 @@
         </div>
       </div>
     </section>
-
   </main>
 
-  <!-- ===== 免责声明（真实数据版） ===== -->
   <footer class="disclaimer" id="disclaimer">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;display:inline-block;margin-right:4px"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-    本页所有行情与信号均来自后端真实行情接口（腾讯 / 东财 / 新浪公开数据），经数据质量闸门校验后展示。<strong>延迟（DELAYED）/ 过期（STALE）/ 异常（UNKNOWN）数据已逐条标注</strong>，请勿将延迟数据当作实时数据使用。本系统仅作辅助参考，不构成任何投资建议。市场有风险，决策需谨慎。
+    <span class="disclaimer-label">Risk notice</span>行情与信号由后端数据质量闸门校验后展示；<strong>DELAYED / STALE / UNKNOWN 不得视为实时可执行数据</strong>。本系统只提供辅助判断，不构成投资建议。
   </footer>
 
-  <!-- ===== 底部：5 个 Tab 导航（今日为默认首页） ===== -->
-  <nav class="bottom-nav">
+  <nav class="bottom-nav" aria-label="主导航">
     <button class="nav-btn active" data-page="today"><span class="nav-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg></span><span>今日</span></button>
     <button class="nav-btn" data-page="overview"><span class="nav-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></span><span>总览</span></button>
     <button class="nav-btn" data-page="watch"><span class="nav-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span><span>自选</span></button>
@@ -113,15 +130,9 @@
     <button class="nav-btn" data-page="research"><span class="nav-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6l-4 9a2 2 0 002 3h10a2 2 0 002-3l-4-9V2"/><path d="M9 2h6"/></svg></span><span>研究室</span></button>
   </nav>
 
-  <!-- ===== 信号详情弹层 ===== -->
-  <div class="sheet-mask" id="sheetMask" hidden>
-    <div class="sheet" id="sheet"></div>
-  </div>
-
-  <!-- 轻提示 -->
+  <div class="sheet-mask" id="sheetMask" hidden><div class="sheet" id="sheet"></div></div>
   <div class="toast" id="toast" hidden></div>
 
-  <!-- 脚本：先工具，后网络层，再渲染，最后启动（已废弃 mock-data.js） -->
   <script src="js/format.js"></script>
   <script src="js/api.js"></script>
   <script src="js/sse.js"></script>

@@ -20,12 +20,14 @@
 
 /* ---- 通用卡片（复用 .card 视觉，但避免被 .card 的 hover 位移干扰） ---- */
 .tb-card {
-  background: var(--bg-mid);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0) 42%),
+    var(--bg-mid);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 14px;
   margin-bottom: 14px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow: var(--hairline-2), var(--shadow-card);
 }
 .tb-card-title {
   font-size: 14px;
@@ -62,11 +64,14 @@
   align-items: center;
   font-size: 12px;
   font-weight: 700;
-  padding: 4px 10px;
+  padding: 4px 11px;
   border-radius: var(--radius-xs);
   color: #fff;
   white-space: nowrap;
   line-height: 1.2;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.02) 55%, rgba(0, 0, 0, 0.08));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
+  letter-spacing: .2px;
 }
 .a-exec     { background: #30d158; color: #06210f; }
 .a-wait-pb  { background: #5e5ce6; }
@@ -91,6 +96,7 @@
   font-size: 12px; font-weight: 800;
   color: #fff;
   margin-left: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 .grade-badge.g-a { background: #ff453a; }
 .grade-badge.g-b { background: #ff9f0a; }
@@ -127,10 +133,11 @@
   display: flex;
   flex-direction: column;
   gap: 3px;
-  background: var(--bg-surface);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 50%), var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 9px 10px;
+  box-shadow: var(--hairline-2), var(--shadow-card);
 }
 .tb-pp-k { font-size: 11px; color: var(--text-3); }
 .tb-pp-v { font-size: 14px; font-weight: 700; color: var(--text); }
@@ -151,8 +158,11 @@
   border-radius: var(--radius-sm);
   padding: 12px 8px;
   border: 1px solid var(--border);
-  background: var(--bg-surface);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 50%), var(--bg-surface);
+  box-shadow: var(--hairline-2), var(--shadow-card);
+  transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
+.tb-do:hover { transform: translateY(-2px); border-color: var(--border-strong); }
 .tb-do-n { font-size: 22px; font-weight: 800; font-family: var(--font-mono); }
 .tb-do-l { font-size: 12px; color: var(--text-2); }
 .tb-do.a-exec .tb-do-n { color: #30d158; }
@@ -183,6 +193,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
+  box-shadow: var(--hairline-2);
 }
 .tb-prob-row {
   display: flex;
@@ -208,6 +219,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 10px;
+  box-shadow: var(--hairline-2), var(--shadow-card);
 }
 .tb-plan-row {
   display: flex;
