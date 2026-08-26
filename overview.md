@@ -262,22 +262,23 @@ python scripts/run_stage1_today_integration.py
 
 ## 8. 当前下一步
 
-Stage 2B—6A 的后端工程合同已经形成。Hybrid H1/H2 已完成 Runtime Config、统一 URL Builder、Origin-scoped Token、exact CORS/OPTIONS、Runtime Health、版本握手与离线/认证/STALE 状态分离；接下来进入 H3/H4 operational 与云静态部署，再继续补真实研究证据：
+Stage 2B—6A 的后端工程合同已经形成。Hybrid H0—H5 的仓库侧工程实现已完成，真实 Tailscale、Windows 恢复和 Pages 部署仍待 operational 验收；数据主线继续补真实研究证据：
 
 1. **补齐 Hybrid H0 operational 验收：在安装并登录 Tailscale 的服务端启用 Serve，并从第二台独立 Tailnet 设备验证静态页、REST、SSE 和临时 Portfolio CRUD；工程实现与本地远程式验收已经完成；**
 2. **Hybrid H1（已完成）：无密钥 Runtime Config、固定 Allowed API Origin/Engine ID、统一 URL Builder、Origin-scoped Token 与 Major/Engine/Build hard block；**
 3. **Hybrid H2（已完成）：exact CORS/OPTIONS、Authorization、metadata-only Runtime Health、非法 Health hard block、动态 STALE 与 SSE 无热重试；**
-4. **Hybrid H3/H4：加固 Tailscale Serve Target Lane、开机自启和恢复，并将静态网页部署到 Cloudflare Pages（GitHub Pages 备选）；**
-5. **Hybrid H5：可信朋友优先加入 Tailnet；只有确需公开时才试用 Tailscale Funnel 或自有域名 + Cloudflare Tunnel；**
+4. **Hybrid H3/H4（工程已完成）：补真实 Serve Target、开机/休眠恢复与 Cloudflare/GitHub Pages operational 证据；**
+5. **Hybrid H5（失败关闭）：可信朋友优先加入 Tailnet；公开 Funnel/Tunnel 在独立限流与安全 Review 前不启用；**
 6. **Stage 3C.2：固定真实 free-stockdb Release，审计二进制、首次运行网络、同步源、manifest 和数据许可；**
-7. **执行 50—100 个代表性标的的 RAW 日线/分钟线多源差异矩阵，审计通过后才进入 WARM/COLD Shadow Scanner 与 EOD Reconciliation；**
-8. **建设真实 Outcome 的追加式持久化与独立样本收集，达到门槛前 Strategy Scoreboard 保持 `INSUFFICIENT_REAL_EVIDENCE`；**
-9. **闭环 T3 A 股 Snapshot、正式 PIT Replay、Replay UI、真实新样本 Shadow 与受控模型部署；**
-10. **依次进入 Stage 6B—6F 的港股通、美股独立数据、校准、Scoreboard、Shadow 与真实证据审查。**
+7. **HiThink Financial-API：使用真实账户凭据做小窗口 exact-raw 日线捕获与许可审查；保持默认关闭和 T1，不进入 Runtime、训练或再分发；**
+8. **执行 50—100 个代表性标的的 RAW 日线/分钟线多源差异矩阵，审计通过后才进入 WARM/COLD Shadow Scanner 与 EOD Reconciliation；**
+9. **建设真实 Outcome 的追加式持久化与独立样本收集，达到门槛前 Strategy Scoreboard 保持 `INSUFFICIENT_REAL_EVIDENCE`；**
+10. **闭环 T3 A 股 Snapshot、正式 PIT Replay、Replay UI、真实新样本 Shadow 与受控模型部署；**
+11. **依次进入 Stage 6B—6F 的港股通、美股独立数据、校准、Scoreboard、Shadow 与真实证据审查。**
 
 默认方案不依赖 Oracle Cloud、付费域名或付费云后端。本地机器关闭、休眠、断网或 Tunnel 中断时，云端页面虽然仍可加载，但必须显示 `ENGINE_OFFLINE`/`STALE`，不得继续展示旧的可执行动作。
 
-在真实审计完成前，`free_stockdb.enabled` 保持 `false`；在真实 Outcome、许可和 T3 数据不足时，不展示真实胜率、真实 Big Trend 捕获率或正式模型晋级结论。跨市场阈值、校准和模型只能进入目标市场零权重 Shadow，不能直接复用到生产。
+在真实审计完成前，`free_stockdb.enabled` 与 `hithink_finance.enabled` 均保持 `false`；在真实 Outcome、许可和 T3 数据不足时，不展示真实胜率、真实 Big Trend 捕获率或正式模型晋级结论。跨市场阈值、校准和模型只能进入目标市场零权重 Shadow，不能直接复用到生产。
 
 ---
 

@@ -18,6 +18,7 @@
 5. “今天的证券列表”只是一张当前态快照。它天然遗漏过去已退市且今天不再出现的证券，也不能还原历史名称、证券类型、停复牌、ST/*ST 或退市整理状态，故不能构造历史 Universe。
 6. 指数历史成分的公开 PIT 证据主要是调样公告；完整静态数据由中证指数数据服务或授权厂商提供。行业分类可从证监会旧季度结果和 CAPCO 现行半年结果拼接，但官方主题/概念板块的免费、完整、带版本历史未找到。
 7. SSE、SZSE、中证指数及其信息公司均有知识产权或数据授权限制；`robots.txt` 也未给出肯定的采集许可。**技术上能下载不等于获得长期存储、批量抓取或再分发权。** 这些问题必须由人工/法务确认。
+8. HiThink-Tech/Financial-API 可作为同花顺官方运营的规范化 A 股数据 API 和原始响应捕获候选，但仓库 MIT License 只覆盖代码，不自动授予接口数据的长期保存、训练或再分发权；当前项目仅将其冻结为默认关闭的 `T1_BEST_EFFORT` 日线 exact-raw 捕获源，真实 Key、覆盖、修订、许可与跨源对账通过前不得升级。
 
 ## 2. 审计方法与 Trust Tier 判定原则
 
@@ -144,6 +145,7 @@ parser_version
 | 国证指数与深市指数调样 / 深圳证券交易所、深圳证券信息有限公司（CNI） | official index compiler | 调样增删、实施日、方法、指数权属 | 公告索引跨多年；未证明免费全量静态版本 | 公告可追加；当前成分查询可能覆盖旧值 | 通常有公告日 + 未来生效日 | HTML/PDF/附件可捕获 | 高：方法文件明确指数权属及复制/再分发限制 | 公告免费；历史/商业使用授权另议 | 单事件 T2 候选 | 权重、临时调整和所有历史版本需覆盖审计 | **primary（事件）** |
 | 历史行情/证券基本信息/公告数据产品 / 上证信息公司 | official authorized vendor | 历史 L1/L2、日线/分钟、证券基本信息、公告等 | 产品声明按授权范围提供历史数据 | 取决于交付合同和产品版本 | 合同/文件规范决定 | 可，前提是授权下载和本地保存 | 高但可合同化 | 官网当前报价含年度/月度收费，非接近零成本 | 可作为 T3 组成，不可单独 T3 | 仍需 Universe、状态、公司行为及修订 SLA；成本高 | **fallback（有预算时）** |
 | 深市历史增强行情与授权服务 / 深圳证券信息有限公司 | official authorized vendor | 2008-01-01 起的全证券订单/成交/快照、证券信息、状态、指数快照（按产品说明） | 产品页声明自 2008-01-01 起 | 取决于交付版本和合同 | 日文件/状态字段，需合同确认 known_at | 授权后可本地日下载 | 高但可合同化；自用、场所、系统和再分发受限制 | 商务询价/授权，非公开免费 API | 可作为 T3 组成，不可单独 T3 | 2008 年以前、修订链和跨所数据仍缺 | **fallback（有预算时）** |
+| HiThink Financial-API / HiThink-Tech（同花顺官方仓库） | official-operated normalized API | A 股日线/快照、财务、估值、日历、指数/行业及全市场 Market Dumps；本项目首期只接历史日线 | REST 单请求最长 10 年；全市场长期数据另有 Dumps/marketdb 路线 | 当前文档未证明 append-only 历史修订链；重复请求可能返回后补结果 | 毫秒时间戳按 Asia/Shanghai 解释；仍未证明各字段的 PIT `known_at/usable_from` | 可保存 HTTPS JSON exact bytes；Dumps 的临时下载地址与文件身份需另建 Manifest | 中高：仓库 MIT 仅覆盖代码；API 数据存储、训练和再分发权需按账户条款人工确认 | 需 API Key；配额/限流应以真实账户和官方错误码验收为准 | T1 | 未证明退市样本、Universe/Status/Corporate Action、修订保留、完整性和授权范围 | **corroboration / raw capture；默认关闭** |
 | Tushare Pro / Tushare 社区与运营方 | secondary | 日历、股票基本信息、停牌、ST、指数成分、公司行为等规范化表 | 各接口不同；由平台声明，未以官方原件逐项审计 | 部分接口有更新标志；旧值可能被修订值覆盖 | 平台 update_time/ann_date 含义各异，不等于官方 known_at | 可捕获 API JSON，但不是上游 exact raw bytes | 中高：个人、非转让、非商业等协议限制；机构另议 | 积分/年费与每分钟、每日额度随方案变化 | T1 | 上游 provenance、修订旧版本、完整性和许可不能外推 | **corroboration / fallback** |
 | AKShare / 开源项目 | secondary wrapper | 多公开站点的列表、状态、指数、公司行为接口 | 随上游接口而异，无统一保证 | 通常不保留上游历史版本 | 依上游展示字段；包装时间不等于来源发布时间 | 可保存包装结果；默认不等于保存上游 response bytes | 高：MIT 只覆盖代码，不授予底层数据权利；项目文档提示商业风险 | 软件免费；上游可能限流/变更 | T1 | 接口漂移、二次清洗、来源条款、无完整性保证 | **fallback** |
 | 东方财富公开网页/未文档化接口 / 东方财富 | secondary commercial portal | 行情、列表、板块、公告聚合 | 端点各异，历史口径不稳定 | 未公开 revision schema | 返回时间与来源发布时间常混合 | 技术上可捕获，合同与 schema 不稳定 | 高：未找到面向本用途的正式数据许可 | 免费页面；无稳定公开 API 频率/SLA | T1 | 非权威、板块定义可变、无 PIT 完整性、许可不清 | **reject as authority / fallback only** |
@@ -288,6 +290,22 @@ PROPOSED -> APPROVED -> IMPLEMENTATION_ANNOUNCED -> EX_DATE/RECORD_DATE -> COMPL
 - AKShare 的 MIT 许可证只覆盖代码，不自动授权底层来源数据；项目文档提示公开源研究与商业使用风险（[AKShare 项目](https://github.com/akfamily/akshare)、[说明](https://github.com/akfamily/akshare/blob/main/docs/introduction.md)）。
 
 因此，在许可确认前只允许小规模审计性捕获和内部研究原型；不得把 raw 数据打包入 Git、公开发布、向第三方提供或声称获得再分发权。
+
+### 5.8 HiThink Financial-API 的当前接入边界
+
+仓库已增加 `stock_tracker/collector/hithink_finance.py` 与 `scripts/capture_hithink_bars.py`。Adapter 只允许官方 HTTPS Origin、A 股 `1d` 历史接口、单标的最长十年窗口和 exact raw JSON 留存；Key 只从 `HITHINK_FINANCE_API_KEY` 环境读取，不写入配置、日志或 Artifact descriptor。
+
+该接入故意不参加 Runtime Quote/Snapshot/Bar 路由，且构造器强制：
+
+```text
+read_only = true
+trust_tier = T1_BEST_EFFORT
+allow_live_decision = false
+allow_model_training = false
+allow_public_redistribution = false
+```
+
+下一证据切片应使用真实 Key 做小窗口活体验收，再执行 50—100 个代表性标的与 Eastmoney/交易所事实的差异矩阵；全市场多年回填应评估官方 Market Dumps/marketdb，而不是逐标的循环 REST。详见 `docs/HITHINK-FINANCE-INTEGRATION.md`。
 
 ## 6. 结论与实施冻结项
 

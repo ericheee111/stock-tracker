@@ -43,6 +43,7 @@ Oracle Cloud 因实际无法注册，已从候选和应急依赖中移除。Rend
 | Cloudflare Pages 静态部署 | `NOT_IMPLEMENTED` | `web/` 已是静态资源 | Hybrid H4 |
 | GitHub Pages 静态备选 | `NOT_IMPLEMENTED` | `web/` 已是静态资源 | Hybrid H4 |
 | Tailscale Funnel / Cloudflare Tunnel | `NOT_IMPLEMENTED` | 无公开访问配置 | Hybrid H5，可选而非默认 |
+| HiThink Financial-API A 股日线 exact-raw 捕获 | `IMPLEMENTED_GATED` | 官方 HTTPS REST Adapter、严格信封解析、内容寻址 Artifact CLI；默认关闭且不进入 Runtime | 真实 Key 小窗验收、账号授权/留存/训练/再分发条款、覆盖与跨源对账；当前仅 T1 |
 | Render 纯云部署 | `EXPERIMENTAL` | Docker/Blueprint 存在 | 休眠、持久化、Provider 可达性和安全门禁未通过 |
 
 部署切片顺序仍是：**H0 Tailscale Serve 整站同源 Bootstrap → H1 前端解耦 → H2 CORS/Health → H3 Serve Target Lane 加固 → H4 静态云部署 → H5 可选公开访问**。H0–H4 的仓库侧工程实现和本地验收已经通过；H5 已实现可信 Tailnet 优先、公开模式失败关闭的只读 preflight。当前不再有未实现的 Hybrid 主线代码切片，后续重点是补真实 Tailscale/两设备、Windows 恢复和 Pages operational 证据，以及继续 Stage 2 的真实 A 股数据质量与研究证据。在真实部署验收前，不能声称远程服务或云端静态网页已经正式上线。

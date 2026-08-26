@@ -313,6 +313,9 @@ class FreeStockDbProvider(MarketDataProvider):
     def supports_bars(self) -> bool:
         return True
 
+    def supports_quotes(self) -> bool:
+        return False
+
     def supports_raw_bars(self) -> bool:
         return True
 

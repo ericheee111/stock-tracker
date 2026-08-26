@@ -27,6 +27,7 @@ from .cli import parse_args
 from .collector import router as R
 from .collector.eastmoney import EastmoneyProvider
 from .collector.free_stockdb import FreeStockDbProvider
+from .collector.hithink_finance import HithinkFinanceProvider
 from .collector.scheduler import Scheduler
 from .collector.sina import SinaProvider
 from .collector.tencent import TencentProvider
@@ -44,6 +45,7 @@ from .storage.repository import Repository
 _PROVIDER_REGISTRY = {
     "EastmoneyProvider": EastmoneyProvider,
     "FreeStockDbProvider": FreeStockDbProvider,
+    "HithinkFinanceProvider": HithinkFinanceProvider,
     "SinaProvider": SinaProvider,
     "TencentProvider": TencentProvider,
 }

@@ -33,6 +33,7 @@ class ProviderRouter:
         candidates = [
             p for p in self.providers
             if (market is None or p.applies_to(market))
+            and getattr(p, "supports_quotes", lambda: True)()
             and (op != "snapshot" or p.supports_snapshot())
             and self.trackers[p.name].can_try()
         ]

@@ -26,6 +26,7 @@ stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + �
 - 2026-08-24 Hybrid H0 最终发布门禁：运行产品 380 项通过、1 项活体探针跳过；Quant 560 项通过（迁移负向路径仍输出既有 SQLite `ResourceWarning`，退出码为 0）；H0 专项 16/16；H0 本地远程式验收 12/12；Mock Today UI 17/17；真实 API/Web Today 17/17；Portfolio CRUD 13/13；compileall、ruff check、pip check、Quant contract smoke、synthetic fixture benchmark、production migration dry-run 和 `git diff --check` 均通过；Review 为 `ENGINEERING_READY_FOR_MERGE / OPERATIONAL_DEVICE_ACCEPTANCE_PENDING`；
 - 2026-08-26 Hybrid H1/H2 发布门禁：专项 Python 14/14；浏览器主场景 28/28，Config/Invalid Health/Build/STALE 负向场景 11/11；运行产品 394 项通过、1 项跳过；Quant 560 项及 244 subtests 通过；Mock Today 17/17；真实 Today 17/17；Portfolio CRUD 13/13；compileall、H1/H2 targeted Ruff、pip check、Quant smoke、synthetic benchmark 和 production migration dry-run 通过；Review 为 `ENGINEERING_READY_FOR_MERGE / OPERATIONAL_REMOTE_DEPLOYMENT_PENDING`；
 - 2026-08-26 Hybrid H3–H5 发布门禁：H0–H5 部署专项 62/62，H3/H4/H5 新增专项 26/26；运行产品 426 项通过、1 项跳过；Quant 561 项及 244 subtests 通过；H4 生成站点浏览器在线/离线 15/15；H1/H2 浏览器 28/28 + 11/11；H0 本地验收 12/12；Mock Today 17/17；真实 Today 17/17；Portfolio CRUD 13/13；source distribution/no tracked bytecode、compileall、targeted Ruff、Node syntax、pip check、Quant smoke、synthetic benchmark 和 migration dry-run 通过；Review 为 `ENGINEERING_READY_FOR_MERGE / OPERATIONAL_GATES_PENDING`；
+- 2026-08-26 HiThink Financial-API 门禁：Provider/CLI/Router/Config 37/37，H3 安全回归 20/20，运行产品 436 项通过、1 项跳过，完整 staged Quant/source-distribution 563 项及 248 subtests 通过；H0、H1/H2、H4 浏览器式验收、targeted Ruff、compileall、`pip check`、cached diff 和生产数据库 SHA 检查通过；真实 Key 小窗口调用仍待用户本机执行；
 - Quant migration checksum 已按 UTF-8 SQL 的规范化 LF 字节计算；新记录在 Windows/Linux 一致，旧 LF/CRLF/CR 原始 checksum 仍可读取，任何非行尾内容变化继续失败关闭；
 - 生产 `data/stock_tracker.db` 验证前后 SHA-256 均为 `1cde40aa66846630d89b10d080a8837d204266c5ce32001a45d3b0c0c06197b1`；
 - 当前仍未实现 Big Trend、正式 Event Intelligence、真实 Strategy Scoreboard、Replay 和真实校准概率；H3/H4 仓库侧工程已完成，但真实 Tailscale、Windows 恢复和云端静态站点 operational 部署尚未完成；Portfolio 编辑 UI 已完成；
@@ -34,6 +35,7 @@ stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + �
 - Eastmoney 日 K 已拆分为 `fetch_bars_raw()` 与 `parse_bars()`，可在解析前保存 exact raw bytes；
 - 新增 `RawDataArtifact + Trust Tier + request_parameters + normalized_dataset_id + capture_id` 的内容寻址捕获与重放合同；descriptor 绑定端点、复权模式、请求起止范围和 parser version；
 - 新增 `scripts/capture_quant_bars.py`，默认只生成 `BEST_EFFORT` Artifact，不修改生产 SQLite，也不能自我升级为 `RESEARCH_GRADE`；
+- 新增默认关闭的 `HithinkFinanceProvider` 与 `scripts/capture_hithink_bars.py`：只通过同花顺官方 HTTPS REST 捕获 A 股 `1d` exact raw JSON，凭据仅来自进程环境；它不参加 Runtime Quote/Snapshot/BAR 路由，不用于训练或公开再分发；
 - Scheduler 的重复 BAR 方法定义已收敛为一套；BAR Universe 覆盖 radar、自选、持仓和活跃信号；
 - 日线有效数据标记为 `DELAYED` 而不是 `LIVE`，避免把 EOD 数据伪装成盘中实时；
 - 下一阶段：A/HK/US golden raw payload、跨源 reconciliation、覆盖缺口报告，然后组装带 Calendar/Status/Universe/Corporate Action 的 T3 Snapshot。
@@ -45,7 +47,7 @@ stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + �
 - **后端**：`stock_tracker/` 纯标准库（`http.server.ThreadingHTTPServer` + `sqlite3` + `urllib.request` + `tomllib`）。`python -m stock_tracker` 一键启动，无需 `pip install`。
 - **前端**：`web/` 静态 HTML/JS/CSS 玻璃拟态驾驶舱，由 Python HTTP 服务托管。
 - **数据层**：`stock_tracker/storage/repository.py`（SQLite），含 `save_bar` / `load_recent_bars`（历史 K 线接口已就位但**未接线**，见 §5 T1）。
-- **采集**：`stock_tracker/collector/` 三家免费源：腾讯 `qt.gtimg.cn`(GBK)、东财 `push2.eastmoney.com`(JSON)、新浪 `hq.sinajs.cn`(CSV，需 Referer)。`ProviderRouter` 熔断 / 指数退避 / 跨源偏差 / token-bucket 限频。
+- **采集**：`stock_tracker/collector/` 运行链使用腾讯、东财、新浪；另有默认关闭的 free-stockdb 本地 Sidecar 与 HiThink 官方 REST exact-raw 研究捕获 Adapter。研究源不因存在于 Provider 目录就自动进入 Runtime Router。`ProviderRouter` 负责熔断 / 指数退避 / 跨源偏差 / token-bucket 限频。
 - **调度**：`stock_tracker/collector/scheduler.py` HOT/WARM/COLD 三守护线程（A 股 HOT=3s / WARM=10s / COLD=45s）。
 - **特征**：`stock_tracker/features/` 5 证据族（去相关、无重复计数）+ 市场 Regime(5 态) + 板块轮动。
 - **信号**：`stock_tracker/signals/` 4 分数 + 风险闸门 + 12 态状态机 + OverextensionPenalty(反 FOMO)。

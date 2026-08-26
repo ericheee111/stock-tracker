@@ -22,12 +22,14 @@ class TestSourceDistribution(unittest.TestCase):
         critical = (
             ".gitattributes",
             "scripts/capture_quant_bars.py",
+            "scripts/capture_hithink_bars.py",
             "scripts/capture_a_share_corporate_actions.py",
             "scripts/extract_a_share_corporate_actions.py",
             "scripts/materialize_adjusted_market_data.py",
             "scripts/reconcile_a_share_corporate_actions.py",
             "scripts/verify_free_stockdb_sidecar.py",
             "stock_tracker/collector/free_stockdb.py",
+            "stock_tracker/collector/hithink_finance.py",
             "stock_tracker/quant/core/big_trend.py",
             "stock_tracker/quant/core/classification.py",
             "stock_tracker/quant/core/corporate_actions.py",
@@ -57,6 +59,7 @@ class TestSourceDistribution(unittest.TestCase):
             "tests_quant/test_corporate_action_adapter.py",
             "tests_quant/test_corporate_action_extraction.py",
             "tests_quant/test_corporate_action_reconciliation.py",
+            "tests_quant/test_capture_hithink_bars_cli.py",
             "tests_quant/test_decision_quality.py",
             "tests_quant/test_events.py",
             "tests_quant/test_free_stockdb_governance.py",
@@ -65,6 +68,7 @@ class TestSourceDistribution(unittest.TestCase):
             "tests_quant/test_replay.py",
             "tests_quant/test_shadow_lifecycle.py",
             "tests/test_free_stockdb_provider.py",
+            "tests/test_hithink_finance_provider.py",
         )
         for relative_path in critical:
             with self.subTest(path=relative_path):

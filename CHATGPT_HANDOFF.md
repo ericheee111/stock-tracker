@@ -309,3 +309,16 @@ Status: `COMPLETED`
 - After the implementation push, local `HEAD`, local `origin/main`, and remote `refs/heads/main` were verified equal at `51d9d907d9c2773eead1dfcd48ff58c2a9474d8e` before this handoff-only completion commit.
 - The tracked Python cache modification remained outside all H1/H2 staged files and commits.
 - Real Tailscale Serve/two-device acceptance and H3/H4 operational deployment remain pending and are not represented as completed.
+
+## 22. Task P — HiThink Financial-API gated integration
+
+Status: `IMPLEMENTED / LIVE_KEY_ACCEPTANCE_PENDING`
+
+- Evaluated the official `HiThink-Tech/Financial-API` repository and integrated only the documented A-share historical daily REST boundary; the upstream SDK/CLI/DuckDB project was not vendored and no runtime dependency was added.
+- Added `HithinkFinanceProvider` as a default-disabled, read-only `T1_BEST_EFFORT` exact-raw capture adapter. It uses the fixed official HTTPS origin, verified system TLS, no inherited proxy, no redirects, bounded responses, strict JSON/envelope/OHLC checks, and a process-environment credential that is never written to TOML, Git, logs, artifacts, or CLI output.
+- Added `scripts/capture_hithink_bars.py`. The explicit CLI temporarily activates the disabled adapter only for its own process, writes exact response bytes plus a content-addressed descriptor, and never modifies production SQLite or joins the Runtime Quote/Snapshot/BAR Router.
+- Runtime routing gained a backward-compatible `supports_quotes()` capability; free-stockdb and HiThink both refuse quote routing, while HiThink also refuses runtime BAR routing and exposes only explicit raw-bar capture.
+- Updated `docs/HITHINK-FINANCE-INTEGRATION.md`, the A-share authoritative-source audit, AGENTS boundaries, HANDOFF, overview, product gap matrix, and source-distribution tracking gates.
+- Full regression discovered and repaired four pre-existing H3 blockers: remote same-origin proxy requests are no longer misclassified as loopback, no-Origin remote-host requests remain remote, and Serve recovery test fixtures now match the two preflight boundaries and partial-mutation semantics.
+- Final verified gates: HiThink/provider/CLI/router/config tests 37/37; H3 20/20; complete runtime unittest 436 passed with one expected skip; runtime pytest excluding the duplicate H3 module 416 passed with one skip; H0/H1-H2/H4 browser-style acceptance passed; full staged Quant/source-distribution 563 passed plus 248 subtests; targeted Ruff, compileall, `pip check`, and cached-diff checks passed.
+- No live HiThink request was made because the user credential was not supplied to the session. The exact environment variable and a bounded one-month acceptance command are documented; the key must not be pasted into chat or committed.

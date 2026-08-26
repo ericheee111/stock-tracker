@@ -90,11 +90,13 @@ class _ServeRunner:
         fail_api_enable: bool = False,
         fail_whole_site_enable: bool = False,
         conflict_on_api_failure: bool = False,
+        mutate_before_api_failure: bool = False,
     ) -> None:
         self.target = target
         self.fail_api_enable = fail_api_enable
         self.fail_whole_site_enable = fail_whole_site_enable
         self.conflict_on_api_failure = conflict_on_api_failure
+        self.mutate_before_api_failure = mutate_before_api_failure
         self.calls: list[tuple[str, ...]] = []
 
     def _payload(self) -> str:
@@ -144,6 +146,8 @@ class _ServeRunner:
                 self.fail_api_enable = False
                 if self.conflict_on_api_failure:
                     self.target = "http://127.0.0.1:9999"
+                elif self.mutate_before_api_failure:
+                    self.target = requested
                 return CommandResult(argv, 2, "", "injected H3 enable failure")
             if self.fail_whole_site_enable and requested == serve_target(8080):
                 self.fail_whole_site_enable = False
@@ -456,9 +460,10 @@ class TestHybridH3AuditAndTarget(unittest.TestCase):
 
 class TestHybridH3ServeMigration(unittest.TestCase):
     def _patch_preflight(self, binary: str):
-        return mock.patch(
-            "stock_tracker.deployment.hybrid_h3.run_preflight",
-            return_value=_Preflight(binary),
+        return mock.patch.multiple(
+            "stock_tracker.deployment.hybrid_h3",
+            run_preflight=mock.Mock(return_value=_Preflight(binary)),
+            run_h0_preflight=mock.Mock(return_value=_Preflight(binary)),
         )
 
     def test_inspection_accepts_only_exact_h0_h3_or_empty(self) -> None:

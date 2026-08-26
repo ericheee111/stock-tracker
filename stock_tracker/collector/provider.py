@@ -82,6 +82,11 @@ class MarketDataProvider(ABC):
     def supports_snapshot(self) -> bool:
         return False
 
+    def supports_quotes(self) -> bool:
+        """Whether this provider may participate in runtime quote routing."""
+
+        return True
+
     def supports_bars(self) -> bool:
         """是否支持历史 K 线采集（默认 False，子类覆盖）。"""
         return False

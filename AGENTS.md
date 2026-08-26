@@ -234,7 +234,10 @@ UNKNOWN
 - 本地行情 Sidecar 也属于外部 Provider，不因“本机读取”自动升级 Trust；
 - `free-stockdb` 等 Sidecar 默认关闭，只允许 loopback、只读和显式 RAW 查询；
 - Sidecar 的复权因子、板块成分和当前证券列表不得直接进入 PIT 回测、训练或模型晋级；
-- Sidecar 服务端口不得暴露公网，真实启用前必须固定发行版、二进制、manifest 和数据快照身份。
+- Sidecar 服务端口不得暴露公网，真实启用前必须固定发行版、二进制、manifest 和数据快照身份；
+- `HiThink-Tech/Financial-API` 首期只允许作为默认关闭的 A 股日线 exact-raw 捕获源；固定官方 HTTPS Origin，凭据只从 `HITHINK_FINANCE_API_KEY` 环境读取；
+- HiThink Adapter 必须保持 `T1_BEST_EFFORT`、只读、`allow_live_decision=false`、`allow_model_training=false`、`allow_public_redistribution=false`；不得因官方运营主体、HTTP 200 或仓库 MIT License 自行升级数据 Trust Tier 或再分发权；
+- 全市场多年回填应单独审计 Market Dumps/marketdb，不得用逐标的 REST 循环制造高频请求或冒充完整 PIT 数据库。
 
 ## 10. 事件和 LLM 边界
 

@@ -197,6 +197,30 @@ class APIHandler(BaseHTTPRequestHandler):
             )
         )
 
+    def _request_host_is_loopback(self) -> bool:
+        raw_host = self.headers.get("Host", "")
+        try:
+            parsed = urlparse("//" + raw_host)
+            if (
+                parsed.username is not None
+                or parsed.password is not None
+                or parsed.path
+                or parsed.query
+                or parsed.fragment
+            ):
+                return False
+            hostname = parsed.hostname
+        except ValueError:
+            return False
+        if hostname == "localhost":
+            return True
+        if not hostname:
+            return False
+        try:
+            return ipaddress.ip_address(hostname).is_loopback
+        except ValueError:
+            return False
+
     def _client_class(self) -> str:
         raw_origin = self.headers.get("Origin", "")
         if self._has_forwarding_headers():
@@ -208,15 +232,20 @@ class APIHandler(BaseHTTPRequestHandler):
                 return "REMOTE_BROWSER_INVALID_ORIGIN"
             return (
                 "LOOPBACK_SAME_ORIGIN"
-                if self._origin_is_same_origin(normalized)
+                if self._request_host_is_loopback()
+                and self._origin_is_same_origin(normalized)
                 else "REMOTE_BROWSER"
             )
         try:
-            if not ipaddress.ip_address(self.client_address[0]).is_loopback:
-                return "REMOTE_DIRECT"
+            client_is_loopback = ipaddress.ip_address(
+                self.client_address[0]
+            ).is_loopback
+
         except ValueError:
             return "REMOTE_DIRECT"
-        return "LOOPBACK_DIRECT"
+        if client_is_loopback and self._request_host_is_loopback():
+            return "LOOPBACK_DIRECT"
+        return "REMOTE_DIRECT"
 
     def _is_remote_style(self) -> bool:
         return self._client_class() not in {

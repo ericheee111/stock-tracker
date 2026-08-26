@@ -65,3 +65,27 @@ release_version = ""
 binary_inventory_sha256 = ""
 data_snapshot_manifest_sha256 = ""
 sync_manifest_sha256 = ""
+
+# 可选同花顺官方 REST 日线捕获源。默认关闭；凭据只从进程环境读取，
+# 不写入 TOML、日志、公开 Runtime Config 或 Git。首期只允许 A 股日线原始
+# 响应捕获，固定 T1/BEST_EFFORT，不进入 HOT/WARM/COLD 决策、训练或再分发。
+[[providers]]
+name = "hithink_finance"
+cls = "HithinkFinanceProvider"
+markets = ["a"]
+enabled = false
+primary = false
+supports_snapshot = false
+host = ""
+timeout_ms = 8000
+max_rps = 2
+backoff_base_sec = 2.0
+backoff_max_sec = 60.0
+circuit_fail_threshold = 3
+bars_fallback = false
+bars_priority = 40
+read_only = true
+trust_tier = "T1_BEST_EFFORT"
+allow_live_decision = false
+allow_model_training = false
+allow_public_redistribution = false
