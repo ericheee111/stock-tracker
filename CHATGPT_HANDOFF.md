@@ -302,7 +302,10 @@ Status: `COMPLETED`
 
 ## 21. Task O — Hybrid H1/H2 GitHub delivery
 
-Status: `IN_PROGRESS`
+Status: `COMPLETED`
 
-- Pending final staged-file review, staged-tree gates, commit, push, remote SHA equality verification and this handoff's final delivery SHA update.
-- The tracked Python cache modification must remain outside all H1/H2 commits.
+- H1/H2 implementation/review commit `51d9d907d9c2773eead1dfcd48ff58c2a9474d8e` (`feat: implement hybrid H1 H2 runtime boundary`) was pushed to `origin/main`.
+- The staged Git index independently passed runtime unittest 394/1, H1/H2 browser 28/28 + 11/11 negative scenarios, Mock Today 17/17, real Today 17/17, Portfolio 13/13, targeted Ruff and compileall. Its Quant export passed 559 with one expected no-`.git` source-distribution skip; the same source-distribution gate passed 2 tests and 45 subtests in the real checkout, where the complete Quant run passed 560 tests and 244 subtests.
+- After the implementation push, local `HEAD`, local `origin/main`, and remote `refs/heads/main` were verified equal at `51d9d907d9c2773eead1dfcd48ff58c2a9474d8e` before this handoff-only completion commit.
+- The tracked Python cache modification remained outside all H1/H2 staged files and commits.
+- Real Tailscale Serve/two-device acceptance and H3/H4 operational deployment remain pending and are not represented as completed.
