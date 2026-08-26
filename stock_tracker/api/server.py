@@ -18,6 +18,7 @@ import queue
 import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -33,6 +34,11 @@ from ..core.security import (
 )
 from ..storage.db import close_all
 from . import handlers as H
+from .audit import (
+    AuditWriteError,
+    RemoteAuditLogger,
+    new_request_id,
+)
 from .handlers import AppContext
 from .runtime import build_runtime_health
 
@@ -167,6 +173,121 @@ class APIHandler(BaseHTTPRequestHandler):
         if getattr(self.server, "logger", None) is not None:
             self.server.logger.debug("HTTP %s - %s", self.address_string(), fmt % args)
 
+    def handle_one_request(self) -> None:
+        self._request_id = new_request_id()
+        self._audit_write_pending = False
+        self._audit_write_path = ""
+        super().handle_one_request()
+
+    def _request_identifier(self) -> str:
+        value = getattr(self, "_request_id", "")
+        if not value:
+            value = new_request_id()
+            self._request_id = value
+        return value
+
+    def _has_forwarding_headers(self) -> bool:
+        return any(
+            self.headers.get(name)
+            for name in (
+                "Forwarded",
+                "X-Forwarded-For",
+                "X-Forwarded-Host",
+                "X-Real-IP",
+            )
+        )
+
+    def _client_class(self) -> str:
+        raw_origin = self.headers.get("Origin", "")
+        if self._has_forwarding_headers():
+            return "REMOTE_PROXY"
+        if raw_origin:
+            try:
+                normalized = normalize_http_origin(raw_origin)
+            except InvalidOriginError:
+                return "REMOTE_BROWSER_INVALID_ORIGIN"
+            return (
+                "LOOPBACK_SAME_ORIGIN"
+                if self._origin_is_same_origin(normalized)
+                else "REMOTE_BROWSER"
+            )
+        try:
+            if not ipaddress.ip_address(self.client_address[0]).is_loopback:
+                return "REMOTE_DIRECT"
+        except ValueError:
+            return "REMOTE_DIRECT"
+        return "LOOPBACK_DIRECT"
+
+    def _is_remote_style(self) -> bool:
+        return self._client_class() not in {
+            "LOOPBACK_DIRECT",
+            "LOOPBACK_SAME_ORIGIN",
+        }
+
+    def _audit_origin(self) -> str | None:
+        raw_origin = self.headers.get("Origin", "")
+        if not raw_origin:
+            return None
+        try:
+            return normalize_http_origin(raw_origin)
+        except InvalidOriginError:
+            return "INVALID_ORIGIN"
+
+    def _audit_event(
+        self,
+        *,
+        event: str,
+        outcome: str,
+        path: str,
+        status_code: int | None = None,
+        required: bool = False,
+    ) -> bool:
+        audit = getattr(self.server, "audit_logger", None)
+        if audit is None or not self._is_remote_style():
+            return True
+        try:
+            audit.record(
+                event=event,
+                outcome=outcome,
+                method=self.command,
+                path=path,
+                client_class=self._client_class(),
+                request_id=self._request_identifier(),
+                status_code=status_code,
+                origin=self._audit_origin(),
+            )
+            return True
+        except AuditWriteError:
+            logger = getattr(self.server, "logger", None)
+            if logger is not None:
+                logger.exception("Remote audit write failed")
+            return not required
+
+    def _begin_remote_write(self, path: str) -> bool:
+        if self.command not in {"POST", "PUT", "PATCH", "DELETE"}:
+            return True
+        if not self._is_remote_style():
+            return True
+        if not self._audit_event(
+            event="REMOTE_WRITE",
+            outcome="AUTHORIZED",
+            path=path,
+            required=True,
+        ):
+            self._send_json(
+                {
+                    "error": {
+                        "code": "REMOTE_AUDIT_UNAVAILABLE",
+                        "message": "remote writes are disabled until the local audit log is writable",
+                    }
+                },
+                status=503,
+            )
+            return False
+        self._audit_write_pending = True
+        self._audit_write_path = path
+        return True
+
     def finish(self) -> None:
         try:
             super().finish()
@@ -193,6 +314,7 @@ class APIHandler(BaseHTTPRequestHandler):
         if not origin:
             return
         self.send_header("Access-Control-Allow-Origin", origin)
+        self.send_header("Access-Control-Expose-Headers", "X-Request-ID")
         self.send_header(
             "Vary",
             (
@@ -227,6 +349,12 @@ class APIHandler(BaseHTTPRequestHandler):
         try:
             normalized_origin = normalize_http_origin(raw_origin)
         except InvalidOriginError:
+            self._audit_event(
+                event="CORS",
+                outcome="INVALID_ORIGIN",
+                path=path,
+                status_code=403,
+            )
             self._send_json(
                 {
                     "error": {
@@ -241,6 +369,12 @@ class APIHandler(BaseHTTPRequestHandler):
             return True
         allowed = getattr(self.server, "cors_allowed_origins", frozenset())
         if normalized_origin not in allowed:
+            self._audit_event(
+                event="CORS",
+                outcome="ORIGIN_DENIED",
+                path=path,
+                status_code=403,
+            )
             self._send_json(
                 {
                     "error": {
@@ -298,6 +432,12 @@ class APIHandler(BaseHTTPRequestHandler):
                 else "private API is local-only until private access is configured"
             )
         )
+        self._audit_event(
+            event="PRIVATE_API_AUTH",
+            outcome=code,
+            path=path,
+            status_code=401 if configured else 503,
+        )
         self._send_json(
             {"error": {"code": code, "message": message}},
             status=401 if configured else 503,
@@ -305,11 +445,20 @@ class APIHandler(BaseHTTPRequestHandler):
         return False
 
     def _send_json(self, obj: Any, status: int = 200) -> None:
+        if getattr(self, "_audit_write_pending", False):
+            self._audit_event(
+                event="REMOTE_WRITE",
+                outcome="SUCCEEDED" if status < 400 else "REJECTED",
+                path=getattr(self, "_audit_write_path", ""),
+                status_code=status,
+            )
+            self._audit_write_pending = False
         body = json.dumps(obj, ensure_ascii=False, allow_nan=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Request-ID", self._request_identifier())
         self._send_cors_headers()
         self.end_headers()
         self.wfile.write(body)
@@ -319,6 +468,7 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-Request-ID", self._request_identifier())
         self.end_headers()
         self.wfile.write(body)
 
@@ -396,6 +546,7 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Content-Length", "0")
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Request-ID", self._request_identifier())
         self._send_cors_headers(preflight=True)
         self.end_headers()
 
@@ -449,6 +600,16 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._send_json(detail)
             return
 
+        if getattr(self.server, "api_only", False):
+            if path.startswith("/api/"):
+                self._send_json(
+                    {"error": {"code": "NOT_FOUND", "message": "not found"}},
+                    status=404,
+                )
+            else:
+                self._send_text("Not Found", "text/plain; charset=utf-8", status=404)
+            return
+
         # 静态文件
         self._serve_static(ctx, path)
 
@@ -460,6 +621,8 @@ class APIHandler(BaseHTTPRequestHandler):
         if not self._prepare_api_request(path):
             return
         if not self._require_private_api(path):
+            return
+        if not self._begin_remote_write(path):
             return
         if path == "/api/portfolio/positions":
             payload = self._read_strict_json()
@@ -497,6 +660,8 @@ class APIHandler(BaseHTTPRequestHandler):
             return
         if not self._require_private_api(path):
             return
+        if not self._begin_remote_write(path):
+            return
         if path != "/api/portfolio/profile":
             self._send_json({"error": {"code": "NOT_FOUND", "message": "not found"}}, status=404)
             return
@@ -509,6 +674,8 @@ class APIHandler(BaseHTTPRequestHandler):
         if not self._prepare_api_request(path):
             return
         if not self._require_private_api(path):
+            return
+        if not self._begin_remote_write(path):
             return
         match = _PORTFOLIO_POSITION_RE.match(path)
         if match is None:
@@ -523,6 +690,8 @@ class APIHandler(BaseHTTPRequestHandler):
         if not self._prepare_api_request(path):
             return
         if not self._require_private_api(path):
+            return
+        if not self._begin_remote_write(path):
             return
         match = _PORTFOLIO_POSITION_RE.match(path)
         if match is None:
@@ -635,6 +804,9 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Request-ID", self._request_identifier())
         self.end_headers()
         self.wfile.write(data)
 
@@ -646,6 +818,7 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "keep-alive")
         self.send_header("X-Accel-Buffering", "no")
+        self.send_header("X-Request-ID", self._request_identifier())
         self._send_cors_headers()
         self.end_headers()
 
@@ -679,6 +852,8 @@ class APIHandler(BaseHTTPRequestHandler):
 class APIServer(ThreadingHTTPServer):
     """HTTP 服务（持有 AppContext 与全局 shutdown 事件）。"""
 
+    allow_reuse_address = True
+
     def __init__(
         self,
         host: str,
@@ -687,6 +862,8 @@ class APIServer(ThreadingHTTPServer):
         logger: Any,
         *,
         allow_non_loopback: bool = False,
+        api_only: bool = False,
+        audit_logger: RemoteAuditLogger | None = None,
     ) -> None:
         safe_host = require_safe_bind(host, allow_non_loopback=allow_non_loopback)
         app_config = getattr(getattr(ctx, "bundle", None), "app", None)
@@ -703,9 +880,38 @@ class APIServer(ThreadingHTTPServer):
             raise TypeError("cors_max_age_sec must be an integer")
         if raw_max_age < 0 or raw_max_age > 86400:
             raise ValueError("cors_max_age_sec must be between 0 and 86400")
+        if type(api_only) is not bool:
+            raise TypeError("api_only must be an actual boolean")
+
+        resolved_audit = (
+            audit_logger
+            if audit_logger is not None
+            else getattr(ctx, "audit_logger", None)
+        )
+        if resolved_audit is None:
+            raw_database = getattr(getattr(ctx, "repo", None), "db_path", None)
+            audit_enabled = getattr(runtime_config, "audit_enabled", False)
+            if type(audit_enabled) is not bool:
+                raise TypeError("audit_enabled must be an actual boolean")
+            if type(raw_database) is str and raw_database and raw_database != ":memory:":
+                fallback_path = Path(raw_database).resolve().parent / "remote_access_audit.jsonl"
+            else:
+                fallback_path = Path(os.devnull)
+                audit_enabled = False
+            resolved_audit = RemoteAuditLogger(
+                fallback_path,
+                enabled=audit_enabled,
+                max_bytes=getattr(runtime_config, "audit_max_bytes", 5 * 1024 * 1024),
+                backup_count=getattr(runtime_config, "audit_backup_count", 3),
+            )
+        if isinstance(resolved_audit, RemoteAuditLogger) and resolved_audit.enabled:
+            resolved_audit.ensure_ready()
+
         super().__init__((safe_host, port), APIHandler)
         self.ctx = ctx
         self.logger = logger
+        self.api_only = api_only
+        self.audit_logger = resolved_audit
         self.cors_allowed_origins = frozenset(normalized_origins)
         self.cors_max_age_sec = raw_max_age
         self._shutdown = threading.Event()

@@ -1,20 +1,20 @@
-"""Metadata-only runtime health contract for Hybrid H1/H2."""
+"""Metadata-only runtime health contract for Hybrid H1/H2/H3."""
 
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .. import __version__
 from ..core import types as T
+from ..core.timezones import TimezoneResolutionError, market_local_to_utc
 from . import serializers as S
 
 RUNTIME_HEALTH_SCHEMA = "hybrid-runtime-v1"
 
 
-def _machine_timezone() -> timezone:
+def _machine_timezone():
     value = datetime.now(timezone.utc).astimezone().tzinfo
     return value if value is not None else timezone.utc
 
@@ -52,23 +52,6 @@ def _market_config(ctx: Any, quote: Any) -> Any:
     return None
 
 
-def _market_timezone(ctx: Any, quote: Any) -> timezone | ZoneInfo:
-    market_config = _market_config(ctx, quote)
-    timezone_name = getattr(market_config, "timezone", None)
-    if isinstance(timezone_name, str) and timezone_name:
-        try:
-            return ZoneInfo(timezone_name)
-        except ZoneInfoNotFoundError:
-            pass
-    offset = getattr(market_config, "utc_offset_hours", 0)
-    if isinstance(offset, bool) or not isinstance(offset, (int, float)):
-        return timezone.utc
-    try:
-        return timezone(timedelta(hours=float(offset)))
-    except ValueError:
-        return timezone.utc
-
-
 def _quote_datetime_utc(
     ctx: Any,
     quote: Any,
@@ -78,16 +61,24 @@ def _quote_datetime_utc(
 ) -> datetime | None:
     if not isinstance(value, datetime):
         return None
-    if value.tzinfo is None or value.utcoffset() is None:
-        source_timezone = (
-            _market_timezone(ctx, quote) if market_time else _machine_timezone()
+    if value.tzinfo is not None and value.utcoffset() is not None:
+        return value.astimezone(timezone.utc)
+    if not market_time:
+        return value.replace(tzinfo=_machine_timezone()).astimezone(timezone.utc)
+
+    market_config = _market_config(ctx, quote)
+    try:
+        return market_local_to_utc(
+            value,
+            timezone_name=getattr(market_config, "timezone", "UTC"),
+            fallback_offset_hours=getattr(market_config, "utc_offset_hours", 0),
         )
-        value = value.replace(tzinfo=source_timezone)
-    return value.astimezone(timezone.utc)
+    except TimezoneResolutionError:
+        return None
 
 
 def _quote_age_ms_now(ctx: Any, quote: Any) -> int:
-    """Recompute quote age using market time for source timestamps."""
+    """Recompute quote age using current time and configured market timezone."""
 
     value = getattr(quote, "timestamp", None)
     normalized = None
@@ -144,11 +135,8 @@ def _provider_summary(ctx: Any) -> dict[str, int]:
             summary["closed"] += 1
         elif state == "HALF_OPEN":
             summary["half_open"] += 1
-        elif state == "OPEN":
-            summary["open"] += 1
         else:
-            # Unknown provider state is conservatively treated as open so the
-            # public contract remains internally consistent and fails degraded.
+            # OPEN and unknown values are both conservative failures.
             summary["open"] += 1
     return summary
 

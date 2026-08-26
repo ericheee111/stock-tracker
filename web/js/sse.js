@@ -95,13 +95,14 @@
     }, delay);
   }
 
-  function blockForAuth(error) {
+  function blockForAuth(error, attemptedAccess) {
+    if (Runtime && Runtime.noteAuthError(error, attemptedAccess) === false) return;
     authBlocked = true;
     shouldRun = false;
     connected = false;
     if (Runtime) {
       Runtime.noteSseClosed();
-      Runtime.noteAuthError(error);
+
     }
     emit('error', error);
   }
@@ -110,10 +111,12 @@
     if (!shouldRun || authBlocked || controller) return;
     controller = new AbortController();
     const localController = controller;
+    let attemptedAccess;
     try {
       if (!Runtime) throw new Error('Runtime 模块未加载');
       Runtime.assertPrivateReady();
       const headers = { 'Accept': 'text/event-stream' };
+      attemptedAccess = Runtime.privateAccessValue();
       Object.assign(headers, Runtime.privateHeaders());
       const response = await global.fetch(
         Runtime.sseUrl(),
@@ -129,7 +132,7 @@
         error.code = response.status === 401 ? 'PRIVATE_API_AUTH_REQUIRED' :
           (response.status === 403 ? 'PRIVATE_API_AUTH_FAILED' : 'SSE_HTTP_' + response.status);
         if (response.status === 401 || response.status === 403) {
-          blockForAuth(error);
+          blockForAuth(error, attemptedAccess);
           return;
         }
         throw error;
@@ -160,7 +163,7 @@
       if (!error || error.name !== 'AbortError') {
         if (error && (error.code === 'PRIVATE_API_AUTH_REQUIRED' ||
             error.code === 'PRIVATE_API_AUTH_FAILED')) {
-          blockForAuth(error);
+          blockForAuth(error, attemptedAccess);
         } else if (error && ((Runtime && Runtime.isHardFailure(error.code)) ||
             error.code === 'RUNTIME_HANDSHAKE_REQUIRED')) {
           shouldRun = false;

@@ -28,8 +28,16 @@ class RuntimeConfig:
     engine_id: str = "stock-tracker-local"
     commit_id: str = "development"
     api_major: int = 1
+    api_target_enabled: bool = False
+    api_target_port: int = 8081
     cors_allowed_origins: list[str] = field(default_factory=list)
     cors_max_age_sec: int = 600
+    audit_enabled: bool = True
+    audit_log_path: str = "data/remote_access_audit.jsonl"
+    audit_max_bytes: int = 5 * 1024 * 1024
+    audit_backup_count: int = 3
+    prevent_sleep_during_trading: bool = False
+    power_guard_interval_sec: int = 60
 
 
 @dataclass(slots=True)
@@ -245,8 +253,16 @@ def load_app(path: str, root_dir: str) -> AppConfig:
         "engine_id",
         "commit_id",
         "api_major",
+        "api_target_enabled",
+        "api_target_port",
         "cors_allowed_origins",
         "cors_max_age_sec",
+        "audit_enabled",
+        "audit_log_path",
+        "audit_max_bytes",
+        "audit_backup_count",
+        "prevent_sleep_during_trading",
+        "power_guard_interval_sec",
     }
     unknown_runtime_fields = set(runtime_d) - allowed_runtime_fields
     if unknown_runtime_fields:
@@ -299,6 +315,41 @@ def load_app(path: str, root_dir: str) -> AppConfig:
         if len(value) > 128 or any(ord(char) < 33 or ord(char) == 127 for char in value):
             raise ConfigError(f"{name} 必须是最多 128 个可见字符")
 
+    audit_log_path = _expect_string(
+        _opt(runtime_d, "audit_log_path", "data/remote_access_audit.jsonl"),
+        "runtime.audit_log_path",
+        nonempty=True,
+    )
+    normalized_audit_path = audit_log_path.replace("\\", "/")
+    if (
+        os.path.isabs(audit_log_path)
+        or ":" in normalized_audit_path
+        or any(ord(char) < 32 or ord(char) == 127 for char in normalized_audit_path)
+        or any(part in {"", ".", ".."} for part in normalized_audit_path.split("/"))
+        or not normalized_audit_path.endswith(".jsonl")
+    ):
+        raise ConfigError(
+            "runtime.audit_log_path 必须是仓库根目录内、无点段的相对 .jsonl 路径"
+        )
+
+    api_target_enabled = _expect_bool(
+        _opt(runtime_d, "api_target_enabled", False),
+        "runtime.api_target_enabled",
+    )
+    api_target_port = _expect_int(
+        _opt(runtime_d, "api_target_port", 8081),
+        "runtime.api_target_port",
+        minimum=1,
+        maximum=65535,
+    )
+    if api_target_enabled and api_target_port == srv.port:
+        raise ConfigError("runtime.api_target_port 不能与 server.port 相同")
+    if api_target_enabled and deployment_mode not in {
+        "HYBRID_PRIVATE",
+        "HYBRID_PUBLIC_AUTH",
+    }:
+        raise ConfigError("runtime.api_target_enabled 只允许用于 Hybrid 部署模式")
+
     runtime = RuntimeConfig(
         deployment_mode=deployment_mode,
         engine_id=engine_id,
@@ -309,12 +360,41 @@ def load_app(path: str, root_dir: str) -> AppConfig:
             minimum=1,
             maximum=999,
         ),
+        api_target_enabled=api_target_enabled,
+        api_target_port=api_target_port,
         cors_allowed_origins=normalized_origins,
         cors_max_age_sec=_expect_int(
             _opt(runtime_d, "cors_max_age_sec", 600),
             "runtime.cors_max_age_sec",
             minimum=0,
             maximum=86400,
+        ),
+        audit_enabled=_expect_bool(
+            _opt(runtime_d, "audit_enabled", True),
+            "runtime.audit_enabled",
+        ),
+        audit_log_path=normalized_audit_path,
+        audit_max_bytes=_expect_int(
+            _opt(runtime_d, "audit_max_bytes", 5 * 1024 * 1024),
+            "runtime.audit_max_bytes",
+            minimum=64 * 1024,
+            maximum=100 * 1024 * 1024,
+        ),
+        audit_backup_count=_expect_int(
+            _opt(runtime_d, "audit_backup_count", 3),
+            "runtime.audit_backup_count",
+            minimum=1,
+            maximum=20,
+        ),
+        prevent_sleep_during_trading=_expect_bool(
+            _opt(runtime_d, "prevent_sleep_during_trading", False),
+            "runtime.prevent_sleep_during_trading",
+        ),
+        power_guard_interval_sec=_expect_int(
+            _opt(runtime_d, "power_guard_interval_sec", 60),
+            "runtime.power_guard_interval_sec",
+            minimum=15,
+            maximum=3600,
         ),
     )
 

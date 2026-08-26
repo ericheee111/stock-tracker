@@ -9,7 +9,7 @@
 
 ## 0. TL;DR
 
-stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + 独立 Quant Foundation** 的真实可运行系统。v1.1 将产品中心冻结为“今天该怎么操作”，市场资源按 A 股、港股通、美股排序，并把 Core Opportunity、Big Trend、Event Intelligence、持仓/Exit、Strategy Scoreboard、Replay 与混合部署设为主线。Stage 1 的严格决策合同、Portfolio REST/UI、真实 `/api/brief/today` 和 Today Action 首页已经接线。Hybrid H0 已完成 loopback 默认安全、Tailscale Serve 运维 CLI、冲突保护和临时数据库本地远程式验收；真实 Serve/两设备 operational 验收仍待补。Hybrid H1/H2 已完成无密钥 Runtime Config、统一 REST/SSE/Health URL Builder、Origin-scoped 会话访问、API Major/Engine/Build 握手、exact CORS/OPTIONS、metadata-only Runtime Health、STALE 与错误状态分离，并通过同源回归和本地双 Origin 浏览器验收。下一代码切片是 H3/H4；真实 Tailscale、开机恢复和 Pages 部署尚未完成。概率、Big Trend 和策略战绩仍诚实降级，这些工程能力不等于真实投资表现。
+stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + 独立 Quant Foundation** 的真实可运行系统。v1.1 将产品中心冻结为“今天该怎么操作”，市场资源按 A 股、港股通、美股排序，并把 Core Opportunity、Big Trend、Event Intelligence、持仓/Exit、Strategy Scoreboard、Replay 与混合部署设为主线。Stage 1 的严格决策合同、Portfolio REST/UI、真实 `/api/brief/today` 和 Today Action 首页已经接线。Hybrid H0–H4 的仓库侧工程实现和本地验收现已完成：loopback/Tailscale Bootstrap、Runtime Config、统一 REST/SSE/Health URL Builder、Origin-scoped 会话访问、API Major/Engine/Build 握手、exact CORS/OPTIONS、API-only Target、远程写审计、Windows 恢复计划、Power Guard、no-secret 静态构建和在线/离线浏览器验收均已落地；H5 已实现可信 Tailnet 优先、公开模式失败关闭的只读门禁。真实 Tailscale、两设备、Windows 重启/休眠、Pages 实际部署和任何公开入口仍待 operational 验收。概率、Big Trend 和策略战绩仍诚实降级，这些工程能力不等于真实投资表现。
 
 > **路线覆盖规则：** 下文保留的 v0.4 Wave、T1–T15 和历史提交记录用于追溯；若与新版产品优先级冲突，以 PRD v1.1、根 `AGENTS.md`、`docs/HYBRID-DEPLOYMENT-ARCHITECTURE-v1.md` 和 `docs/PRODUCT-GAP-MATRIX-v1.1.md` 为准。
 
@@ -21,13 +21,14 @@ stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + �
 - `GET /api/brief/today` 已真实接线，只读 Store/Repository，不调用 Provider、LLM 或 Quant 训练链；单条合同损坏信号会跳过而不是拖垮整页；
 - Portfolio Profile 与 Position CRUD 已接入临时 SQLite 验证；持仓事实允许零碎股，新开仓建议仍按市场 lot size 向下取整；
 - `/api/brief/today` 与 `/api/portfolio*` 属于私有 API：本机直连可用，公网未配置私有访问时失败关闭，反向代理不能用本机 TCP 来源绕过认证；
-- v1.1 默认目标是 `HYBRID_PRIVATE`；H0 已将本地默认监听改为 `127.0.0.1` 并提供 Tailscale Serve 运维与临时 DB 验收工具；H1/H2 已完成 Runtime Config、统一 URL Builder、Origin-scoped Token、exact CORS/OPTIONS、Runtime Health 与浏览器状态机；真实 Serve/两设备、H3 运行恢复和 H4 Pages 验收仍待执行；
+- v1.1 默认目标是 `HYBRID_PRIVATE`；H0–H4 已完成 loopback/Tailscale Bootstrap、Runtime Config、统一 URL Builder、Origin-scoped Token、exact CORS/OPTIONS、Runtime Health、API-only Target、远程写审计、Windows 恢复计划与 no-secret 静态构建；H5 公开模式保持失败关闭；真实 Serve/两设备、Windows 重启/休眠、Pages 实际部署仍待执行；
 - Today Web 已支持 object blocker、概率空值、0—1 仓位比例、null 行情和 3—5 个 Core；Mock QA 与真实 API/Web QA 均通过；
 - 2026-08-24 Hybrid H0 最终发布门禁：运行产品 380 项通过、1 项活体探针跳过；Quant 560 项通过（迁移负向路径仍输出既有 SQLite `ResourceWarning`，退出码为 0）；H0 专项 16/16；H0 本地远程式验收 12/12；Mock Today UI 17/17；真实 API/Web Today 17/17；Portfolio CRUD 13/13；compileall、ruff check、pip check、Quant contract smoke、synthetic fixture benchmark、production migration dry-run 和 `git diff --check` 均通过；Review 为 `ENGINEERING_READY_FOR_MERGE / OPERATIONAL_DEVICE_ACCEPTANCE_PENDING`；
 - 2026-08-26 Hybrid H1/H2 发布门禁：专项 Python 14/14；浏览器主场景 28/28，Config/Invalid Health/Build/STALE 负向场景 11/11；运行产品 394 项通过、1 项跳过；Quant 560 项及 244 subtests 通过；Mock Today 17/17；真实 Today 17/17；Portfolio CRUD 13/13；compileall、H1/H2 targeted Ruff、pip check、Quant smoke、synthetic benchmark 和 production migration dry-run 通过；Review 为 `ENGINEERING_READY_FOR_MERGE / OPERATIONAL_REMOTE_DEPLOYMENT_PENDING`；
+- 2026-08-26 Hybrid H3–H5 发布门禁：H0–H5 部署专项 62/62，H3/H4/H5 新增专项 26/26；运行产品 426 项通过、1 项跳过；Quant 561 项及 244 subtests 通过；H4 生成站点浏览器在线/离线 15/15；H1/H2 浏览器 28/28 + 11/11；H0 本地验收 12/12；Mock Today 17/17；真实 Today 17/17；Portfolio CRUD 13/13；source distribution/no tracked bytecode、compileall、targeted Ruff、Node syntax、pip check、Quant smoke、synthetic benchmark 和 migration dry-run 通过；Review 为 `ENGINEERING_READY_FOR_MERGE / OPERATIONAL_GATES_PENDING`；
 - Quant migration checksum 已按 UTF-8 SQL 的规范化 LF 字节计算；新记录在 Windows/Linux 一致，旧 LF/CRLF/CR 原始 checksum 仍可读取，任何非行尾内容变化继续失败关闭；
 - 生产 `data/stock_tracker.db` 验证前后 SHA-256 均为 `1cde40aa66846630d89b10d080a8837d204266c5ce32001a45d3b0c0c06197b1`；
-- 当前仍未实现 Big Trend、正式 Event Intelligence、真实 Strategy Scoreboard、Replay、真实校准概率、H3 运行恢复与 H4 云端静态部署；Portfolio 编辑 UI 已完成；
+- 当前仍未实现 Big Trend、正式 Event Intelligence、真实 Strategy Scoreboard、Replay 和真实校准概率；H3/H4 仓库侧工程已完成，但真实 Tailscale、Windows 恢复和云端静态站点 operational 部署尚未完成；Portfolio 编辑 UI 已完成；
 - 下文旧测试数字和旧 T1—T15 状态仅供历史追溯，当前验证以最新自动化输出为准；
 - 根 `.gitignore` 的 `data/` 曾误排除 `stock_tracker/quant/data/`；现已改为 `/data/`，并增加关键源码 `git ls-files` 回归测试；
 - Eastmoney 日 K 已拆分为 `fetch_bars_raw()` 与 `parse_bars()`，可在解析前保存 exact raw bytes；
@@ -131,13 +132,16 @@ stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + �
 - 脚本：`scripts/{start,stop,restart,status}.bat`。
 - 远程访问必须通过 Tailscale Serve 等安全访问层；不要用家庭路由器端口转发或直接监听公网网卡；
 - H0 运维：先设置强 `STOCK_TRACKER_PRIVATE_ACCESS`，再运行 `python scripts/hybrid_h0.py preflight` 与 `enable`；工具只接受 `http://127.0.0.1:<port>`，发现已有其他 Serve backend 时失败关闭；
-- H0 验收：本机先运行 `python scripts/run_hybrid_h0_acceptance.py local`；真实两设备验收使用服务端 `server --enable-serve` 和第二台 Tailnet 设备 `client --base-url ... --fixture-id ...`，写操作只发生在随机 marker 保护的临时 SQLite。
+- H0 验收：本机先运行 `python scripts/run_hybrid_h0_acceptance.py local`；真实两设备验收使用服务端 `server --enable-serve` 和第二台 Tailnet 设备 `client --base-url ... --fixture-id ...`，写操作只发生在随机 marker 保护的临时 SQLite；
+- H3 运维：`python scripts/hybrid_h3.py preflight/status/migrate-target/rollback-target`；Target 迁移前会直接证明 8081 为 API-only Listener，迁移失败验证恢复原 Target；Windows Task 默认只生成计划，安装/删除需要 `--apply` 与 host-change acknowledgement；
+- H3 审计：remote-style 写请求在业务写入前必须成功写入 metadata-only JSONL；审计不可写时返回 503，Token、Body、Portfolio、Symbol、IP 和数据库路径不进入记录。
 
 ### 云端静态网页
 
 - 首选 Cloudflare Pages 的 `pages.dev` 默认域名；GitHub Pages 作为备选。
 - 云端只部署 `web/` 静态资产与无密钥 Runtime Config，不保存账户、持仓、成本或访问 Token。
-- H1/H2 已完成 Runtime Config、统一 API Base、精确 CORS 和 `/api/runtime/health`；H4 仍需生成真实发布配置、设置 exact Pages Origin，并完成云端静态页到 Tailscale Serve API 的 operational 验收。
+- H1/H2 已完成 Runtime Config、统一 API Base、精确 CORS 和 `/api/runtime/health`；H4 已完成 no-secret 确定性构建、Cloudflare `_headers`、GitHub Pages Workflow、Hash manifest 和本地浏览器在线/离线验收；仍需生成真实发布配置、设置 exact Pages Origin，并完成云端静态页到 Tailscale Serve API 的 operational 验收；
+- H4 构建入口：`python scripts/build_hybrid_h4.py build ...`；GitHub Workflow 从 `configure-pages` 派生 Origin，并显式上传隐藏 `.nojekyll`，不接受 Bearer Secret。
 
 ### Render 纯云实验
 

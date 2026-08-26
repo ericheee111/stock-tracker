@@ -1,13 +1,13 @@
 # Stock Tracker v1.1 产品 Gap Matrix 与 Stage 1/1.5 实施入口
 
 > 初始审计日期：2026-08-14
-> 最新对齐日期：2026-08-24
+> 最新对齐日期：2026-08-26
 > 工作区：`D:\Projects\stock-tracker`
 > 分支：`main`
 > 产品基准：`docs/PRD-股票辅助判断与交易参考网站.md` v1.1
 > 部署基准：`docs/HYBRID-DEPLOYMENT-ARCHITECTURE-v1.md`
 > Agent 规则：根目录 `AGENTS.md`
-> 状态：Stage 1 核心决策链已实现；Stage 1.5 H0 工程实现与本地远程式验收已通过，真实 Tailscale/两设备验收待执行；H1–H5 尚未实现
+> 状态：Stage 1 与 Stage 1.5 H0–H5 仓库侧工程合同已实现并通过本地回归；真实 Tailscale/两设备、Windows 主机恢复与 Pages 实际部署仍待 operational 验收，公开 Funnel/Tunnel 保持失败关闭
 
 ---
 
@@ -45,7 +45,7 @@ Oracle Cloud 因实际无法注册，已从候选和应急依赖中移除。Rend
 | Tailscale Funnel / Cloudflare Tunnel | `NOT_IMPLEMENTED` | 无公开访问配置 | Hybrid H5，可选而非默认 |
 | Render 纯云部署 | `EXPERIMENTAL` | Docker/Blueprint 存在 | 休眠、持久化、Provider 可达性和安全门禁未通过 |
 
-当前部署切片顺序是：**H0 Tailscale Serve 整站同源 Bootstrap → H1 前端解耦 → H2 CORS/Health → H3 Serve Target Lane 加固 → H4 静态云部署 → H5 可选公开访问**。H1/H2 的工程实现、同源回归和本地双 Origin 浏览器验收已经通过；当前下一代码切片是 H3/H4。H0 只有在真实 Serve 与两台不同 Tailnet 设备运行 `server/client` 验收后，operational 状态才可改为 `PASSED`；在 H4 实际部署和真实远程验收前，也不能声称云端静态网页已经正式上线。
+部署切片顺序仍是：**H0 Tailscale Serve 整站同源 Bootstrap → H1 前端解耦 → H2 CORS/Health → H3 Serve Target Lane 加固 → H4 静态云部署 → H5 可选公开访问**。H0–H4 的仓库侧工程实现和本地验收已经通过；H5 已实现可信 Tailnet 优先、公开模式失败关闭的只读 preflight。当前不再有未实现的 Hybrid 主线代码切片，后续重点是补真实 Tailscale/两设备、Windows 恢复和 Pages operational 证据，以及继续 Stage 2 的真实 A 股数据质量与研究证据。在真实部署验收前，不能声称远程服务或云端静态网页已经正式上线。
 
 ## 0.1 2026-08-14 Stage 1 集成更新
 
@@ -70,7 +70,7 @@ Oracle Cloud 因实际无法注册，已从候选和应急依赖中移除。Rend
 
 私有数据安全：`/api/brief/today` 与 `/api/portfolio*` 本机直连可用；公网部署未配置私有访问时失败关闭。反向代理不能通过本机 TCP 来源绕过认证。
 
-当前下一代码切片是：**Stage 1.5 Hybrid H3/H4（Serve Target Lane、开机自启/恢复、Cloudflare Pages/GitHub Pages 静态部署与真实远程验收）**；H1/H2 已完成 Runtime Config、统一 API Base、exact CORS、Runtime Health 与状态分离。在进入正式远程使用前，仍需在安装并登录 Tailscale 的服务端和第二台独立 Tailnet 设备上补齐 H0 operational 验收。所有切片都不得改变 Big Trend、真实概率和模型晋级的证据门禁。
+Hybrid H3/H4 的仓库侧实现已经完成：API-only Target、远程写审计、Windows 恢复计划、Power Guard、no-secret 静态构建、Cloudflare/GitHub Pages 发布合同和本地浏览器验收均已落地；H5 公开路径保持失败关闭。当前下一工程重点是：**补齐真实 Tailscale/两设备、Windows 重启/休眠和 Pages operational 验收，同时继续 Stage 2 A 股数据质量与真实研究证据**。所有部署切片都不得改变 Big Trend、真实概率和模型晋级的证据门禁。
 
 ---
 

@@ -1,0 +1,68 @@
+name: Deploy Hybrid H4 to GitHub Pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_origin:
+        description: Exact private HTTPS API origin, normally Tailscale Serve
+        required: true
+        type: string
+      engine_id:
+        description: Expected Local Engine ID
+        required: true
+        default: stock-tracker-local
+        type: string
+      expected_api_major:
+        description: Expected API major version
+        required: true
+        default: "1"
+        type: string
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: hybrid-h4-github-pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Build and verify no-secret static artifact
+        env:
+          STOCK_TRACKER_WEB_ORIGIN: ${{ steps.pages.outputs.origin }}
+          STOCK_TRACKER_API_ORIGIN: ${{ inputs.api_origin }}
+          STOCK_TRACKER_ENGINE_ID: ${{ inputs.engine_id }}
+          STOCK_TRACKER_EXPECTED_API_MAJOR: ${{ inputs.expected_api_major }}
+          STOCK_TRACKER_BUILD_ID: ${{ github.sha }}
+          STOCK_TRACKER_STATIC_HOST: github
+          STOCK_TRACKER_STATIC_OUTPUT: build/hybrid-h4-static
+        run: python scripts/build_hybrid_h4_ci.py
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: build/hybrid-h4-static
+          include-hidden-files: true
+
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

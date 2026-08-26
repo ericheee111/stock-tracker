@@ -2,7 +2,7 @@
 
 > 决策日期：2026-08-24
 >
-> 状态：Design Freeze；Hybrid H0 工程实现与本地远程式验收已通过，真实 Tailscale/两设备 operational 验收待执行；H1/H2 工程实现、同源回归与本地跨 Origin 浏览器验收已通过；H3–H5 待实现
+> 状态：Design Freeze；Hybrid H0–H5 仓库侧工程合同均已实现并通过本地回归，其中 H3/H4 已通过 API Target/审计/静态构建与双 Origin 真实浏览器验收，H5 公开入口保持失败关闭；真实 Tailscale、两设备、Windows 恢复演练与 Pages 实际部署仍为 operational `PENDING`
 >
 > 适用范围：个人使用为主，后续最多向少量朋友开放
 >
@@ -667,29 +667,35 @@ TWO_DISTINCT_TAILNET_DEVICES = PENDING
 
 ### Hybrid H3：Tailscale Serve Target Lane 与运行加固
 
-- 复验并固化 H0 已完成的 loopback 合同，禁止 Target Lane 回退到公网监听；
-- Serve HTTPS 可从整站代理切换为固定 API Target；
-- Tailnet ACL、设备撤销和 Token 轮换流程落盘；
-- Engine 与 Tailscale 开机自启、崩溃恢复和休眠防护；
-- 在独立 Review 前不直接信任代理身份 Header 替代 Bearer Token；
-- 两台不同网络设备完成 SSE、REST、Portfolio CRUD、断线和重启恢复验收。
+状态：`ENGINEERING_IMPLEMENTED_LOCAL_VERIFIED`。双 loopback Listener、API-only Target、metadata-only 远程写审计、exact H0/H3 Serve ownership、双向事务式恢复、Token 轮换计划、Windows Task dry-run 与可选交易时段 Power Guard 已通过专项测试；真实 Tailscale 与主机恢复演练待执行。
 
-### Hybrid H4：Cloudflare Pages
+- `127.0.0.1:8080` 保留本地整站/H0 recovery，`127.0.0.1:8081` 只提供 API；
+- Serve 迁移只接受 EMPTY、exact H0 whole-site 或 exact H3 API Target，冲突配置失败关闭且禁止 `serve reset`；
+- H0→H3 和 H3→H0 失败时只清理重新证明为 H0/H3 独占的 Target；并发变为冲突配置时拒绝清理；
+- remote-style 写请求必须先成功落 metadata-only JSONL 审计，否则返回 `REMOTE_AUDIT_UNAVAILABLE` 且不修改 Repository；
+- Windows Task 与 Power Guard 默认不修改主机/默认关闭，Token 不进入 XML、命令行或日志；
+- 代理身份 Header 不能替代 Bearer Token。
 
-- 静态部署；
-- `pages.dev` 默认域名；
-- Runtime Config 注入；
-- CSP `connect-src` 只允许精确 API Origin，禁止宽泛 `*`；
-- Referrer-Policy / no-secret build review；
-- Backend Offline 页面验收。
+### Hybrid H4：Cloudflare Pages / GitHub Pages
+
+状态：`STATIC_BUILD_AND_LOCAL_BROWSER_ACCEPTANCE_PASSED`。确定性构建、公开文件 allowlist、UTF-8/LF、manifest、no-secret scan、exact CSP/Header、旧构建恢复、在线 CRUD/SSE 与 Engine Offline Shell 已通过；真实 Pages URL 部署仍待执行。
+
+- 生成无密钥 Runtime Config、Cloudflare `_headers`、GitHub `.nojekyll`/404 fallback 与内容哈希 manifest；
+- `connect-src` 只允许 `'self'` 与精确 API Origin，禁止 `*`；
+- symlink、未知静态文件类型、数据库、日志、解释器缓存、私钥标记和实际会话 Token 失败关闭；
+- 激活新产物后再次验证，失败则恢复上一 verified build；
+- GitHub Pages manifest 明确 `response_headers_supported=false`，不冒充 Cloudflare 响应 Header；
+- Backend Offline 时静态 Shell 可加载且不保留新的 `EXECUTABLE` 动作。
 
 ### Hybrid H5：可选公开路径
+
+状态：`TRUSTED_TAILNET_ELIGIBLE_PUBLIC_PATH_BLOCKED`。当前只提供只读 preflight，不提供 Funnel/Tunnel enable 动作；公开模式即使给出确认和 Review ID，也继续被公开限流缺口阻断。
 
 优先顺序：
 
 ```text
 可信朋友加入 Tailnet
-→ Tailscale Funnel 小流量试用
+→ 独立公开安全切片补齐 Rate Limit/Auth 后再评估 Tailscale Funnel
 → 自有域名 + Cloudflare Tunnel
 → 通过门禁后才考虑纯云后端
 ```

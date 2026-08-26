@@ -81,9 +81,13 @@
     const timer = setTimeout(function () { ctrl.abort(); }, opts.timeout || DEFAULT_TIMEOUT_MS);
     const method = opts.method || 'GET';
     const headers = { 'Accept': 'application/json' };
+    let attemptedAccess;
     try {
       if (opts.decision) Runtime.assertDecisionReady();
-      if (opts.private) Object.assign(headers, privateHeaders());
+      if (opts.private) {
+        attemptedAccess = privateAccessValue();
+        Object.assign(headers, privateHeaders());
+      }
     } catch (error) {
       clearTimeout(timer);
       throw new APIRequestError(
@@ -122,7 +126,7 @@
           url
         );
         if (opts.private && (res.status === 401 || res.status === 403) && Runtime) {
-          Runtime.noteAuthError(requestError);
+          Runtime.noteAuthError(requestError, attemptedAccess);
         }
         throw requestError;
       }

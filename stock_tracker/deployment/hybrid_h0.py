@@ -313,6 +313,41 @@ def _read_serve_status(
     return result, _json_payload(result, label="tailscale serve status")
 
 
+def inspect_serve_config(payload: object, target: str) -> tuple[bool, set[str]]:
+    """Public read-only ownership inspection shared by later Hybrid lanes."""
+
+    if type(target) is not str or not target.startswith("http://127.0.0.1:"):
+        raise HybridH0Error("Serve ownership target must be an explicit loopback HTTP URL")
+    return _serve_config_summary(payload, target)
+
+
+def read_serve_status(
+    tailscale_binary: str,
+    *,
+    runner: CommandRunner = default_command_runner,
+    timeout_sec: float = 10.0,
+) -> tuple[CommandResult, object]:
+    """Read and parse Tailscale Serve status without mutating configuration."""
+
+    return _read_serve_status(
+        tailscale_binary,
+        runner=runner,
+        timeout_sec=timeout_sec,
+    )
+
+
+def run_command_checked(
+    runner: CommandRunner,
+    argv: tuple[str, ...],
+    *,
+    timeout_sec: float,
+    label: str,
+) -> CommandResult:
+    """Execute one bounded Tailscale command with the shared error contract."""
+
+    return _run_checked(runner, argv, timeout_sec=timeout_sec, label=label)
+
+
 def _tailscale_identity(
     tailscale_binary: str,
     *,

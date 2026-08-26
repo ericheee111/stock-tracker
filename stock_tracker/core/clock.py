@@ -1,75 +1,90 @@
-"""交易时段判定（按市场/时区，PRD #5.1 / #2）。
+"""Operational trading-session checks using configured market timezones.
 
-设计说明（零依赖简化）：
-- 本机时钟即作为“现在”。PRD 要求按市场独立判断开休市，这里用各市场
-  ``trading_hours``（当地交易所时间）与“本机本地时间”比较。
-- 对于跨时区市场（如美股 ET），为避免过度工程化且不引入 zoneinfo/tzdata 依赖，
-  采用 markets.toml 中的 ``utc_offset_hours`` 将“本机本地时间”换算为该市场当地时间的
-  近似（假设本机处于东八区，这是 Phase1 个人/小团队工具的典型部署场景）。
-  该近似仅用于开休市判定；行情新鲜度（observed_age）统一按本机本地解释（见 core/types.py）。
+The runtime clock prefers the standard-library ``zoneinfo`` database and uses
+``core.timezones`` fallbacks when a Windows Python installation lacks IANA data.
+Formal PIT research calendars remain separate and stricter.
 """
 
 from __future__ import annotations
 
-import time
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 
-from .config import ConfigBundle, MarketConfig
 from . import types as T
-
-
-def machine_utc_offset_hours() -> int:
-    """检测本机相对 UTC 的偏移（小时，东为正）。"""
-    # time.timezone: 本机标准时区相对 UTC 的秒数（西为正）。
-    return round(-time.timezone / 3600)
+from .config import ConfigBundle, MarketConfig
+from .timezones import TimezoneResolutionError, utc_to_market_local
 
 
 def _market_local_now(market_cfg: MarketConfig) -> datetime:
-    """将本机“现在”换算为该市场当地近似时间。"""
-    now = datetime.now()
-    delta = timedelta(hours=(market_cfg.utc_offset_hours - machine_utc_offset_hours()))
-    return now + delta
+    """Convert current UTC into the configured market-local clock."""
+
+    try:
+        return utc_to_market_local(
+            datetime.now(timezone.utc),
+            timezone_name=market_cfg.timezone,
+            fallback_offset_hours=market_cfg.utc_offset_hours,
+        )
+    except TimezoneResolutionError:
+        return datetime.now(timezone.utc)
 
 
 def _in_session(market_cfg: MarketConfig, dt: datetime) -> bool:
-    """dt（市场当地）是否落在任一交易时段内（含周末判断）。"""
-    if dt.weekday() >= 5:  # 周六/周日
+    """Return whether market-local ``dt`` is inside a configured weekday session."""
+
+    if dt.weekday() >= 5:
         return False
     cur_min = dt.hour * 60 + dt.minute
-    for sess in market_cfg.trading_hours:
-        if len(sess) == 4:
-            start = sess[0] * 60 + sess[1]
-            end = sess[2] * 60 + sess[3]
-            if start <= cur_min <= end:
-                return True
+    for session in market_cfg.trading_hours:
+        if not isinstance(session, (list, tuple)) or len(session) != 4:
+            continue
+        if any(type(value) is not int for value in session):
+            continue
+        start_hour, start_minute, end_hour, end_minute = session
+        if not (
+            0 <= start_hour <= 23
+            and 0 <= end_hour <= 23
+            and 0 <= start_minute <= 59
+            and 0 <= end_minute <= 59
+        ):
+            continue
+        start = start_hour * 60 + start_minute
+        end = end_hour * 60 + end_minute
+        if start <= cur_min <= end:
+            return True
     return False
 
 
 def is_trading_now(bundle: ConfigBundle, market: T.Market) -> bool:
-    """market 当前是否处于交易时段。"""
-    mc = _market_cfg(bundle, market)
-    return _in_session(mc, _market_local_now(mc))
+    """Return whether ``market`` is currently inside a configured session."""
+
+    market_config = _market_cfg(bundle, market)
+    return _in_session(market_config, _market_local_now(market_config))
 
 
 def session_of(bundle: ConfigBundle, market: T.Market) -> str:
-    """返回 'TRADING' / 'CLOSED' / 'WEEKEND'。"""
-    mc = _market_cfg(bundle, market)
-    now_local = _market_local_now(mc)
+    """Return ``TRADING``, ``CLOSED``, or ``WEEKEND``."""
+
+    market_config = _market_cfg(bundle, market)
+    now_local = _market_local_now(market_config)
     if now_local.weekday() >= 5:
         return "WEEKEND"
-    return "TRADING" if _in_session(mc, now_local) else "CLOSED"
+    return "TRADING" if _in_session(market_config, now_local) else "CLOSED"
 
 
-def market_open_status(bundle: ConfigBundle) -> dict:
-    """返回 {'a':.., 'hk':.., 'us':..} 的开市状态字符串。"""
-    out = {}
-    for key, mk in (("a", T.Market.A), ("hk", T.Market.HK), ("us", T.Market.US)):
+def market_open_status(bundle: ConfigBundle) -> dict[str, str]:
+    """Return enabled A/HK/US market-session states."""
+
+    output: dict[str, str] = {}
+    for key, market in (("a", T.Market.A), ("hk", T.Market.HK), ("us", T.Market.US)):
         if bundle.app.markets_enabled.get(key, False):
-            out[key] = session_of(bundle, mk)
+            output[key] = session_of(bundle, market)
         else:
-            out[key] = "DISABLED"
-    return out
+            output[key] = "DISABLED"
+    return output
 
 
 def _market_cfg(bundle: ConfigBundle, market: T.Market) -> MarketConfig:
-    return {"A": bundle.markets.a, "HK": bundle.markets.hk, "US": bundle.markets.us}[market.value]
+    return {
+        "A": bundle.markets.a,
+        "HK": bundle.markets.hk,
+        "US": bundle.markets.us,
+    }[market.value]

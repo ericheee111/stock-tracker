@@ -10,8 +10,16 @@ deployment_mode = "HYBRID_PRIVATE"
 engine_id = "stock-tracker-local"
 commit_id = "development"
 api_major = 1
+api_target_enabled = true
+api_target_port = 8081  # H3 固定 API-only loopback Target；8080 保留本地整站恢复
 cors_allowed_origins = []  # H4 部署 Pages 时填写精确 HTTPS Origin；禁止 "*"
 cors_max_age_sec = 600
+audit_enabled = true
+audit_log_path = "data/remote_access_audit.jsonl"
+audit_max_bytes = 5242880
+audit_backup_count = 3
+prevent_sleep_during_trading = false  # 主机级策略，默认不强制保持唤醒
+power_guard_interval_sec = 60
 
 [logging]
 level = "INFO"            # DEBUG / INFO / WARNING / ERROR

@@ -671,7 +671,13 @@
     return state.status;
   }
 
-  function noteAuthError(error) {
+  function noteAuthError(error, attemptedAccess) {
+    if (error && error._runtimeAuthHandled) return false;
+    if (attemptedAccess !== undefined && privateAccessValue() !== attemptedAccess) {
+      if (error) error._runtimeAuthHandled = true;
+      return false;
+    }
+    if (error) error._runtimeAuthHandled = true;
     const code = error && error.code;
     const missing = !hasPrivateAccess();
     const status = missing || code === 'PRIVATE_API_AUTH_REQUIRED' ? 'AUTH_REQUIRED' : 'AUTH_FAILED';
@@ -679,6 +685,7 @@
       authState: status,
       checkedAt: new Date().toISOString()
     });
+    return true;
   }
 
   function noteAuthSuccess() {
