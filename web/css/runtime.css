@@ -1,0 +1,99 @@
+/* =========================================================================
+ * runtime.css — Hybrid H1/H2 runtime, tunnel, CORS, auth and version states.
+ * ========================================================================= */
+.runtime-status {
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--line-soft, var(--border));
+  background: rgba(8, 11, 16, .58);
+  color: var(--text-2);
+  font-size: 10px;
+}
+:root[data-theme="light"] .runtime-status {
+  background: rgba(239, 237, 231, .72);
+}
+.runtime-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--status-unknown);
+  box-shadow: 0 0 0 4px rgba(125, 137, 153, .08);
+}
+.runtime-status-label {
+  color: var(--text);
+  font: 760 9px/1 var(--font-mono);
+  letter-spacing: .075em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.runtime-status-detail {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runtime-status-meta {
+  max-width: 48vw;
+  overflow: hidden;
+  padding-left: 9px;
+  border-left: 1px solid var(--line-soft, var(--border));
+  color: var(--text-3);
+  font: 8px/1.25 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runtime-online .runtime-status-dot {
+  background: var(--status-live);
+  box-shadow: 0 0 0 4px rgba(66, 216, 137, .09);
+}
+.runtime-degraded .runtime-status-dot,
+.runtime-stale .runtime-status-dot,
+.runtime-auth-required .runtime-status-dot {
+  background: var(--status-delayed);
+  box-shadow: 0 0 0 4px rgba(244, 182, 74, .09);
+}
+.runtime-auth-failed .runtime-status-dot,
+.runtime-cors-blocked .runtime-status-dot,
+.runtime-api-version-mismatch .runtime-status-dot,
+.runtime-engine-id-mismatch .runtime-status-dot,
+.runtime-build-mismatch .runtime-status-dot,
+.runtime-runtime-config-error .runtime-status-dot,
+.runtime-runtime-health-invalid .runtime-status-dot {
+  background: var(--status-stale);
+  box-shadow: 0 0 0 4px rgba(255, 98, 90, .09);
+}
+.runtime-engine-offline .runtime-status-dot,
+.runtime-network-offline .runtime-status-dot,
+.runtime-tunnel-unavailable .runtime-status-dot {
+  background: var(--status-unknown);
+}
+.runtime-auth-required .runtime-status-label,
+.runtime-degraded .runtime-status-label,
+.runtime-stale .runtime-status-label {
+  color: var(--status-delayed);
+}
+.runtime-auth-failed .runtime-status-label,
+.runtime-cors-blocked .runtime-status-label,
+.runtime-api-version-mismatch .runtime-status-label,
+.runtime-engine-id-mismatch .runtime-status-label,
+.runtime-build-mismatch .runtime-status-label,
+.runtime-runtime-config-error .runtime-status-label,
+.runtime-runtime-health-invalid .runtime-status-label {
+  color: var(--status-stale);
+}
+.runtime-online .runtime-status-label { color: var(--status-live); }
+
+@media (max-width: 700px) {
+  .runtime-status {
+    grid-template-columns: auto auto minmax(0, 1fr);
+    min-height: 34px;
+    padding: 7px 10px;
+  }
+  .runtime-status-detail { font-size: 9px; }
+  .runtime-status-meta { display: none; }
+}

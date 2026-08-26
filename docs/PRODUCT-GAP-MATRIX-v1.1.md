@@ -30,14 +30,14 @@ Oracle Cloud 因实际无法注册，已从候选和应急依赖中移除。Rend
 | 能力 | 当前状态 | 当前证据 | 剩余缺口 |
 |---|---|---|---|
 | 本地同源 Web + API | `IMPLEMENTED` | Python Backend 同时托管 `web/` 与 `/api/...` | 保留为 `LOCAL_ONLY` 恢复路径 |
-| 私有 API Bearer / loopback 判断 | `IMPLEMENTED` | `stock_tracker/api/server.py`、私有 API 测试 | 远程模式仍需 CORS 与访问层验收 |
-| fetch-stream SSE Authorization | `IMPLEMENTED` | `web/js/sse.js` | 当前 URL 仍写死 `/api/stream` |
-| 无密钥 Runtime Config | `NOT_IMPLEMENTED` | 无 `window.STOCK_TRACKER_RUNTIME` | Hybrid H1 |
-| 统一 `apiBaseUrl` / URL Builder | `NOT_IMPLEMENTED` | `api.js` 与 `sse.js` 使用相对路径 | Hybrid H1 |
+| 私有 API Bearer / loopback 判断 | `IMPLEMENTED_VERIFIED` | 反向代理绕过保护、Origin-scoped Bearer、exact CORS 浏览器验收 | 真实 Tailnet/Pages operational 验收 |
+| fetch-stream SSE Authorization | `IMPLEMENTED_VERIFIED` | Runtime URL Builder、cross-origin Header auth、401/403 无热重试 | 真实 Tailnet 断线与重连演练 |
+| 无密钥 Runtime Config | `IMPLEMENTED_VERIFIED` | `web/runtime-config.js`、严格 Runtime QA | H4 部署时注入真实静态站点元数据 |
+| 统一 `apiBaseUrl` / URL Builder | `IMPLEMENTED_VERIFIED` | REST/SSE/Health 全部经过 `web/js/runtime.js` | H4 静态部署验收 |
 | 部署模式化监听地址 | `IMPLEMENTED` | `config/app.toml`、`ServerConfig` 与本地启动脚本默认 `127.0.0.1`；非 loopback 需 `--allow-non-loopback`；Docker/Procfile 显式 opt-in | 真实宿主复验监听地址 |
-| 精确 CORS Allowlist / `OPTIONS` | `NOT_IMPLEMENTED` | API Server 未实现正式 CORS | Hybrid H2 |
-| `/api/runtime/health` / API Major | `NOT_IMPLEMENTED` | 仅有 `/api/provider_health` | Hybrid H2 |
-| Engine/Tunnel/Auth/CORS/Stale UI | `NOT_IMPLEMENTED` | 当前错误与离线状态未完整区分 | Hybrid H1/H2 |
+| 精确 CORS Allowlist / `OPTIONS` | `IMPLEMENTED_VERIFIED` | exact Origin、OPTIONS、Bearer CRUD/SSE 单测 + 浏览器跨域写验收 | H4 Pages Origin 实际配置 |
+| `/api/runtime/health` / API Major | `IMPLEMENTED_VERIFIED` | metadata-only Health、API Major/Engine/Commit handshake、时间推进 STALE 测试 | H3/H4 operational 接线 |
+| Engine/Tunnel/Auth/CORS/Stale UI | `IMPLEMENTED_VERIFIED` | Runtime 状态条、hard-failure 清理、STALE 决策阻断、SSE 401 不热重试 | 真实 Tunnel 故障演练 |
 | Tailscale Serve 私有访问 | `PARTIAL` | H0 提供 preflight/enable/status/disable、冲突配置失败关闭及临时 DB server/client 验收工具；本地远程式 REST/SSE/Portfolio CRUD 已通过 | 当前宿主未安装 Tailscale；真实 Serve 与两台不同 Tailnet 设备验收待执行 |
 | 开机自启、休眠与崩溃恢复 | `PARTIAL` | 有 start/stop 脚本 | 缺受支持的 Windows Service/Task Scheduler 验收 |
 | Cloudflare Pages 静态部署 | `NOT_IMPLEMENTED` | `web/` 已是静态资源 | Hybrid H4 |
@@ -45,7 +45,7 @@ Oracle Cloud 因实际无法注册，已从候选和应急依赖中移除。Rend
 | Tailscale Funnel / Cloudflare Tunnel | `NOT_IMPLEMENTED` | 无公开访问配置 | Hybrid H5，可选而非默认 |
 | Render 纯云部署 | `EXPERIMENTAL` | Docker/Blueprint 存在 | 休眠、持久化、Provider 可达性和安全门禁未通过 |
 
-当前部署切片顺序是：**H0 Tailscale Serve 整站同源 Bootstrap → H1 前端解耦 → H2 CORS/Health → H3 Serve Target Lane 加固 → H4 静态云部署 → H5 可选公开访问**。H0 的工程实现和本地远程式验收已经完成，但只有真实 Serve 与两台不同 Tailnet 设备运行 `server/client` 验收后，才可把 H0 的 operational 状态改为 `PASSED`；在 H1/H2/H4 完成前，也不能声称云端静态网页已经可以安全连接本地 Backend。
+当前部署切片顺序是：**H0 Tailscale Serve 整站同源 Bootstrap → H1 前端解耦 → H2 CORS/Health → H3 Serve Target Lane 加固 → H4 静态云部署 → H5 可选公开访问**。H1/H2 的工程实现、同源回归和本地双 Origin 浏览器验收已经通过；当前下一代码切片是 H3/H4。H0 只有在真实 Serve 与两台不同 Tailnet 设备运行 `server/client` 验收后，operational 状态才可改为 `PASSED`；在 H4 实际部署和真实远程验收前，也不能声称云端静态网页已经正式上线。
 
 ## 0.1 2026-08-14 Stage 1 集成更新
 
@@ -70,7 +70,7 @@ Oracle Cloud 因实际无法注册，已从候选和应急依赖中移除。Rend
 
 私有数据安全：`/api/brief/today` 与 `/api/portfolio*` 本机直连可用；公网部署未配置私有访问时失败关闭。反向代理不能通过本机 TCP 来源绕过认证。
 
-当前下一代码切片是：**Stage 1.5 Hybrid H1/H2（Runtime Config、统一 API Base、精确 CORS、Runtime Health 和离线状态）**；在进入正式远程使用前，仍需在安装并登录 Tailscale 的服务端和第二台独立 Tailnet 设备上补齐 H0 operational 验收。Portfolio 设置/持仓编辑 UI 可以并行完成。所有切片都不得改变 Big Trend、真实概率和模型晋级的证据门禁。
+当前下一代码切片是：**Stage 1.5 Hybrid H3/H4（Serve Target Lane、开机自启/恢复、Cloudflare Pages/GitHub Pages 静态部署与真实远程验收）**；H1/H2 已完成 Runtime Config、统一 API Base、exact CORS、Runtime Health 与状态分离。在进入正式远程使用前，仍需在安装并登录 Tailscale 的服务端和第二台独立 Tailnet 设备上补齐 H0 operational 验收。所有切片都不得改变 Big Trend、真实概率和模型晋级的证据门禁。
 
 ---
 

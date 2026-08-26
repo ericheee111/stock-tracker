@@ -21,7 +21,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlparse
 
-from ..core.network import require_safe_bind
+from ..core.network import (
+    InvalidOriginError,
+    normalize_http_origin,
+    require_safe_bind,
+)
 from ..core.security import (
     MIN_PRIVATE_ACCESS_LENGTH,
     PRIVATE_ACCESS_ENV,
@@ -30,6 +34,7 @@ from ..core.security import (
 from ..storage.db import close_all
 from . import handlers as H
 from .handlers import AppContext
+from .runtime import build_runtime_health
 
 # 路由表：前缀 → handler 函数（GET）
 _GET_ROUTES: list[tuple[str, Any]] = [
@@ -68,6 +73,33 @@ _PRIVATE_API_PREFIXES = (
 )
 _MAX_JSON_BODY_BYTES = 64 * 1024
 _MAX_OVERSIZE_DRAIN_BYTES = 1024 * 1024
+_CORS_ALLOWED_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
+_CORS_PREFLIGHT_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
+_CORS_ALLOWED_HEADERS = frozenset({"authorization", "content-type", "accept"})
+_CORS_ALLOWED_HEADERS_VALUE = "Authorization, Content-Type, Accept"
+
+
+def _request_host_identity(request_host: str, scheme: str) -> tuple[str, int] | None:
+    """Return normalized Host header identity for same-origin detection."""
+
+    if type(request_host) is not str or not request_host:
+        return None
+    try:
+        parsed = urlparse("//" + request_host)
+        if parsed.username is not None or parsed.password is not None or parsed.path or parsed.query or parsed.fragment:
+            return None
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return None
+    if not hostname:
+        return None
+    normalized = hostname.rstrip(".").lower()
+    try:
+        normalized = normalized.encode("idna").decode("ascii")
+    except UnicodeError:
+        return None
+    return normalized, port or (443 if scheme == "https" else 80)
 
 
 def _private_api_access_allowed(
@@ -145,6 +177,83 @@ class APIHandler(BaseHTTPRequestHandler):
     def _ctx(self) -> AppContext:
         return self.server.ctx
 
+    def _origin_is_same_origin(self, normalized_origin: str) -> bool:
+        parsed = urlparse(normalized_origin)
+        if not parsed.hostname:
+            return False
+        origin_port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        request_identity = _request_host_identity(
+            self.headers.get("Host", ""),
+            parsed.scheme,
+        )
+        return request_identity == (parsed.hostname.rstrip(".").lower(), origin_port)
+
+    def _send_cors_headers(self, *, preflight: bool = False) -> None:
+        origin = getattr(self, "_cors_origin", None)
+        if not origin:
+            return
+        self.send_header("Access-Control-Allow-Origin", origin)
+        self.send_header(
+            "Vary",
+            (
+                "Origin, Access-Control-Request-Method, Access-Control-Request-Headers"
+                if preflight
+                else "Origin"
+            ),
+        )
+        if preflight:
+            self.send_header(
+                "Access-Control-Allow-Methods",
+                ", ".join(_CORS_ALLOWED_METHODS),
+            )
+            self.send_header(
+                "Access-Control-Allow-Headers",
+                _CORS_ALLOWED_HEADERS_VALUE,
+            )
+            self.send_header(
+                "Access-Control-Max-Age",
+                str(getattr(self.server, "cors_max_age_sec", 600)),
+            )
+
+    def _prepare_api_request(self, path: str) -> bool:
+        """Validate cross-origin API access before authentication or routing."""
+
+        self._cors_origin = None
+        if not path.startswith("/api/"):
+            return True
+        raw_origin = self.headers.get("Origin", "")
+        if not raw_origin:
+            return True
+        try:
+            normalized_origin = normalize_http_origin(raw_origin)
+        except InvalidOriginError:
+            self._send_json(
+                {
+                    "error": {
+                        "code": "CORS_ORIGIN_INVALID",
+                        "message": "request Origin must be a strict HTTP(S) origin",
+                    }
+                },
+                status=403,
+            )
+            return False
+        if self._origin_is_same_origin(normalized_origin):
+            return True
+        allowed = getattr(self.server, "cors_allowed_origins", frozenset())
+        if normalized_origin not in allowed:
+            self._send_json(
+                {
+                    "error": {
+                        "code": "CORS_ORIGIN_DENIED",
+                        "message": "request Origin is not allowed",
+                    }
+                },
+                status=403,
+            )
+            return False
+        self._cors_origin = normalized_origin
+        return True
+
     def _private_api_authorized(self, path: str) -> bool:
         return _private_api_access_allowed(
             path=path,
@@ -201,6 +310,7 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self._send_cors_headers()
         self.end_headers()
         self.wfile.write(body)
 
@@ -212,11 +322,93 @@ class APIHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    # ---- OPTIONS ----
+    def do_OPTIONS(self) -> None:
+        path = urlparse(self.path).path
+        if not path.startswith("/api/"):
+            self._send_json(
+                {"error": {"code": "NOT_FOUND", "message": "not found"}},
+                status=404,
+            )
+            return
+        if not self.headers.get("Origin", ""):
+            self._send_json(
+                {
+                    "error": {
+                        "code": "CORS_PREFLIGHT_ORIGIN_REQUIRED",
+                        "message": "CORS preflight requires Origin",
+                    }
+                },
+                status=400,
+            )
+            return
+        if not self._prepare_api_request(path):
+            return
+
+        requested_method = self.headers.get(
+            "Access-Control-Request-Method",
+            "",
+        ).strip().upper()
+        if requested_method not in _CORS_PREFLIGHT_METHODS:
+            self._send_json(
+                {
+                    "error": {
+                        "code": "CORS_PREFLIGHT_METHOD_DENIED",
+                        "message": "requested method is not allowed",
+                    }
+                },
+                status=403,
+            )
+            return
+
+        requested_headers_raw = self.headers.get(
+            "Access-Control-Request-Headers",
+            "",
+        )
+        requested_headers: set[str] = set()
+        if requested_headers_raw:
+            for raw_header in requested_headers_raw.split(","):
+                header = raw_header.strip().lower()
+                if not header or re.fullmatch(r"[!#$%&'*+.^_`|~0-9a-z-]+", header) is None:
+                    self._send_json(
+                        {
+                            "error": {
+                                "code": "CORS_PREFLIGHT_HEADERS_DENIED",
+                                "message": "requested headers are malformed",
+                            }
+                        },
+                        status=403,
+                    )
+                    return
+                requested_headers.add(header)
+        if not requested_headers.issubset(_CORS_ALLOWED_HEADERS):
+            self._send_json(
+                {
+                    "error": {
+                        "code": "CORS_PREFLIGHT_HEADERS_DENIED",
+                        "message": "requested headers are not allowed",
+                    }
+                },
+                status=403,
+            )
+            return
+
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        self._send_cors_headers(preflight=True)
+        self.end_headers()
+
     # ---- GET ----
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path
         ctx = self._ctx()
+        if not self._prepare_api_request(path):
+            return
+        if path == "/api/runtime/health":
+            self._send_json(build_runtime_health(ctx))
+            return
         if not self._require_private_api(path):
             return
 
@@ -262,9 +454,11 @@ class APIHandler(BaseHTTPRequestHandler):
 
     # ---- POST ----
     def do_POST(self) -> None:
-        ctx = self._ctx()
         parsed = urlparse(self.path)
         path = parsed.path
+        ctx = self._ctx()
+        if not self._prepare_api_request(path):
+            return
         if not self._require_private_api(path):
             return
         if path == "/api/portfolio/positions":
@@ -299,6 +493,8 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:
         path = urlparse(self.path).path
+        if not self._prepare_api_request(path):
+            return
         if not self._require_private_api(path):
             return
         if path != "/api/portfolio/profile":
@@ -310,6 +506,8 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def do_PATCH(self) -> None:
         path = urlparse(self.path).path
+        if not self._prepare_api_request(path):
+            return
         if not self._require_private_api(path):
             return
         match = _PORTFOLIO_POSITION_RE.match(path)
@@ -322,6 +520,8 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:
         path = urlparse(self.path).path
+        if not self._prepare_api_request(path):
+            return
         if not self._require_private_api(path):
             return
         match = _PORTFOLIO_POSITION_RE.match(path)
@@ -446,6 +646,7 @@ class APIHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "keep-alive")
         self.send_header("X-Accel-Buffering", "no")
+        self._send_cors_headers()
         self.end_headers()
 
         q: queue.Queue = queue.Queue()
@@ -488,9 +689,25 @@ class APIServer(ThreadingHTTPServer):
         allow_non_loopback: bool = False,
     ) -> None:
         safe_host = require_safe_bind(host, allow_non_loopback=allow_non_loopback)
+        app_config = getattr(getattr(ctx, "bundle", None), "app", None)
+        runtime_config = getattr(app_config, "runtime", None)
+        raw_origins = getattr(runtime_config, "cors_allowed_origins", []) or []
+        normalized_origins: set[str] = set()
+        for raw_origin in raw_origins:
+            try:
+                normalized_origins.add(normalize_http_origin(raw_origin))
+            except InvalidOriginError as exc:
+                raise ValueError(f"invalid CORS allowlist origin: {raw_origin!r}") from exc
+        raw_max_age = getattr(runtime_config, "cors_max_age_sec", 600)
+        if isinstance(raw_max_age, bool) or not isinstance(raw_max_age, int):
+            raise TypeError("cors_max_age_sec must be an integer")
+        if raw_max_age < 0 or raw_max_age > 86400:
+            raise ValueError("cors_max_age_sec must be between 0 and 86400")
         super().__init__((safe_host, port), APIHandler)
         self.ctx = ctx
         self.logger = logger
+        self.cors_allowed_origins = frozenset(normalized_origins)
+        self.cors_max_age_sec = raw_max_age
         self._shutdown = threading.Event()
         self.daemon_threads = True
 

@@ -13,12 +13,23 @@ from typing import Any
 import tomllib
 
 from . import types as T
+from .network import InvalidOriginError, normalize_http_origin
 
 
 @dataclass(slots=True)
 class ServerConfig:
     host: str = "127.0.0.1"
     port: int = 8080
+
+
+@dataclass(slots=True)
+class RuntimeConfig:
+    deployment_mode: str = "HYBRID_PRIVATE"
+    engine_id: str = "stock-tracker-local"
+    commit_id: str = "development"
+    api_major: int = 1
+    cors_allowed_origins: list[str] = field(default_factory=list)
+    cors_max_age_sec: int = 600
 
 
 @dataclass(slots=True)
@@ -55,6 +66,7 @@ class StoreConfig:
 @dataclass(slots=True)
 class AppConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
+    runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     collector: CollectorConfig = field(default_factory=CollectorConfig)
     store: StoreConfig = field(default_factory=StoreConfig)
@@ -224,6 +236,88 @@ def load_app(path: str, root_dir: str) -> AppConfig:
             maximum=65535,
         ),
     )
+    runtime_d = d.get("runtime", {})
+    if not isinstance(runtime_d, dict):
+        raise ConfigError("runtime 必须是 TOML table")
+
+    allowed_runtime_fields = {
+        "deployment_mode",
+        "engine_id",
+        "commit_id",
+        "api_major",
+        "cors_allowed_origins",
+        "cors_max_age_sec",
+    }
+    unknown_runtime_fields = set(runtime_d) - allowed_runtime_fields
+    if unknown_runtime_fields:
+        raise ConfigError(
+            f"runtime 包含未知字段: {min(unknown_runtime_fields)}"
+        )
+
+    raw_origins = _opt(runtime_d, "cors_allowed_origins", [])
+    if type(raw_origins) is not list:
+        raise ConfigError("runtime.cors_allowed_origins 必须是 TOML string array")
+    if len(raw_origins) > 32:
+        raise ConfigError("runtime.cors_allowed_origins 最多允许 32 项")
+    normalized_origins: list[str] = []
+    for index, raw_origin in enumerate(raw_origins):
+        try:
+            normalized_origin = normalize_http_origin(raw_origin)
+        except InvalidOriginError as exc:
+            raise ConfigError(
+                f"runtime.cors_allowed_origins[{index}] 无效: {exc}"
+            ) from exc
+        if normalized_origin not in normalized_origins:
+            normalized_origins.append(normalized_origin)
+
+    deployment_mode = _expect_string(
+        _opt(runtime_d, "deployment_mode", "HYBRID_PRIVATE"),
+        "runtime.deployment_mode",
+        nonempty=True,
+    )
+    allowed_modes = {
+        "LOCAL_ONLY",
+        "HYBRID_PRIVATE",
+        "HYBRID_PUBLIC_AUTH",
+        "HYBRID_SNAPSHOT",
+        "PURE_CLOUD_EXPERIMENTAL",
+    }
+    if deployment_mode not in allowed_modes:
+        raise ConfigError("runtime.deployment_mode 不是已冻结的部署模式")
+
+    engine_id = _expect_string(
+        _opt(runtime_d, "engine_id", "stock-tracker-local"),
+        "runtime.engine_id",
+        nonempty=True,
+    )
+    commit_id = _expect_string(
+        _opt(runtime_d, "commit_id", "development"),
+        "runtime.commit_id",
+        nonempty=True,
+    )
+    for name, value in (("runtime.engine_id", engine_id), ("runtime.commit_id", commit_id)):
+        if len(value) > 128 or any(ord(char) < 33 or ord(char) == 127 for char in value):
+            raise ConfigError(f"{name} 必须是最多 128 个可见字符")
+
+    runtime = RuntimeConfig(
+        deployment_mode=deployment_mode,
+        engine_id=engine_id,
+        commit_id=commit_id,
+        api_major=_expect_int(
+            _opt(runtime_d, "api_major", 1),
+            "runtime.api_major",
+            minimum=1,
+            maximum=999,
+        ),
+        cors_allowed_origins=normalized_origins,
+        cors_max_age_sec=_expect_int(
+            _opt(runtime_d, "cors_max_age_sec", 600),
+            "runtime.cors_max_age_sec",
+            minimum=0,
+            maximum=86400,
+        ),
+    )
+
     log = LoggingConfig(
         level=_opt(d.get("logging", {}), "level", "INFO"),
         file=_opt(d.get("logging", {}), "file", "data/stock_tracker.log"),
@@ -256,7 +350,7 @@ def load_app(path: str, root_dir: str) -> AppConfig:
         "hk": _expect_bool(_opt(markets_d, "hk", True), "markets.hk"),
         "us": _expect_bool(_opt(markets_d, "us", True), "markets.us"),
     }
-    return AppConfig(server=srv, logging=log, collector=col, store=sto,
+    return AppConfig(server=srv, runtime=runtime, logging=log, collector=col, store=sto,
                      markets_enabled=markets_enabled, root_dir=root_dir)
 
 

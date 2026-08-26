@@ -1,14 +1,14 @@
 /* =========================================================================
- * api.js —— REST 封装（超时、严格 JSON、私有会话访问、结构化错误）
- * 全局对象：API
+ * api.js — REST wrapper using the Hybrid H1 Runtime URL/handshake contract.
+ * Global: API
  * ========================================================================= */
 (function (global) {
   'use strict';
 
+  const Runtime = global.Runtime;
   const DEFAULT_TIMEOUT_MS = 8000;
-  const PRIVATE_ACCESS_KEY = 'stockTrackerPrivateAccess';
 
-  function APIRequestError(status, code, message, field, url) {
+  function APIRequestError(status, code, message, field, url, cause) {
     Error.call(this, message);
     this.name = 'APIRequestError';
     this.message = message;
@@ -16,40 +16,32 @@
     this.code = code || 'HTTP_ERROR';
     this.field = field || null;
     this.url = url || '';
+    this.cause = cause || null;
     if (Error.captureStackTrace) Error.captureStackTrace(this, APIRequestError);
   }
   APIRequestError.prototype = Object.create(Error.prototype);
   APIRequestError.prototype.constructor = APIRequestError;
 
   function privateAccessValue() {
-    try {
-      return global.sessionStorage.getItem(PRIVATE_ACCESS_KEY) || '';
-    } catch (e) {
-      return '';
-    }
+    return Runtime ? Runtime.privateAccessValue() : '';
   }
 
   function setPrivateAccess(value) {
-    const normalized = typeof value === 'string' ? value.trim() : '';
-    try {
-      if (normalized) global.sessionStorage.setItem(PRIVATE_ACCESS_KEY, normalized);
-      else global.sessionStorage.removeItem(PRIVATE_ACCESS_KEY);
-    } catch (e) {
-      throw new Error('当前浏览器不允许保存会话访问值');
-    }
+    if (!Runtime) throw new Error('Runtime 模块未加载');
+    Runtime.setPrivateAccess(value);
   }
 
   function clearPrivateAccess() {
-    setPrivateAccess('');
+    if (Runtime) Runtime.clearPrivateAccess();
   }
 
   function hasPrivateAccess() {
-    return privateAccessValue().length > 0;
+    return Boolean(Runtime && Runtime.hasPrivateAccess());
   }
 
   function privateHeaders() {
-    const value = privateAccessValue();
-    return value ? { 'Authorization': 'Bearer ' + value } : {};
+    if (!Runtime) return {};
+    return Runtime.privateHeaders();
   }
 
   async function readResponsePayload(res) {
@@ -61,42 +53,78 @@
     }
     try {
       return await res.json();
-    } catch (e) {
+    } catch (error) {
       return { __invalidJson: true };
     }
   }
 
-  async function requestJSON(url, opts) {
+  function resolvedUrl(path) {
+    if (!Runtime) throw new APIRequestError(0, 'RUNTIME_MISSING', 'Runtime 模块未加载', null, path);
+    try {
+      return Runtime.apiUrl(path);
+    } catch (error) {
+      throw new APIRequestError(
+        0,
+        error && error.code || 'RUNTIME_CONFIG_ERROR',
+        error && error.message || 'API URL 无法解析',
+        null,
+        String(path || ''),
+        error
+      );
+    }
+  }
+
+  async function requestJSON(path, opts) {
     opts = opts || {};
+    const url = resolvedUrl(path);
     const ctrl = new AbortController();
     const timer = setTimeout(function () { ctrl.abort(); }, opts.timeout || DEFAULT_TIMEOUT_MS);
     const method = opts.method || 'GET';
     const headers = { 'Accept': 'application/json' };
-    if (opts.private) Object.assign(headers, privateHeaders());
+    try {
+      if (opts.decision) Runtime.assertDecisionReady();
+      if (opts.private) Object.assign(headers, privateHeaders());
+    } catch (error) {
+      clearTimeout(timer);
+      throw new APIRequestError(
+        0,
+        error && error.code || 'RUNTIME_HANDSHAKE_REQUIRED',
+        error && error.message || 'Runtime Health 握手尚未完成',
+        null,
+        url,
+        error
+      );
+    }
+
     let body;
     if (opts.body !== undefined) {
       headers['Content-Type'] = 'application/json; charset=utf-8';
       body = JSON.stringify(opts.body);
     }
+
     try {
-      const res = await fetch(url, {
+      const fetchOptions = Runtime.secureFetchOptions({
         method: method,
         signal: ctrl.signal,
-        cache: 'no-store',
         headers: headers,
         body: body
       });
+      const res = await global.fetch(url, fetchOptions);
       const payload = await readResponsePayload(res);
       if (!res.ok) {
         const error = payload && payload.error && typeof payload.error === 'object'
           ? payload.error : {};
-        throw new APIRequestError(
+        const requestError = new APIRequestError(
           res.status,
           error.code || 'HTTP_' + res.status,
           error.message || ('HTTP ' + res.status + ' @ ' + url),
           error.field || null,
           url
         );
+        if (opts.private && (res.status === 401 || res.status === 403) && Runtime) {
+          Runtime.noteAuthError(requestError);
+        }
+        throw requestError;
       }
       if (payload && payload.__nonJson) {
         throw new APIRequestError(
@@ -116,20 +144,31 @@
           url
         );
       }
+      if (opts.private && Runtime) Runtime.noteAuthSuccess();
       return payload;
     } catch (error) {
       if (error && error.name === 'AbortError') {
-        throw new APIRequestError(0, 'REQUEST_TIMEOUT', '请求超时', null, url);
+        throw new APIRequestError(0, 'REQUEST_TIMEOUT', '请求超时', null, url, error);
       }
-      throw error;
+      if (error instanceof APIRequestError || (Runtime && error instanceof Runtime.RuntimeError)) {
+        throw error;
+      }
+      throw new APIRequestError(
+        0,
+        'NETWORK_REQUEST_FAILED',
+        '无法连接 API；可能是 Engine、Tunnel、CORS 或网络故障',
+        null,
+        url,
+        error
+      );
     } finally {
       clearTimeout(timer);
     }
   }
 
-  function fetchJSON(url, opts) {
+  function fetchJSON(path, opts) {
     opts = Object.assign({}, opts || {}, { method: 'GET' });
-    return requestJSON(url, opts);
+    return requestJSON(path, opts);
   }
 
   function unwrap(payload, key) {
@@ -140,14 +179,19 @@
   }
 
   const API = {
+    getRuntimeHealth: function () {
+      if (!Runtime) return Promise.reject(new Error('Runtime 模块未加载'));
+      return Runtime.refreshHealth();
+    },
     getOverview: function () {
-      return fetchJSON('/api/overview', { private: true });
+      return fetchJSON('/api/overview', { private: true, decision: true });
     },
     getBriefToday: function (opts) {
       opts = opts || {};
       return fetchJSON('/api/brief/today', {
         timeout: opts.timeout || DEFAULT_TIMEOUT_MS,
-        private: true
+        private: true,
+        decision: true
       }).then(function (payload) { return unwrap(payload, 'brief') || payload; });
     },
     getPortfolio: function () {
@@ -174,37 +218,40 @@
       });
     },
     getWatchlist: function () {
-      return fetchJSON('/api/watchlist', { private: true })
-        .then(function (d) { return unwrap(d, 'items') || unwrap(d, 'watchlist') || []; });
+      return fetchJSON('/api/watchlist', { private: true, decision: true })
+        .then(function (data) { return unwrap(data, 'items') || unwrap(data, 'watchlist') || []; });
     },
     getPositions: function () {
-      return fetchJSON('/api/positions', { private: true })
-        .then(function (d) { return unwrap(d, 'items') || unwrap(d, 'positions') || []; });
+      return fetchJSON('/api/positions', { private: true, decision: true })
+        .then(function (data) { return unwrap(data, 'items') || unwrap(data, 'positions') || []; });
     },
     getRadar: function () {
-      return fetchJSON('/api/radar', { private: true })
-        .then(function (d) { return unwrap(d, 'signals') || unwrap(d, 'items') || (Array.isArray(d) ? d : []); });
+      return fetchJSON('/api/radar', { private: true, decision: true })
+        .then(function (data) { return unwrap(data, 'signals') || unwrap(data, 'items') || (Array.isArray(data) ? data : []); });
     },
     getSignal: function (id) {
-      return fetchJSON('/api/signal/' + encodeURIComponent(id), { private: true });
+      return fetchJSON('/api/signal/' + encodeURIComponent(id), {
+        private: true,
+        decision: true
+      });
     },
     getQuote: function (symbol) {
       return fetchJSON('/api/quote/' + encodeURIComponent(symbol));
     },
     getMarkets: function () {
       return fetchJSON('/api/markets')
-        .then(function (d) { return unwrap(d, 'markets') || unwrap(d, 'items') || (Array.isArray(d) ? d : []); });
+        .then(function (data) { return unwrap(data, 'markets') || unwrap(data, 'items') || (Array.isArray(data) ? data : []); });
     },
     getProviderHealth: function () {
       return fetchJSON('/api/provider_health')
-        .then(function (d) { return unwrap(d, 'providers') || unwrap(d, 'items') || (Array.isArray(d) ? d : []); });
+        .then(function (data) { return unwrap(data, 'providers') || unwrap(data, 'items') || (Array.isArray(data) ? data : []); });
     },
     getSectors: function () {
       return fetchJSON('/api/sectors')
-        .then(function (d) { return unwrap(d, 'sectors') || unwrap(d, 'items') || (Array.isArray(d) ? d : []); });
+        .then(function (data) { return unwrap(data, 'sectors') || unwrap(data, 'items') || (Array.isArray(data) ? data : []); });
     },
     getConfig: function () {
-      return fetchJSON('/api/config', { private: true }).then(function (d) { return d || {}; });
+      return fetchJSON('/api/config', { private: true }).then(function (data) { return data || {}; });
     },
     requestJSON: requestJSON,
     fetchJSON: fetchJSON,
@@ -212,8 +259,13 @@
     setPrivateAccess: setPrivateAccess,
     clearPrivateAccess: clearPrivateAccess,
     hasPrivateAccess: hasPrivateAccess,
-    privateHeaders: privateHeaders
+    privateAccessValue: privateAccessValue,
+    privateHeaders: privateHeaders,
+    apiUrl: resolvedUrl,
+    currentOrigin: function () {
+      return Runtime ? Runtime.config().apiOrigin : '';
+    }
   };
 
-  global.API = API;
+  global.API = Object.freeze(API);
 })(window);

@@ -5,6 +5,14 @@
 host = "127.0.0.1"  # LOCAL_ONLY / HYBRID_PRIVATE 默认只监听 loopback
 port = 8080
 
+[runtime]
+deployment_mode = "HYBRID_PRIVATE"
+engine_id = "stock-tracker-local"
+commit_id = "development"
+api_major = 1
+cors_allowed_origins = []  # H4 部署 Pages 时填写精确 HTTPS Origin；禁止 "*"
+cors_max_age_sec = 600
+
 [logging]
 level = "INFO"            # DEBUG / INFO / WARNING / ERROR
 file = "data/stock_tracker.log"

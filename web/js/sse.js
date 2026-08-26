@@ -1,14 +1,11 @@
 /* =========================================================================
- * sse.js —— 带私有访问 Header 的 fetch-stream SSE 客户端
- * 全局对象：SSE
- * 事件类型：quote / signal / regime / sector / provider_health
- *
- * 原生 EventSource 无法发送 Authorization Header，因此个人决策流改用
- * fetch + ReadableStream。访问值仍只来自当前 sessionStorage；断线自动退避重连。
+ * sse.js — Header-authenticated fetch-stream SSE through the Runtime URL layer.
+ * Global: SSE
  * ========================================================================= */
 (function (global) {
   'use strict';
 
+  const Runtime = global.Runtime;
   const TYPES = ['quote', 'signal', 'regime', 'sector', 'provider_health'];
   const listeners = {};
   TYPES.forEach(function (type) { listeners[type] = []; });
@@ -19,6 +16,7 @@
   let retryTimer = null;
   let shouldRun = false;
   let connected = false;
+  let authBlocked = false;
   let retryDelay = 1000;
 
   function emit(type, payload) {
@@ -85,8 +83,9 @@
   }
 
   function scheduleReconnect(error) {
-    if (!shouldRun || retryTimer) return;
+    if (!shouldRun || authBlocked || retryTimer) return;
     connected = false;
+    if (Runtime) Runtime.noteSseClosed();
     if (error) emit('error', error);
     const delay = retryDelay;
     retryDelay = Math.min(30000, Math.round(retryDelay * 1.8));
@@ -96,31 +95,56 @@
     }, delay);
   }
 
+  function blockForAuth(error) {
+    authBlocked = true;
+    shouldRun = false;
+    connected = false;
+    if (Runtime) {
+      Runtime.noteSseClosed();
+      Runtime.noteAuthError(error);
+    }
+    emit('error', error);
+  }
+
   async function connectLoop() {
-    if (!shouldRun || controller) return;
+    if (!shouldRun || authBlocked || controller) return;
     controller = new AbortController();
     const localController = controller;
     try {
+      if (!Runtime) throw new Error('Runtime 模块未加载');
+      Runtime.assertPrivateReady();
       const headers = { 'Accept': 'text/event-stream' };
-      if (global.API && typeof global.API.privateHeaders === 'function') {
-        Object.assign(headers, global.API.privateHeaders());
-      }
-      const response = await fetch('/api/stream', {
-        method: 'GET',
-        cache: 'no-store',
-        headers: headers,
-        signal: localController.signal
-      });
+      Object.assign(headers, Runtime.privateHeaders());
+      const response = await global.fetch(
+        Runtime.sseUrl(),
+        Runtime.secureFetchOptions({
+          method: 'GET',
+          headers: headers,
+          signal: localController.signal
+        })
+      );
       if (!response.ok) {
         const error = new Error('SSE HTTP ' + response.status);
         error.status = response.status;
+        error.code = response.status === 401 ? 'PRIVATE_API_AUTH_REQUIRED' :
+          (response.status === 403 ? 'PRIVATE_API_AUTH_FAILED' : 'SSE_HTTP_' + response.status);
+        if (response.status === 401 || response.status === 403) {
+          blockForAuth(error);
+          return;
+        }
         throw error;
       }
       if (!response.body || typeof response.body.getReader !== 'function') {
-        throw new Error('浏览器不支持 fetch streaming');
+        const unsupported = new Error('浏览器不支持 fetch streaming');
+        unsupported.code = 'SSE_STREAM_UNSUPPORTED';
+        throw unsupported;
       }
       connected = true;
       retryDelay = 1000;
+      if (Runtime) {
+        Runtime.noteAuthSuccess();
+        Runtime.noteSseOpen();
+      }
       emit('open');
       const reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8');
@@ -133,16 +157,29 @@
       parser.push(decoder.decode());
       parser.finish();
     } catch (error) {
-      if (!error || error.name !== 'AbortError') scheduleReconnect(error);
+      if (!error || error.name !== 'AbortError') {
+        if (error && (error.code === 'PRIVATE_API_AUTH_REQUIRED' ||
+            error.code === 'PRIVATE_API_AUTH_FAILED')) {
+          blockForAuth(error);
+        } else if (error && ((Runtime && Runtime.isHardFailure(error.code)) ||
+            error.code === 'RUNTIME_HANDSHAKE_REQUIRED')) {
+          shouldRun = false;
+          emit('error', error);
+        } else {
+          scheduleReconnect(error);
+        }
+      }
     } finally {
       if (controller === localController) controller = null;
       connected = false;
-      if (shouldRun && !retryTimer) scheduleReconnect();
+      if (Runtime) Runtime.noteSseClosed();
+      if (shouldRun && !authBlocked && !retryTimer) scheduleReconnect();
     }
   }
 
   function connect() {
-    if (shouldRun) return;
+    if (shouldRun && !authBlocked) return;
+    authBlocked = false;
     shouldRun = true;
     connectLoop();
   }
@@ -162,6 +199,8 @@
   function close() {
     shouldRun = false;
     connected = false;
+    authBlocked = false;
+    if (Runtime) Runtime.noteSseClosed();
     if (retryTimer) {
       clearTimeout(retryTimer);
       retryTimer = null;
@@ -175,14 +214,16 @@
   function reconnect() {
     close();
     retryDelay = 1000;
+    authBlocked = false;
     shouldRun = true;
     connectLoop();
   }
 
-  global.SSE = {
+  global.SSE = Object.freeze({
     subscribe: subscribe,
     close: close,
     reconnect: reconnect,
-    isConnected: function () { return connected; }
-  };
+    isConnected: function () { return connected; },
+    isAuthBlocked: function () { return authBlocked; }
+  });
 })(window);

@@ -2,7 +2,7 @@
 
 > 决策日期：2026-08-24
 >
-> 状态：Design Freeze；Hybrid H0 工程实现与本地远程式验收已通过，真实 Tailscale/两设备 operational 验收待执行；H1–H5 待实现
+> 状态：Design Freeze；Hybrid H0 工程实现与本地远程式验收已通过，真实 Tailscale/两设备 operational 验收待执行；H1/H2 工程实现、同源回归与本地跨 Origin 浏览器验收已通过；H3–H5 待实现
 >
 > 适用范围：个人使用为主，后续最多向少量朋友开放
 >
@@ -642,23 +642,28 @@ TWO_DISTINCT_TAILNET_DEVICES = PENDING
 
 ### Hybrid H1：前端 API Base 解耦
 
+状态：`ENGINEERING_IMPLEMENTED_VERIFIED`。本地同源兼容与 `127.0.0.1 → localhost` 双 Origin 浏览器验收均已通过；真实云静态站点 Origin 注入留给 H4。
+
 - 新增无密钥 Runtime Config；
 - 固定 `allowedApiOrigins` 与 `expectedEngineId`；
-- REST、SSE 和 Health 使用统一 URL Builder；
-- Bearer Token 按 API Origin 分区，Origin 改变时清除；
-- 生产模式禁止任意 API Origin Override；
+- REST、SSE 和 Health 使用统一 URL Builder，并拒绝 query、fragment、反斜杠及 dot-segment 越界；
+- Bearer Token 按 API Origin 分区，Origin 改变时清除；旧全局 session key 也会移除；
+- 生产模式禁止任意 API Origin Override；HTTP 仅允许 loopback，远程 API Origin 必须 HTTPS；
 - 保留 same-origin 兼容；
 - UI 显示当前 API Host、Engine ID 和 Commit；
-- 加入 API Major / Engine / Commit 版本握手。
+- 加入 API Major / Engine / Commit 版本握手；Major、Engine、Build mismatch 均为硬阻断并清除当前 Origin 的访问值。
 
 ### Hybrid H2：后端 CORS 与 Runtime Health
+
+状态：`ENGINEERING_IMPLEMENTED_VERIFIED`。Exact CORS、OPTIONS、Bearer CRUD、SSE、metadata-only Health、动态 STALE 与非法 Health hard block 已通过单测和真实浏览器双 Origin 验收。
 
 - 精确 Origin Allowlist；
 - OPTIONS；
 - Authorization Header；
-- `/api/runtime/health`；
-- 错误状态区分；
-- CORS、安全和回归测试。
+- `/api/runtime/health`，动态重算数据 freshness，Provider/Scheduler/DB 缺口诚实降级；
+- 错误状态区分，并对非法 Health 字段、枚举、时间戳、Provider 计数执行 `RUNTIME_HEALTH_INVALID` 硬阻断；
+- CORS、安全和回归测试；
+- 未通过私有数据加载前不启动 SSE，SSE 401/403 停止热重试。
 
 ### Hybrid H3：Tailscale Serve Target Lane 与运行加固
 

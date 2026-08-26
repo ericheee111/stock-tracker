@@ -267,3 +267,42 @@ Status: `COMPLETED`
 - Python bytecode is already covered by `__pycache__/` and `*.pyc`. Five historical `.pyc` files are still tracked by Git; the currently modified `stock_tracker/quant/data/__pycache__/__init__.cpython-314.pyc` must not be pushed. CodexPro blocked `git rm --cached` as a high-risk operation, so this session does not bypass the guard or delete local cache files.
 - After the hygiene commit, generated build/ZIP/screenshot artifacts are correctly hidden from status; after this handoff-only completion commit, the only expected dirty path is the legacy tracked `.pyc` noted above.
 - Hygiene/roadmap commit `2dca0fd809127678c4767bf723eff44a498ea2fc` (`chore: ignore local generated artifacts`) was pushed to `origin/main`; local `HEAD`, local `origin/main`, and remote `refs/heads/main` were verified equal at that SHA before this handoff-only completion update.
+
+## 18. Task L — Hybrid H1/H2 design freeze
+
+Status: `COMPLETED`
+
+- Revalidated the canonical H1/H2 contracts in `docs/HYBRID-DEPLOYMENT-ARCHITECTURE-v1.md` and froze the implementation plan in `docs/STAGE1.5-HYBRID-H1-H2-DESIGN-PLAN.md`.
+- H1 scope is limited to no-secret Runtime Config, one REST/SSE/Health URL Builder, normalized allowed API origins, origin-scoped session access, API Major/Engine/Commit handshake, and explicit runtime-state presentation.
+- H2 scope is limited to exact CORS allowlisting, strict OPTIONS preflight, cross-origin Authorization support, public metadata-only `/api/runtime/health`, SSE CORS, and security/regression gates.
+- The design requires private requests to omit credentials and referrers and to reject redirects; browser cookies or private headers must not follow an unexpected redirect.
+- Hard runtime/config/version/engine/network/tunnel/CORS failures must clear current private decision state so stale `EXECUTABLE` actions are not left on screen.
+- H3/H4/H5, real Tailnet operational acceptance, cloud static deployment, Quant and trading semantics remain outside this slice.
+- The tracked Python cache modification remains isolated and must not enter H1/H2 commits.
+
+## 19. Task M — Hybrid H1/H2 implementation
+
+Status: `COMPLETED`
+
+- Implemented strict no-secret Runtime Config, one REST/SSE/Health URL layer, origin-scoped `sessionStorage` access, exact API Major/Engine/Build handshake, explicit Runtime UI states and fail-closed stale/hard-failure behavior.
+- Implemented strict backend Runtime config, exact CORS/OPTIONS, metadata-only `/api/runtime/health`, SSE CORS and scheduler/provider/database health metadata without upstream Provider calls.
+- Remote HTTP origins are rejected; loopback HTTP remains available for local recovery and dual-origin acceptance. Private fetch security options are pinned after caller options are merged.
+- Runtime Health recomputes quote freshness at request time and normalizes naive source timestamps by market timezone, preventing old A/HK/US local timestamps from being treated as fresh UTC data.
+- Added temporary-SQLite real-browser acceptance for cross-origin REST, Portfolio CRUD, fetch-stream SSE, Origin token cleanup, invalid config/health, API/Build mismatch and STALE decision blocking.
+
+## 20. Task N — Hybrid H1/H2 adversarial review
+
+Status: `COMPLETED`
+
+- Review report: `docs/STAGE1.5-HYBRID-H1-H2-INDEPENDENT-REVIEW.md`.
+- Resolved all blocking findings: remote HTTP, overridable secure fetch options, soft Build mismatch, weak Health validation, stale stored LIVE state, market-local time misinterpretation, orphan/legacy tokens, unbounded health probes, SSE auth hot retry, malformed Host same-origin handling and missing Provider degradation.
+- Final engineering verdict is `ENGINEERING_READY_FOR_MERGE`; real Tailscale, two Tailnet devices, H3 recovery and H4 Pages deployment remain explicit operational gates.
+- Latest verified gates before Git staging: H1/H2 Python 14/14; browser main 28/28 plus 11/11 negative scenarios; runtime unittest 394/1; Quant 560 + 244 subtests; Mock Today 17/17; real Today 17/17; Portfolio 13/13; production database SHA unchanged.
+- Full-repository Ruff still reports pre-existing unrelated lint debt; only H1/H2 new/related surfaces are claimed as passing targeted Ruff. `ruff format --check` is not claimed.
+
+## 21. Task O — Hybrid H1/H2 GitHub delivery
+
+Status: `IN_PROGRESS`
+
+- Pending final staged-file review, staged-tree gates, commit, push, remote SHA equality verification and this handoff's final delivery SHA update.
+- The tracked Python cache modification must remain outside all H1/H2 commits.

@@ -52,6 +52,19 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const shots = path.join(ROOT, 'qa', 'shots');
   fs.mkdirSync(shots, { recursive: true });
+  await page.route('**/api/runtime/health', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      schema_version: 'hybrid-runtime-v1', status: 'ONLINE',
+      engine_id: 'stock-tracker-local', engine_version: '1.1.0', commit_id: 'development',
+      deployment_mode: 'HYBRID_PRIVATE', started_at: '2026-08-14T09:00:00+08:00',
+      last_heartbeat_at: '2026-08-14T09:45:00+08:00', last_collection_at: '2026-08-14T09:45:00+08:00',
+      data_as_of: '2026-08-14T09:45:00+08:00', data_status: 'LIVE', scheduler_state: 'RUNNING',
+      provider_summary: { total: 1, healthy: 1, degraded: 0, open: 0 },
+      database_state: 'READY', sse_available: true, api_major: 1
+    })
+  }));
   await page.route('**/api/brief/today', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: fixtureJson }));
 

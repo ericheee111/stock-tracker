@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="css/today.css" />
   <link rel="stylesheet" href="css/portfolio.css" />
   <link rel="stylesheet" href="css/terminal.css" />
+  <link rel="stylesheet" href="css/runtime.css" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2377a7ff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 18V7M9 18V11M14 18V5M19 18V9M3 20h18M5 9l4 2 5-5 5 3'/%3E%3C/svg%3E" />
 </head>
 <body>
@@ -35,6 +36,9 @@
     </div>
     <div id="banner" class="banner" aria-live="polite">
       <div class="banner-loading">正在连接后端，加载真实行情…</div>
+    </div>
+    <div id="runtimeStatus" class="runtime-status offline" aria-live="polite">
+      <span class="runtime-status-label">Engine 握手中</span>
     </div>
   </header>
 
@@ -133,6 +137,8 @@
   <div class="sheet-mask" id="sheetMask" hidden><div class="sheet" id="sheet"></div></div>
   <div class="toast" id="toast" hidden></div>
 
+  <script src="runtime-config.js"></script>
+  <script src="js/runtime.js"></script>
   <script src="js/format.js"></script>
   <script src="js/api.js"></script>
   <script src="js/sse.js"></script>

@@ -52,6 +52,8 @@ class AppContext:
     signal_manager: Any         # SignalManager
     sse_hub: SSEHub
     web_root: str = "web"
+    started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    scheduler: Any = None
 
 
 class APIError(ValueError):

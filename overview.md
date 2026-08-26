@@ -262,11 +262,11 @@ python scripts/run_stage1_today_integration.py
 
 ## 8. 当前下一步
 
-Stage 2B—6A 的后端工程合同已经形成。考虑到纯云持续运行、持久化和 A 股数据源可达性的不确定性，接下来先形成可安全使用的混合部署基线，再继续补真实研究证据：
+Stage 2B—6A 的后端工程合同已经形成。Hybrid H1/H2 已完成 Runtime Config、统一 URL Builder、Origin-scoped Token、exact CORS/OPTIONS、Runtime Health、版本握手与离线/认证/STALE 状态分离；接下来进入 H3/H4 operational 与云静态部署，再继续补真实研究证据：
 
 1. **补齐 Hybrid H0 operational 验收：在安装并登录 Tailscale 的服务端启用 Serve，并从第二台独立 Tailnet 设备验证静态页、REST、SSE 和临时 Portfolio CRUD；工程实现与本地远程式验收已经完成；**
-2. **Hybrid H1：前端新增无密钥 Runtime Config、固定 Allowed API Origin/Engine ID、统一 URL Builder，并按 API Origin 分区私有 Token；**
-3. **Hybrid H2：实现精确 CORS Allowlist、`OPTIONS`、`GET /api/runtime/health`、版本握手和离线/认证错误状态；**
+2. **Hybrid H1（已完成）：无密钥 Runtime Config、固定 Allowed API Origin/Engine ID、统一 URL Builder、Origin-scoped Token 与 Major/Engine/Build hard block；**
+3. **Hybrid H2（已完成）：exact CORS/OPTIONS、Authorization、metadata-only Runtime Health、非法 Health hard block、动态 STALE 与 SSE 无热重试；**
 4. **Hybrid H3/H4：加固 Tailscale Serve Target Lane、开机自启和恢复，并将静态网页部署到 Cloudflare Pages（GitHub Pages 备选）；**
 5. **Hybrid H5：可信朋友优先加入 Tailnet；只有确需公开时才试用 Tailscale Funnel 或自有域名 + Cloudflare Tunnel；**
 6. **Stage 3C.2：固定真实 free-stockdb Release，审计二进制、首次运行网络、同步源、manifest 和数据许可；**

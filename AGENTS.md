@@ -578,9 +578,9 @@ python -m stock_tracker --once
 2. Stage 1 核心：Today Action 决策合同、Portfolio 后端、真实 Brief API 与首页（已完成）；
 3. Stage 1.1：Portfolio 设置/持仓编辑 UI 与真实 REST CRUD 验收（已完成）；
 4. Stage 1.5 / Hybrid H0：Backend 显式 loopback + Tailscale Serve 整站同源 Bootstrap（工程实现与本地远程式验收已完成；真实 Serve/两设备 operational 验收待补）；
-5. Stage 1.5 / Hybrid H1：前端 Runtime Config、Allowed API Origin/Engine ID、统一 URL Builder 与 Origin-scoped Token（当前下一步）；
-6. Stage 1.5 / Hybrid H2：精确 CORS、`OPTIONS`、Runtime Health、版本握手与离线状态；
-7. Stage 1.5 / Hybrid H3/H4：Tailscale Serve Target Lane、开机自启及 Cloudflare Pages/GitHub Pages 静态部署；
+5. Stage 1.5 / Hybrid H1：前端 Runtime Config、Allowed API Origin/Engine ID、统一 URL Builder 与 Origin-scoped Token（已完成并通过本地双 Origin 浏览器验收）；
+6. Stage 1.5 / Hybrid H2：精确 CORS、`OPTIONS`、Runtime Health、版本握手、非法 Health hard block 与离线状态（已完成并通过同源回归）；
+7. Stage 1.5 / Hybrid H3/H4：Tailscale Serve Target Lane、开机自启及 Cloudflare Pages/GitHub Pages 静态部署（当前下一步）；
 8. Stage 2：A 股数据与决策质量；
 9. Stage 3A/3B：Event Intelligence + Big Trend v1；
 10. Stage 3C.1：可选本地行情 Sidecar 隔离合同，默认关闭；

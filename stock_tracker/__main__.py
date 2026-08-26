@@ -131,6 +131,7 @@ def build_context(args) -> tuple:
 
     scheduler = Scheduler(bundle, store, repo, router, feature_engine,
                           signal_manager, gate, logger)
+    ctx.scheduler = scheduler
     api_server = APIServer(
         bundle.app.server.host,
         bundle.app.server.port,

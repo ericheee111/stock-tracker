@@ -16,7 +16,6 @@ from stock_tracker.core.store import MarketStore
 from stock_tracker.storage.db import close_all
 from stock_tracker.storage.repository import Repository
 
-
 _STRONG_ACCESS = "stage1-private-access-value-0123456789abcdef"
 
 
@@ -28,7 +27,7 @@ class TestPrivateAPIHTTP(unittest.TestCase):
             bundle=load_configs("config"),
             store=MarketStore(),
             repo=Repository(os.path.join(cls.tmp.name, "private-http.db")),
-            router=SimpleNamespace(health_list=lambda: []),
+            router=SimpleNamespace(health_list=list),
             signal_manager=None,
             sse_hub=SimpleNamespace(),
             web_root=cls.tmp.name,
@@ -149,9 +148,14 @@ class TestPrivateAPIHTTP(unittest.TestCase):
                         host=f"127.0.0.1:{self.port}",
                         **case,
                     )
+                    expected = (
+                        (403, "CORS_ORIGIN_DENIED")
+                        if "origin" in case
+                        else (503, "PRIVATE_API_DISABLED")
+                    )
                     self.assertEqual(
                         (status, body["error"]["code"]),
-                        (503, "PRIVATE_API_DISABLED"),
+                        expected,
                     )
 
     def test_direct_same_origin_loopback_remains_available(self) -> None:

@@ -9,6 +9,7 @@
 
   const F = window.Fmt;
   const UI = window.UI;
+  const Runtime = window.Runtime;
   const API = window.API;
   const SSE = window.SSE;
 
@@ -16,6 +17,7 @@
 
   const state = {
     market: 'A',
+    runtime: null,
     meta: null,
     brief: null,
     portfolio: null,
@@ -39,6 +41,11 @@
   let toastTimer = null;
   let toastHideTimer = null;
   let todayRefreshTimer = null;
+  let healthPollTimer = null;
+  let runtimeReloading = false;
+  let runtimeClosingSse = false;
+  let sseSubscribed = false;
+  let dataLoadPromise = null;
   function hideToast() {
     const t = $('#toast');
     if (!t) return;
@@ -58,6 +65,169 @@
     t.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(hideToast, 1400);
+  }
+
+  /* ---------------- Hybrid H1/H2 Runtime 状态 ---------------- */
+  const RUNTIME_LABELS = {
+    ONLINE: 'Engine online',
+    DEGRADED: 'Engine degraded',
+    STALE: 'Data stale',
+    ENGINE_OFFLINE: 'Engine offline',
+    NETWORK_OFFLINE: 'Network offline',
+    AUTH_REQUIRED: 'Access required',
+    AUTH_FAILED: 'Access rejected',
+    CORS_BLOCKED: 'CORS blocked',
+    API_VERSION_MISMATCH: 'API mismatch',
+    ENGINE_ID_MISMATCH: 'Engine mismatch',
+    BUILD_MISMATCH: 'Build mismatch',
+    TUNNEL_UNAVAILABLE: 'Tunnel unavailable',
+    RUNTIME_CONFIG_ERROR: 'Runtime config error',
+    RUNTIME_HEALTH_INVALID: 'Runtime health invalid'
+  };
+
+  function effectiveRuntimeStatus(snapshot) {
+    const current = snapshot || state.runtime || {};
+    if (Runtime && (Runtime.isHardFailure(current.status) || current.status === 'STALE')) {
+      return current.status;
+    }
+    return current.authState || current.status || 'ENGINE_OFFLINE';
+  }
+
+  function renderRuntimeStatus() {
+    const el = $('#runtimeStatus');
+    if (!el) return;
+    const snapshot = state.runtime || (Runtime ? Runtime.snapshot() : null) || {};
+    const status = effectiveRuntimeStatus(snapshot);
+    const health = snapshot.health || {};
+    let detail = snapshot.detail || '';
+    if (status === 'AUTH_REQUIRED') detail = '当前 API Origin 需要会话访问值';
+    if (status === 'AUTH_FAILED') detail = '当前 API Origin 的会话访问值未通过验证';
+    const bits = [];
+    if (snapshot.apiOrigin) bits.push('API ' + snapshot.apiOrigin);
+    if (health.engine_id) bits.push('Engine ' + health.engine_id);
+    if (health.api_major != null) bits.push('API v' + health.api_major);
+    if (health.commit_id) bits.push('Backend ' + health.commit_id);
+    if (snapshot.frontendBuild) bits.push('Frontend ' + snapshot.frontendBuild);
+    if (health.data_as_of) bits.push('Data ' + health.data_as_of);
+    if (snapshot.sseConnected) bits.push('SSE online');
+    el.className = 'runtime-status runtime-' + status.toLowerCase().replace(/_/g, '-');
+    el.dataset.runtimeState = status;
+    el.innerHTML = '<span class="runtime-status-dot"></span>' +
+      '<span class="runtime-status-label">' + F.esc(RUNTIME_LABELS[status] || status) + '</span>' +
+      '<span class="runtime-status-detail">' + F.esc(detail) + '</span>' +
+      (bits.length ? '<span class="runtime-status-meta">' + F.esc(bits.join(' · ')) + '</span>' : '');
+  }
+
+  function clearDecisionData() {
+    state.meta = null;
+    state.brief = null;
+    state.overview = null;
+    state.watchlist = [];
+    state.positions = [];
+    state.radar = [];
+    state.loaded.overview = false;
+    state.loaded.watchlist = false;
+    state.loaded.positions = false;
+    state.loaded.radar = false;
+  }
+
+  function clearRuntimeData(error) {
+    state.meta = null;
+    state.brief = null;
+    state.portfolio = null;
+    state.privateError = error || null;
+    state.overview = null;
+    state.markets = [];
+    state.watchlist = [];
+    state.positions = [];
+    state.radar = [];
+    state.sectors = [];
+    state.providers = [];
+    state.config = {};
+    Object.keys(state.loaded).forEach(function (key) { state.loaded[key] = false; });
+  }
+
+  function renderAllRuntimeViews() {
+    renderRuntimeStatus();
+    renderBanner();
+    renderToday();
+    renderOverview();
+    renderWatch();
+    renderRadar();
+    renderHolding();
+  }
+
+  function handleRuntimeSnapshot(snapshot) {
+    state.runtime = snapshot;
+    renderRuntimeStatus();
+    if (!Runtime) return;
+    if (snapshot.status === 'STALE') {
+      clearDecisionData();
+      renderToday();
+      renderOverview();
+      renderWatch();
+      renderRadar();
+      return;
+    }
+    if (!Runtime.isHardFailure(snapshot.status)) return;
+    const error = {
+      code: snapshot.status,
+      message: snapshot.detail || '本地决策引擎当前不可用'
+    };
+    clearRuntimeData(error);
+    if (sseSubscribed && !runtimeClosingSse && SSE && typeof SSE.close === 'function') {
+      runtimeClosingSse = true;
+      try { SSE.close(); } finally { runtimeClosingSse = false; }
+    }
+    renderAllRuntimeViews();
+  }
+
+  async function ensureRuntimeHealth() {
+    if (!Runtime) return false;
+    try {
+      await Runtime.refreshHealth();
+      return true;
+    } catch (error) {
+      try {
+        await Runtime.classifyHealthFailure(error);
+      } catch (classificationError) {
+        console.error('[runtime] health classification failed', classificationError);
+      }
+      return false;
+    }
+  }
+
+  function ensureSSEConnection() {
+    if (!SSE) return;
+    if (!sseSubscribed) {
+      subscribeSSE();
+      sseSubscribed = true;
+    } else if (typeof SSE.reconnect === 'function') {
+      SSE.reconnect();
+    }
+  }
+
+  function scheduleHealthPoll() {
+    clearTimeout(healthPollTimer);
+    if (!Runtime) return;
+    let delay = 15000;
+    try { delay = Runtime.config().healthPollMs; } catch (error) { return; }
+    healthPollTimer = setTimeout(async function () {
+      healthPollTimer = null;
+      const before = state.runtime || Runtime.snapshot();
+      const wasBlocked = Runtime.isHardFailure(before.status) || before.status === 'STALE';
+      const healthy = await ensureRuntimeHealth();
+      if (healthy && wasBlocked && !runtimeReloading) {
+        runtimeReloading = true;
+        try {
+          const dataReady = await loadInitial();
+          if (dataReady) ensureSSEConnection();
+        } finally {
+          runtimeReloading = false;
+        }
+      }
+      scheduleHealthPoll();
+    }, delay);
   }
 
   /* ---------------- 路由 ---------------- */
@@ -133,7 +303,50 @@
   function ok(r) { return r && r.status === 'fulfilled' ? r.value : null; }
   function failure(r) { return r && r.status === 'rejected' ? r.reason : null; }
 
+  function clearPrivateDecisionState(error) {
+    state.brief = null;
+    state.portfolio = null;
+    state.privateError = error || null;
+    state.overview = null;
+    state.watchlist = [];
+    state.positions = [];
+    state.radar = [];
+    state.config = {};
+    state.meta = null;
+  }
+
+  async function refreshRuntimeHealth() {
+    return ensureRuntimeHealth();
+  }
+
+  function applyPrivateFailure(error) {
+    if (!error || !Runtime) return false;
+    state.privateError = error;
+    const code = error.code || '';
+    if (error.status === 401 || error.status === 403 ||
+        code === 'PRIVATE_API_AUTH_REQUIRED' || code === 'PRIVATE_API_DISABLED' ||
+        code === 'PRIVATE_API_MISCONFIGURED') {
+      Runtime.noteAuthError(error);
+      return true;
+    }
+    return false;
+  }
+
   async function loadInitial() {
+    if (!Runtime) {
+      clearRuntimeData({ code: 'RUNTIME_MISSING', message: 'Runtime 模块未加载' });
+      renderAllRuntimeViews();
+      return false;
+    }
+    const ready = await refreshRuntimeHealth();
+    if (!ready) {
+      renderAllRuntimeViews();
+      return false;
+    }
+    return loadDataOnce();
+  }
+
+  async function loadApplicationData() {
     const results = await Promise.allSettled([
       API.getBriefToday(), API.getPortfolio(), API.getOverview(), API.getMarkets(),
       API.getWatchlist(), API.getPositions(), API.getRadar(), API.getSectors(),
@@ -142,7 +355,8 @@
     state.brief = ok(results[0]);
     state.portfolio = ok(results[1]);
     state.privateError = failure(results[1]) || failure(results[0]) ||
-      failure(results[4]) || failure(results[5]);
+      failure(results[2]) || failure(results[4]) || failure(results[5]) ||
+      failure(results[6]) || failure(results[9]);
     state.overview = ok(results[2]);
     state.markets = ok(results[3]) || [];
     state.watchlist = ok(results[4]) || [];
@@ -154,6 +368,10 @@
 
     if (state.overview) state.meta = state.overview.meta || null;
 
+    if (state.privateError) {
+      applyPrivateFailure(state.privateError);
+    }
+
     // 横幅：真实/降级/演示/失败 可见
     renderBanner();
     renderHolding();
@@ -161,14 +379,52 @@
       const banner = $('#banner');
       banner.className = 'banner error';
       banner.innerHTML = '<span class="banner-dot"></span><span class="banner-mode">连接后端失败</span>' +
-        '<span class="banner-text">未能从 /api/* 取到数据。请确认后端已启动（scripts/start.bat），并从前端的同源 http://localhost:8080/ 访问本页。</span>';
+        '<span class="banner-text">未能从配置的 API Origin 取得市场数据；请检查 Engine、私有通道、CORS 与认证状态。</span>';
     }
 
     // 渲染全部页面（切换 tab 即时显示）
+    renderRuntimeStatus();
     renderToday();
     renderOverview();
     renderWatch();
     renderRadar();
+    return !state.privateError;
+  }
+
+  function loadDataOnce() {
+    if (dataLoadPromise) return dataLoadPromise;
+    dataLoadPromise = loadApplicationData().finally(function () { dataLoadPromise = null; });
+    return dataLoadPromise;
+  }
+
+  function scheduleRuntimeHealthPoll() {
+    scheduleHealthPoll();
+  }
+
+  async function recoverRuntime() {
+    const before = state.runtime || (Runtime ? Runtime.snapshot() : null) || {};
+    const ready = await refreshRuntimeHealth();
+    if (ready) {
+      let dataReady = !state.privateError;
+      if (Runtime.isHardFailure(before.status) || before.status === 'STALE' || !dataReady) {
+        dataReady = await loadDataOnce();
+      }
+      if (dataReady) ensureSSEConnection();
+    } else {
+      renderAllRuntimeViews();
+    }
+  }
+
+  function initRuntimeMonitoring() {
+    if (!Runtime) return;
+    state.runtime = Runtime.snapshot();
+    Runtime.onChange(handleRuntimeSnapshot);
+    renderRuntimeStatus();
+    window.addEventListener('offline', function () {
+      Runtime.classifyHealthFailure({ code: 'NETWORK_OFFLINE' }).catch(function () {});
+    });
+    window.addEventListener('online', function () { recoverRuntime(); });
+    scheduleRuntimeHealthPoll();
   }
 
   /* ---------------- 渲染：⓪ 今日作战简报（Stage 1 Lane D） ---------------- */
@@ -462,6 +718,7 @@
     state.privateError = failure(results[0]) || failure(results[1]) ||
       failure(results[2]) || failure(results[3]) || failure(results[4]) ||
       failure(results[5]) || failure(results[6]);
+    if (state.privateError) applyPrivateFailure(state.privateError);
     state.portfolioBusy = false;
     renderBanner();
     renderOverview();
@@ -469,6 +726,7 @@
     renderToday();
     renderWatch();
     renderHolding();
+    renderRuntimeStatus();
     if (reopenSheet) openPortfolioSheet();
     return !state.privateError;
   }
@@ -496,15 +754,15 @@
 
   async function submitPrivateAccess(form) {
     const field = form.elements.namedItem('private_access');
-    const value = field ? String(field.value || '').trim() : '';
+    const value = field ? String(field.value || '') : '';
     if (!value) {
       toast('请输入当前会话私有访问值');
       return;
     }
     try {
       API.setPrivateAccess(value);
-      if (SSE && typeof SSE.reconnect === 'function') SSE.reconnect();
       const connected = await refreshPrivateData(true);
+      if (connected && SSE && typeof SSE.reconnect === 'function') SSE.reconnect();
       toast(connected ? '私有接口已连接' : '私有访问值未通过验证');
     } catch (error) {
       toast(portfolioErrorMessage(error));
@@ -532,11 +790,11 @@
       try {
         state.brief = await API.getBriefToday();
         state.privateError = null;
+        renderRuntimeStatus();
         renderToday();
       } catch (error) {
         state.privateError = error;
-        if (error && (error.code === 'PRIVATE_API_AUTH_REQUIRED' ||
-            error.code === 'PRIVATE_API_DISABLED')) {
+        if (applyPrivateFailure(error)) {
           state.brief = null;
           state.portfolio = null;
           state.positions = [];
@@ -546,6 +804,7 @@
           state.config = {};
           state.meta = null;
         }
+        renderRuntimeStatus();
         renderToday();
       }
     }, delayMs || 400);
@@ -608,7 +867,17 @@
         renderBanner();
       },
       open: function () { /* 连接建立，可选提示 */ },
-      error: function () { /* EventSource 自动重连；此处不抛异常 */ }
+      error: function (error) {
+        if (error && (error.status === 401 || error.status === 403 ||
+            error.code === 'PRIVATE_API_AUTH_REQUIRED' ||
+            error.code === 'PRIVATE_API_AUTH_FAILED')) {
+          Runtime.noteAuthError(error);
+          clearPrivateDecisionState(error);
+          renderAllRuntimeViews();
+          return;
+        }
+        refreshRuntimeHealth();
+      }
     });
   }
 
@@ -632,7 +901,10 @@
       const clearAccess = e.target.closest('[data-private-access-clear]');
       if (clearAccess) {
         API.clearPrivateAccess();
-        if (SSE && typeof SSE.reconnect === 'function') SSE.reconnect();
+        if (SSE && typeof SSE.close === 'function') {
+          SSE.close();
+          sseSubscribed = false;
+        }
         state.portfolio = null;
         state.brief = null;
         state.overview = null;
@@ -642,6 +914,7 @@
         state.positions = [];
         state.watchlist = [];
         refreshPrivateData(true).then(function (connected) {
+          if (connected) ensureSSEConnection();
           toast(connected ? '已清除会话访问值，本机私有接口仍可用' : '已清除当前会话访问值');
         });
         return;
@@ -767,6 +1040,7 @@
     initRipple();
     initIndicators();
     bindEvents();
+    initRuntimeMonitoring();
     // 先渲染占位加载态，避免白屏
     const pp = $('#portfolioPanel'); if (pp) pp.innerHTML = UI.loadingBox('加载账户与持仓…');
     const tb = $('#todayBrief'); if (tb) tb.innerHTML = UI.loadingBox('加载今日作战简报…');
@@ -777,8 +1051,8 @@
     const pl = $('#positionList'); if (pl) pl.innerHTML = UI.loadingBox('加载持仓…');
     const rg = $('#radarGroups'); if (rg) rg.innerHTML = UI.loadingBox('加载机会雷达…');
 
-    loadInitial().then(function () {
-      subscribeSSE();
+    loadInitial().then(function (ready) {
+      if (ready) ensureSSEConnection();
     }).catch(function (e) {
       console.error('[app] 初始化失败', e);
       toast('初始化失败：' + e.message);

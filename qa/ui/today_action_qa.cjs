@@ -154,6 +154,19 @@ const KNOWN_ACTIONS = ['当前可执行', '等回踩', '等突破', '继续持�
 
   // 默认使用 fixture；设置 TODAY_QA_BASE_URL 时直接验证真实后端。
   if (!EXTERNAL_BASE) {
+    await page.route('**/api/runtime/health', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        schema_version: 'hybrid-runtime-v1', status: 'ONLINE',
+        engine_id: 'stock-tracker-local', engine_version: '0.1.0', commit_id: 'development',
+        deployment_mode: 'HYBRID_PRIVATE', started_at: '2026-08-14T09:00:00+08:00',
+        last_heartbeat_at: '2026-08-14T09:45:00+08:00', last_collection_at: '2026-08-14T09:45:00+08:00',
+        data_as_of: '2026-08-14T09:45:00+08:00', data_status: 'LIVE', scheduler_state: 'RUNNING',
+        provider_summary: { count: 1, closed: 1, half_open: 0, open: 0 },
+        database_state: 'READY', sse_available: true, api_major: 1
+      })
+    }));
     await page.route('**/api/brief/today', route =>
       route.fulfill({ status: 200, contentType: 'application/json', body: fixtureJson }));
   }

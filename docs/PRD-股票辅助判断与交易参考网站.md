@@ -2042,7 +2042,7 @@ DATA_STALE
 
 ## Stage 1：Today Action MVP
 
-Stage 1 核心决策链已实现；Portfolio 设置/持仓编辑 UI 仍可与 Stage 1.5 并行补齐。Hybrid H0 工程实现与本地远程式验收已通过，真实 Tailscale/两设备 operational 验收待执行；当前下一代码切片是 H1/H2。
+Stage 1 核心决策链与 Portfolio 设置/持仓编辑 UI 已实现。Hybrid H0 工程实现与本地远程式验收已通过，真实 Tailscale/两设备 operational 验收待执行；Hybrid H1/H2 的 Runtime Config、统一 URL Builder、Origin-scoped Token、exact CORS/OPTIONS、Runtime Health 与状态机已实现并通过同源回归及本地双 Origin 浏览器验收；当前下一代码切片是 H3/H4。
 
 ### 必须实现
 
