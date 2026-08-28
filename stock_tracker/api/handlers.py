@@ -7,21 +7,14 @@ MarketStore + Repository，绝不调用上游 Provider。
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-import math
-from typing import Any, Optional
+from typing import Any
 
 from ..core import types as T
 from ..core.config import ConfigBundle
 from ..core.store import MarketStore
-from ..features import feature_snapshot as FS
-from ..storage.repository import (
-    Repository,
-    RepositoryConflictError,
-    RepositoryValidationError,
-    to_jsonable,
-)
 from ..decision.brief import build_decision_brief, sort_holding_actions
 from ..decision.runtime import (
     RuntimeDecisionRecord,
@@ -36,9 +29,16 @@ from ..decision.types import (
     RiskMode,
     UserPortfolioProfile,
 )
+from ..features import feature_snapshot as FS
+from ..signals.crowding import crowding_for
+from ..storage.repository import (
+    Repository,
+    RepositoryConflictError,
+    RepositoryValidationError,
+    to_jsonable,
+)
 from . import serializers as S
 from .sse import SSEHub
-from ..signals.crowding import crowding_for
 
 
 @dataclass
@@ -54,10 +54,12 @@ class AppContext:
     web_root: str = "web"
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     scheduler: Any = None
+    monitor_service: Any = None
+    monitor_subscription: Any = None
 
 
 class APIError(ValueError):
-    def __init__(self, status: int, code: str, message: str, field: Optional[str] = None) -> None:
+    def __init__(self, status: int, code: str, message: str, field: str | None = None) -> None:
         super().__init__(message)
         self.status = status
         self.code = code
@@ -88,11 +90,11 @@ _POSITION_PATCH_FIELDS = {"shares", "average_cost"}
 def _require_fields(payload: dict, allowed: set[str], required: set[str]) -> None:
     unknown = set(payload) - allowed
     if unknown:
-        field = sorted(unknown)[0]
+        field = min(unknown)
         raise APIError(400, "UNKNOWN_FIELD", f"unknown field: {field}", field)
     missing = required - set(payload)
     if missing:
-        field = sorted(missing)[0]
+        field = min(missing)
         raise APIError(400, "MISSING_FIELD", f"missing required field: {field}", field)
 
 
@@ -149,7 +151,7 @@ def _aware_datetime(payload: dict, field: str) -> datetime:
 # --------------------------------------------------------------------------- #
 # 内部工具
 # --------------------------------------------------------------------------- #
-def _best_signal_for(ctx: AppContext, symbol: str) -> Optional[dict]:
+def _best_signal_for(ctx: AppContext, symbol: str) -> dict | None:
     sigs = ctx.store.get_signals_by_symbol(symbol)
     if not sigs:
         return None
@@ -216,7 +218,7 @@ def _top_opportunities(ctx: AppContext, limit: int = 12) -> list[dict]:
     return out
 
 
-def get_quote_detail(ctx: AppContext, symbol: str) -> Optional[dict]:
+def get_quote_detail(ctx: AppContext, symbol: str) -> dict | None:
     """``/api/quote/{symbol}``：返回单标的详情（实时报价 + 展示指标 + 近期 K 线）。
 
     与 overview 的 indicators 同源（``build_indicators``，纯展示数值，不评分/不加权）。
@@ -252,12 +254,12 @@ def _market_cfg(ctx: AppContext, market: T.Market):
             "US": ctx.bundle.markets.us}[market.value]
 
 
-def _build_index(q: Optional[T.Quote], ctx: AppContext, mk: T.Market) -> dict:
+def _build_index(q: T.Quote | None, ctx: AppContext, mk: T.Market) -> dict:
     """构造单一代表性指数行情摘要；无有效行情时 last/change 为 null（前端渲染「—」）。"""
     last = q.last if (q is not None and q.last is not None and q.last > 0) else None
     prev = q.prev_close if (q is not None and q.prev_close is not None) else None
-    change: Optional[float] = None
-    change_pct: Optional[float] = None
+    change: float | None = None
+    change_pct: float | None = None
     if last is not None and prev is not None and prev > 0:
         change = round(last - prev, 4)
         change_pct = round((last - prev) / prev * 100.0, 4)
@@ -483,7 +485,7 @@ def _worst_data_status(statuses: list[T.DataStatus]) -> T.DataStatus:
     return max(statuses, key=lambda item: _STATUS_SEVERITY[item])
 
 
-def _effective_quote_status(ctx: AppContext, quote: Optional[T.Quote]) -> T.DataStatus:
+def _effective_quote_status(ctx: AppContext, quote: T.Quote | None) -> T.DataStatus:
     if quote is None:
         return T.DataStatus.UNKNOWN
     observed = (
@@ -525,7 +527,7 @@ def _position_reference_value(
 
 def _portfolio_decision_context(
     ctx: AppContext,
-    profile: Optional[UserPortfolioProfile],
+    profile: UserPortfolioProfile | None,
     positions: list[T.Position],
 ) -> tuple[float, dict[str, float], tuple[DecisionBlocker, ...]]:
     if profile is None:
@@ -577,7 +579,7 @@ def _portfolio_decision_context(
     return heat, exposures, blockers
 
 
-def _instrument_lot_size(ctx: AppContext, symbol: str, market: T.Market) -> Optional[int]:
+def _instrument_lot_size(ctx: AppContext, symbol: str, market: T.Market) -> int | None:
     if market is not T.Market.HK:
         return None
     meta = ctx.store.get_instrument(symbol) or {}
@@ -1029,7 +1031,7 @@ def get_radar(ctx: AppContext) -> dict:
     }
 
 
-def get_signal(ctx: AppContext, signal_id: str) -> Optional[dict]:
+def get_signal(ctx: AppContext, signal_id: str) -> dict | None:
     sig = ctx.store.get_signal(signal_id)
     if sig is None:
         return None
@@ -1140,7 +1142,7 @@ def get_sectors(ctx: AppContext) -> dict:
 # --------------------------------------------------------------------------- #
 # 写操作（POST，轻量）：自选管理 + S3 事件注入（#17.5 仅注入，不接实时北向）
 # --------------------------------------------------------------------------- #
-def post_watch_add(ctx: AppContext, symbol: str, market: Optional[str] = None) -> dict:
+def post_watch_add(ctx: AppContext, symbol: str, market: str | None = None) -> dict:
     from ..core import types as T
     mk = T.market_from_symbol(symbol) if market is None else T.Market(market.upper())
     item = T.WatchlistItem(symbol=symbol, market=mk)

@@ -8,14 +8,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from ..core import types as T
 from ..core.config import ConfigBundle
 from ..core.eventbus import get_bus
 from ..core.store import MarketStore
 from ..data_quality.gate import DataQualityGate
+from ..decision.action_mapper import map_signal_to_action
+from ..decision.types import DecisionContractError
 from ..features.engine import FeatureEngine
+from ..features.feature_snapshot import build_indicators
 from ..storage.repository import Repository, to_jsonable
 from ..strategies.base import SignalCandidate, Strategy
 from ..strategies.s1_breakout import S1Breakout
@@ -79,6 +80,129 @@ class SignalManager:
         # Phase1 近似：单股默认占用 10% 预算，封顶 1.0
         return min(1.0, len(positions) * self.bundle.risk.max_single_pct)
 
+    def _has_open_position(self, symbol: str) -> bool:
+        return any(
+            position.symbol == symbol and position.closed_at is None
+            for position in self.store.get_positions().values()
+        )
+
+    def _monitor_facts_payload(
+        self,
+        *,
+        signal: T.Signal,
+        quote: T.Quote,
+        bars: list[T.Bar],
+        regime: T.MarketRegime | None,
+        decision,
+        scores: T.ScoreSet,
+        dq: T.DataQuality,
+    ) -> dict:
+        """Build a metadata-only fact snapshot without mutating decision state."""
+
+        has_position = self._has_open_position(signal.symbol)
+        blocker_codes: list[str] = []
+        try:
+            action = map_signal_to_action(
+                signal,
+                has_position=has_position,
+                risk_allowed=decision.allowed,
+                current_price=quote.last,
+            )
+            action_state = action.action.value
+            blocker_codes.extend(blocker.code for blocker in action.blockers)
+        except DecisionContractError:
+            action_state = "NOT_AVAILABLE"
+            blocker_codes.append("MONITOR_ACTION_MAPPING_FAILED")
+        if not decision.allowed and "RISK_GATE_BLOCKED" not in blocker_codes:
+            blocker_codes.append("RISK_GATE_BLOCKED")
+
+        indicators = build_indicators(bars, quote.market)
+        change_pct = None
+        if (
+            type(quote.last) in (int, float)
+            and type(quote.prev_close) in (int, float)
+            and quote.prev_close > 0
+        ):
+            change_pct = (float(quote.last) / float(quote.prev_close) - 1.0) * 100.0
+        return {
+            "schema": "stock-tracker-monitor-facts-v1",
+            "symbol": signal.symbol,
+            "market": signal.market.value,
+            "strategy_id": signal.strategy_id,
+            "action_state": action_state,
+            "signal_state": signal.state.value,
+            "data_status": signal.data_status.value,
+            "data_quality": {
+                "status": dq.status.value,
+                "score": dq.score,
+            },
+            "blocker_codes": blocker_codes,
+            "market_regime": {
+                "state": regime.regime.value if regime is not None else "UNKNOWN",
+                "score": regime.market_score if regime is not None else 0.0,
+            },
+            "scores": {
+                "opportunity": scores.opportunity,
+                "timing": scores.timing,
+                "risk": scores.risk,
+                "confidence": scores.confidence,
+            },
+            "features": {
+                "rsi14": indicators.get("rsi14"),
+                "roc20": indicators.get("roc20"),
+                "roc60": indicators.get("roc60"),
+                "ann_vol": indicators.get("ann_vol"),
+                "volume_ratio": indicators.get("vol_ratio"),
+                "pos52w": indicators.get("pos52w"),
+                "amplitude": indicators.get("amplitude"),
+                "bar_count": indicators.get("bar_count", 0),
+            },
+            "market_event": {
+                "connection_state": "NOT_APPLICABLE",
+                "feed_mode": "RUNTIME_PROVIDER",
+                "latency_p50_ms": None,
+                "latency_p95_ms": None,
+                "duplicate_count": None,
+                "callback_gap_count": None,
+                "provider_gap_count": None,
+                "out_of_order_count": None,
+                "ingestion_lag_ms": None,
+                "last_price": quote.last,
+                "change_pct": change_pct,
+            },
+            "has_position": has_position,
+            "action_state_mutated": False,
+            "score_mutated": False,
+            "order_created": False,
+        }
+
+    def _publish_monitor_facts(
+        self,
+        *,
+        signal: T.Signal,
+        quote: T.Quote,
+        bars: list[T.Bar],
+        regime: T.MarketRegime | None,
+        decision,
+        scores: T.ScoreSet,
+        dq: T.DataQuality,
+    ) -> None:
+        """Keep optional Monitor telemetry from affecting the signal pipeline."""
+
+        try:
+            payload = self._monitor_facts_payload(
+                signal=signal,
+                quote=quote,
+                bars=bars,
+                regime=regime,
+                decision=decision,
+                scores=scores,
+                dq=dq,
+            )
+        except Exception:  # noqa: BLE001 - observational telemetry boundary
+            return
+        self._bus.publish("monitor_facts", payload)
+
     # ---- 单标的扫描 ----
     def scan_symbol(self, symbol: str, quote: T.Quote, bars: list[T.Bar],
                     regime: T.MarketRegime | None, sector: T.SectorSnapshot | None,
@@ -108,7 +232,7 @@ class SignalManager:
                 continue
             try:
                 c = strat.evaluate(ctx)
-            except Exception:
+            except Exception:  # noqa: BLE001, S112 - isolate one strategy failure
                 continue
             if c is not None:
                 candidates.append(c)
@@ -136,6 +260,15 @@ class SignalManager:
                     sig.signal_id, sig.previous_state.value if sig.previous_state else None,
                     sig.state.value, sig.state_changed_at, sig.reason, sig.what_changed)
             self._bus.publish("signal", to_jsonable(sig))
+            self._publish_monitor_facts(
+                signal=sig,
+                quote=quote,
+                bars=bars,
+                regime=regime,
+                decision=decision,
+                scores=scores,
+                dq=dq,
+            )
             produced.append(sig)
         return produced
 

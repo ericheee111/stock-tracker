@@ -1,0 +1,34 @@
+# XTP read-only quote sidecar control-plane configuration.
+# This file intentionally contains no account, password, server, port, API key,
+# sidecar bearer value, or algorithm-account setting. Secrets are environment-only.
+
+[xtp]
+enabled = false
+backend = "simulator"
+bind_host = "127.0.0.1"
+bind_port = 17991
+max_symbols = 20
+expected_api_version = "2.2.50.8"
+expected_python_series = "3.9"
+read_only = true
+allow_live_decision = false
+allow_model_training = false
+allow_public_redistribution = false
+auto_trade = false
+level2_required = false
+
+[ipc]
+health_public = true
+max_events_per_response = 500
+max_response_bytes = 8388608
+request_timeout_ms = 3000
+
+[event_store]
+root = "data/market-events"
+metadata_db = "data/market_events.db"
+quarantine_root = "data/market-events-quarantine"
+
+[monitor]
+database = "data/monitor.db"
+webhook_enabled = false
+webhook_allowed_origins = []

@@ -16,28 +16,28 @@ import os
 import tempfile
 import threading
 import time
+import unittest
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
 from types import SimpleNamespace
+from unittest import mock
 
-import unittest
-
-from stock_tracker.core import types as T
-from stock_tracker.core.config import load_configs, ProviderConfig
-from stock_tracker.core.store import MarketStore
-from stock_tracker.storage.repository import Repository
-from stock_tracker.collector.router import ProviderRouter
-from stock_tracker.collector.tencent import TencentProvider
-from stock_tracker.collector.sina import SinaProvider
+from stock_tracker.api.handlers import AppContext
+from stock_tracker.api.server import APIServer
 from stock_tracker.collector.eastmoney import EastmoneyProvider
+from stock_tracker.collector.router import ProviderRouter
+from stock_tracker.collector.sina import SinaProvider
+from stock_tracker.collector.tencent import TencentProvider
+from stock_tracker.core import types as T
+from stock_tracker.core.config import ProviderConfig, load_configs
+from stock_tracker.core.store import MarketStore
 from stock_tracker.data_quality.gate import DataQualityGate
 from stock_tracker.features.engine import FeatureEngine
 from stock_tracker.signals.manager import SignalManager
-from stock_tracker.api.handlers import AppContext
-from stock_tracker.api.server import APIServer
 from stock_tracker.storage.db import close_all
-
-from tests._common import _ROOT, make_bars, make_regime, make_sector, make_quote, now_ts
+from stock_tracker.storage.repository import Repository
+from tests._common import _ROOT, make_bars, make_quote, make_regime, make_sector, now_ts
 
 CONFIG_DIR = os.path.join(_ROOT, "config")
 WEB_ROOT = os.path.join(_ROOT, "web")
@@ -97,6 +97,10 @@ class TestE2EPipeline(unittest.TestCase):
         tmp = tempfile.mkdtemp()
         db_path = os.path.join(tmp, "e2e.db")
         ctx = _build_test_context(db_path)
+        published: list[tuple[str, dict]] = []
+        ctx.signal_manager._bus = SimpleNamespace(
+            publish=lambda topic, payload: published.append((topic, payload))
+        )
 
         # 放宽最小 R，使突破候选能通过风险闸门（测试配置，未改业务代码）
         ctx.bundle.risk.min_r_multiple = 0.1
@@ -135,6 +139,73 @@ class TestE2EPipeline(unittest.TestCase):
         self.assertIsNotNone(sig.scores)
         self.assertGreaterEqual(sig.scores.opportunity, 0)
 
+        # 5) Monitor Facts 由同一次扫描生成，但不改变信号、评分或订单。
+        monitor_payloads = [
+            payload for topic, payload in published if topic == "monitor_facts"
+        ]
+        self.assertEqual(len(monitor_payloads), len(produced))
+        monitor = next(
+            payload
+            for payload in monitor_payloads
+            if payload["strategy_id"] == sig.strategy_id
+        )
+        self.assertEqual(monitor["schema"], "stock-tracker-monitor-facts-v1")
+        self.assertEqual(monitor["symbol"], sig.symbol)
+        self.assertEqual(monitor["signal_state"], sig.state.value)
+        self.assertEqual(
+            monitor["scores"]["opportunity"],
+            sig.scores.opportunity,
+        )
+        self.assertIn("rsi14", monitor["features"])
+        self.assertIn("volume_ratio", monitor["features"])
+        self.assertFalse(monitor["action_state_mutated"])
+        self.assertFalse(monitor["score_mutated"])
+        self.assertFalse(monitor["order_created"])
+
+    def test_monitor_telemetry_failure_does_not_abort_signal_pipeline(self):
+        tmp = tempfile.mkdtemp()
+        ctx = _build_test_context(os.path.join(tmp, "monitor-isolation.db"))
+        published: list[tuple[str, dict]] = []
+        ctx.signal_manager._bus = SimpleNamespace(
+            publish=lambda topic, payload: published.append((topic, payload))
+        )
+        ctx.bundle.risk.min_r_multiple = 0.1
+        ctx.bundle.risk.regime_blocked_states = []
+        provider = TencentProvider(
+            ProviderConfig(name="tencent", cls="TencentProvider", markets=["a", "hk", "us"])
+        )
+        quote = provider.normalize(
+            (
+                "sh600519",
+                _tencent_body_a(
+                    last="148.00",
+                    prev="145.00",
+                    open_="147.00",
+                    high="149.00",
+                    low="140.00",
+                ),
+            ),
+            T.Market.A,
+        )
+        quote.timestamp = now_ts(-10)
+        quote.observed_age_ms = 10_000
+
+        with mock.patch(
+            "stock_tracker.signals.manager.build_indicators",
+            side_effect=RuntimeError("fixture monitor failure"),
+        ):
+            produced = ctx.signal_manager.scan_symbol(
+                "600519.SH",
+                quote,
+                make_bars(n=25, start=100, step=2, symbol="600519.SH"),
+                make_regime(T.RegimeState.RISK_ON_TREND, 70),
+                make_sector(T.SectorStage.LEADING, 65, rs=70, sector="白酒"),
+            )
+
+        self.assertTrue(produced)
+        self.assertTrue(any(topic == "signal" for topic, _ in published))
+        self.assertFalse(any(topic == "monitor_facts" for topic, _ in published))
+
 
 class TestApiContract(unittest.TestCase):
     @classmethod
@@ -147,7 +218,7 @@ class TestApiContract(unittest.TestCase):
         old_q = make_quote(
             symbol="600519.SH", open=101.0, high=110.0, low=95.0, close=105.0, last=105.0,
             prev_close=100.0, turnover=2.0, amount=1e9,
-            timestamp=datetime.now() - timedelta(hours=3),
+            timestamp=datetime.now() - timedelta(hours=3),  # noqa: DTZ005 - market-local fixture
             observed_age_ms=3 * 3600 * 1000,
         )
         cls.ctx.store.update_quote(old_q)
@@ -165,15 +236,12 @@ class TestApiContract(unittest.TestCase):
             try:
                 urllib.request.urlopen(f"http://127.0.0.1:{cls.port}/api/provider_health", timeout=1)
                 break
-            except Exception:
+            except (OSError, TimeoutError, urllib.error.URLError):
                 time.sleep(0.1)
 
     @classmethod
     def tearDownClass(cls):
-        try:
-            cls.server.shutdown_wait()
-        except Exception:
-            pass
+        cls.server.shutdown_wait()
         close_all()
 
     def _get(self, path):
@@ -232,8 +300,8 @@ class TestLiveServiceProbe(unittest.TestCase):
         try:
             with urllib.request.urlopen("http://127.0.0.1:8080/api/provider_health", timeout=2) as r:
                 data = json.loads(r.read().decode("utf-8"))
-        except Exception as e:
-            self.skipTest(f"生产服务 :8080 不可达，跳过实时集成用例：{e}")
+        except (OSError, TimeoutError, urllib.error.URLError) as exc:
+            self.skipTest(f"生产服务 :8080 不可达，跳过实时集成用例：{exc}")
         self.assertIn("providers", data)
 
 

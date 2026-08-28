@@ -20,7 +20,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from ..core.network import (
     InvalidOriginError,
@@ -34,6 +34,7 @@ from ..core.security import (
 )
 from ..storage.db import close_all
 from . import handlers as H
+from . import monitor_handlers as MH
 from .audit import (
     AuditWriteError,
     RemoteAuditLogger,
@@ -41,6 +42,7 @@ from .audit import (
 )
 from .handlers import AppContext
 from .runtime import build_runtime_health
+from .sse import SSE_OVERFLOW_TOPIC
 
 # 路由表：前缀 → handler 函数（GET）
 _GET_ROUTES: list[tuple[str, Any]] = [
@@ -58,6 +60,8 @@ _GET_ROUTES: list[tuple[str, Any]] = [
 _SIGNAL_RE = re.compile(r"^/api/signal/([^/]+)$")
 _QUOTE_RE = re.compile(r"^/api/quote/([^/]+)$")
 _PORTFOLIO_POSITION_RE = re.compile(r"^/api/portfolio/positions/([^/]+)$")
+_MONITOR_RULE_RE = re.compile(r"^/api/monitor/rules/([^/]+)$")
+_MONITOR_TRANSITION_RE = re.compile(r"^/api/monitor/inbox/([^/]+)/transition$")
 _PRIVATE_API_PATHS = frozenset({
     "/api/brief/today",
     "/api/overview",
@@ -76,6 +80,7 @@ _PRIVATE_API_PATHS = frozenset({
 _PRIVATE_API_PREFIXES = (
     "/api/portfolio/positions/",
     "/api/signal/",
+    "/api/monitor/",
 )
 _MAX_JSON_BODY_BYTES = 64 * 1024
 _MAX_OVERSIZE_DRAIN_BYTES = 1024 * 1024
@@ -83,6 +88,41 @@ _CORS_ALLOWED_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
 _CORS_PREFLIGHT_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
 _CORS_ALLOWED_HEADERS = frozenset({"authorization", "content-type", "accept"})
 _CORS_ALLOWED_HEADERS_VALUE = "Authorization, Content-Type, Accept"
+
+
+def _single_query_value(
+    query: dict[str, list[str]],
+    name: str,
+    *,
+    required: bool = False,
+    default: str | None = None,
+) -> str | None:
+    values = query.get(name)
+    if values is None:
+        if required:
+            raise H.APIError(400, "MISSING_QUERY_FIELD", f"missing query field: {name}", name)
+        return default
+    if len(values) != 1 or type(values[0]) is not str or not values[0] or len(values[0]) > 256:
+        raise H.APIError(400, "INVALID_QUERY_FIELD", f"invalid query field: {name}", name)
+    return values[0]
+
+
+def _bounded_query_int(
+    query: dict[str, list[str]],
+    name: str,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    raw = _single_query_value(query, name, default=str(default))
+    assert raw is not None
+    if re.fullmatch(r"[0-9]{1,10}", raw) is None:
+        raise H.APIError(400, "INVALID_QUERY_FIELD", f"invalid query field: {name}", name)
+    value = int(raw)
+    if not minimum <= value <= maximum:
+        raise H.APIError(400, "INVALID_QUERY_FIELD", f"invalid query field: {name}", name)
+    return value
 
 
 def _request_host_identity(request_host: str, scheme: str) -> tuple[str, int] | None:
@@ -579,6 +619,86 @@ class APIHandler(BaseHTTPRequestHandler):
         self._send_cors_headers(preflight=True)
         self.end_headers()
 
+    def _handle_monitor_get(self, ctx: AppContext, parsed: Any) -> None:
+        path = parsed.path
+        try:
+            query = parse_qs(
+                parsed.query,
+                keep_blank_values=True,
+                max_num_fields=16,
+            )
+        except ValueError:
+            self._send_json(
+                {
+                    "error": {
+                        "code": "TOO_MANY_QUERY_FIELDS",
+                        "message": "monitor query contains too many fields",
+                    }
+                },
+                status=400,
+            )
+            return
+        try:
+            if path == "/api/monitor/summary":
+                if query:
+                    raise H.APIError(400, "UNKNOWN_QUERY_FIELD", "summary accepts no query fields")
+                self._send_json(MH.get_summary(ctx))
+                return
+            if path == "/api/monitor/data-link":
+                if query:
+                    raise H.APIError(400, "UNKNOWN_QUERY_FIELD", "data-link accepts no query fields")
+                self._send_json(MH.get_data_link(ctx))
+                return
+            if path == "/api/monitor/rules":
+                if query:
+                    raise H.APIError(400, "UNKNOWN_QUERY_FIELD", "rules accepts no query fields")
+                self._send_json(MH.get_rules(ctx))
+                return
+            if path == "/api/monitor/inbox":
+                unknown = set(query) - {"state", "limit"}
+                if unknown:
+                    raise H.APIError(400, "UNKNOWN_QUERY_FIELD", f"unknown query field: {min(unknown)}")
+                states = tuple(query.get("state", [])) or None
+                limit = _bounded_query_int(query, "limit", default=200, minimum=1, maximum=1000)
+                self._send_json(MH.get_inbox(ctx, states=states, limit=limit))
+                return
+            if path == "/api/monitor/outbox":
+                unknown = set(query) - {"limit"}
+                if unknown:
+                    raise H.APIError(400, "UNKNOWN_QUERY_FIELD", f"unknown query field: {min(unknown)}")
+                limit = _bounded_query_int(query, "limit", default=200, minimum=1, maximum=1000)
+                self._send_json(MH.get_outbox(ctx, limit=limit))
+                return
+            if path == "/api/monitor/replay":
+                unknown = set(query) - {"symbol", "start", "end", "backend", "limit"}
+                if unknown:
+                    raise H.APIError(400, "UNKNOWN_QUERY_FIELD", f"unknown query field: {min(unknown)}")
+                symbol = _single_query_value(query, "symbol", required=True)
+                start = _single_query_value(query, "start", required=True)
+                end = _single_query_value(query, "end", required=True)
+                backend = _single_query_value(query, "backend", default="auto")
+                limit = _bounded_query_int(query, "limit", default=5000, minimum=1, maximum=5000)
+                assert symbol is not None and start is not None and end is not None and backend is not None
+                self._send_json(
+                    MH.get_replay(
+                        ctx,
+                        symbol=symbol,
+                        start=start,
+                        end=end,
+                        backend=backend,
+                        limit=limit,
+                    )
+                )
+                return
+            self._send_json(
+                {"error": {"code": "NOT_FOUND", "message": "monitor endpoint not found"}},
+                status=404,
+            )
+        except H.APIError as exc:
+            self._send_json(exc.response(), status=exc.status)
+        except Exception:  # noqa: BLE001 -- HTTP boundary returns a fixed error
+            self._internal_error()
+
     # ---- GET ----
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -593,6 +713,10 @@ class APIHandler(BaseHTTPRequestHandler):
             return
 
         # SSE
+        if path.startswith("/api/monitor/"):
+            self._handle_monitor_get(ctx, parsed)
+            return
+
         if path == "/api/stream":
             self._handle_sse(ctx)
             return
@@ -653,6 +777,22 @@ class APIHandler(BaseHTTPRequestHandler):
             return
         if not self._begin_remote_write(path):
             return
+        if path == "/api/monitor/rules":
+            payload = self._read_strict_json()
+            if payload is not None:
+                self._call_json(MH.put_rule, ctx, payload, status=201)
+            return
+        monitor_transition = _MONITOR_TRANSITION_RE.match(path)
+        if monitor_transition is not None:
+            payload = self._read_strict_json()
+            if payload is not None:
+                self._call_json(
+                    MH.transition_inbox,
+                    ctx,
+                    monitor_transition.group(1),
+                    payload,
+                )
+            return
         if path == "/api/portfolio/positions":
             payload = self._read_strict_json()
             if payload is not None:
@@ -691,6 +831,24 @@ class APIHandler(BaseHTTPRequestHandler):
             return
         if not self._begin_remote_write(path):
             return
+        monitor_rule = _MONITOR_RULE_RE.match(path)
+        if monitor_rule is not None:
+            payload = self._read_strict_json()
+            if payload is None:
+                return
+            if payload.get("rule_id") != monitor_rule.group(1):
+                self._send_json(
+                    {
+                        "error": {
+                            "code": "MONITOR_RULE_ID_MISMATCH",
+                            "message": "path rule_id must match payload rule_id",
+                        }
+                    },
+                    status=400,
+                )
+                return
+            self._call_json(MH.put_rule, self._ctx(), payload)
+            return
         if path != "/api/portfolio/profile":
             self._send_json({"error": {"code": "NOT_FOUND", "message": "not found"}}, status=404)
             return
@@ -721,6 +879,10 @@ class APIHandler(BaseHTTPRequestHandler):
         if not self._require_private_api(path):
             return
         if not self._begin_remote_write(path):
+            return
+        monitor_rule = _MONITOR_RULE_RE.match(path)
+        if monitor_rule is not None:
+            self._call_json(MH.delete_rule, self._ctx(), monitor_rule.group(1))
             return
         match = _PORTFOLIO_POSITION_RE.match(path)
         if match is None:
@@ -767,10 +929,20 @@ class APIHandler(BaseHTTPRequestHandler):
             )
             return None
         raw = self.rfile.read(length) if length > 0 else b""
+
+        def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            payload_object: dict[str, Any] = {}
+            for key, value in pairs:
+                if key in payload_object:
+                    raise ValueError("duplicate JSON key")
+                payload_object[key] = value
+            return payload_object
+
         try:
             text = raw.decode("utf-8")
             payload = json.loads(
                 text,
+                object_pairs_hook=reject_duplicate_keys,
                 parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
             )
         except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
@@ -824,6 +996,12 @@ class APIHandler(BaseHTTPRequestHandler):
                 return
         ctype, _ = mimetypes.guess_type(full)
         ctype = ctype or "application/octet-stream"
+        if ctype.startswith("text/") or ctype in {
+            "application/javascript",
+            "application/json",
+            "image/svg+xml",
+        }:
+            ctype += "; charset=utf-8"
         try:
             with open(full, "rb") as fh:
                 data = fh.read()
@@ -851,7 +1029,7 @@ class APIHandler(BaseHTTPRequestHandler):
         self._send_cors_headers()
         self.end_headers()
 
-        q: queue.Queue = queue.Queue()
+        q: queue.Queue = queue.Queue(maxsize=256)
         hub.add_client(q)
         try:
             self.wfile.write(b": connected\n\n")
@@ -867,6 +1045,8 @@ class APIHandler(BaseHTTPRequestHandler):
                     except (BrokenPipeError, ConnectionResetError, OSError):
                         break
                     continue
+                if topic == SSE_OVERFLOW_TOPIC:
+                    break
                 data = json.dumps(payload, ensure_ascii=False)
                 frame = f"event: {topic}\ndata: {data}\n\n".encode()
                 try:

@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="css/portfolio.css" />
   <link rel="stylesheet" href="css/terminal.css" />
   <link rel="stylesheet" href="css/runtime.css" />
+  <link rel="stylesheet" href="css/monitor.css" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2377a7ff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 18V7M9 18V11M14 18V5M19 18V9M3 20h18M5 9l4 2 5-5 5 3'/%3E%3C/svg%3E" />
 </head>
 <body>
@@ -100,6 +101,18 @@
       <div id="radarGroups"></div>
     </section>
 
+    <section class="page" id="page-monitor">
+      <div class="page-heading">
+        <div class="page-heading-main">
+          <div class="page-eyebrow">Intraday monitor · Evidence stream</div>
+          <h1 class="page-title">盘中监控</h1>
+          <p class="page-description">持续观察行情链路、规则触发与信号生命周期；监控事件只提供变化证据，不改分、不改动作、不创建订单。</p>
+        </div>
+        <div class="page-heading-tags" aria-hidden="true"><span>Inbox</span><span>Rules</span><span>Data link</span><span>Replay</span></div>
+      </div>
+      <div id="monitorWorkspace"></div>
+    </section>
+
     <section class="page" id="page-research">
       <div class="page-heading">
         <div class="page-heading-main">
@@ -131,6 +144,7 @@
     <button class="nav-btn" data-page="overview"><span class="nav-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></span><span>总览</span></button>
     <button class="nav-btn" data-page="watch"><span class="nav-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span><span>自选</span></button>
     <button class="nav-btn" data-page="radar"><span class="nav-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span><span>雷达</span></button>
+    <button class="nav-btn" data-page="monitor"><span class="nav-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-6 4 12 2-6h6"/><path d="M3 4v16h18"/></svg></span><span>监控</span></button>
     <button class="nav-btn" data-page="research"><span class="nav-ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6l-4 9a2 2 0 002 3h10a2 2 0 002-3l-4-9V2"/><path d="M9 2h6"/></svg></span><span>研究室</span></button>
   </nav>
 
@@ -145,6 +159,7 @@
   <script src="js/components.js"></script>
   <script src="js/portfolio.js"></script>
   <script src="js/today.js"></script>
+  <script src="js/monitor.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

@@ -39,6 +39,7 @@ from .core.store import MarketStore
 from .data_quality.gate import DataQualityGate
 from .deployment.power_guard import TradingPowerGuard
 from .features.engine import FeatureEngine
+from .monitor.service import MonitorService
 from .signals.manager import SignalManager
 from .storage.repository import Repository
 
@@ -49,6 +50,9 @@ _PROVIDER_REGISTRY = {
     "SinaProvider": SinaProvider,
     "TencentProvider": TencentProvider,
 }
+_MONITOR_RUNTIME_TOPICS = frozenset(
+    {"regime", "provider_health", "monitor_facts", "quote"}
+)
 
 
 def _build_audit_logger(bundle, root_dir: str) -> RemoteAuditLogger:
@@ -162,7 +166,12 @@ def build_context(args) -> tuple:
     signal_manager = SignalManager(bundle, store, repo, router, feature_engine, gate)
     signal_manager.recover()
 
-    sse_hub = SSEHub(get_bus())
+    bus = get_bus()
+    sse_hub = SSEHub(bus)
+    monitor_service = MonitorService.from_project(
+        root_dir,
+        publisher=bus.publish,
+    )
     ctx = AppContext(
         bundle=bundle,
         store=store,
@@ -171,6 +180,7 @@ def build_context(args) -> tuple:
         signal_manager=signal_manager,
         sse_hub=sse_hub,
         web_root=web_root,
+        monitor_service=monitor_service,
     )
     ctx.audit_logger = audit_logger
 
@@ -206,6 +216,36 @@ def build_context(args) -> tuple:
         api_server.server_close()
         raise
     return ctx, scheduler, api_server, logger
+
+
+def _subscribe_monitor(ctx: AppContext):
+    bus = get_bus()
+
+    def observer(topic, payload) -> None:
+        if topic not in _MONITOR_RUNTIME_TOPICS:
+            return
+        if topic in {"regime", "provider_health"}:
+            ctx.monitor_service.enqueue_runtime_event(topic, payload)
+            return
+        ctx.monitor_service.enqueue_runtime_event(
+            topic,
+            payload,
+            watchlist=tuple(ctx.store.get_watchlist()),
+            positions=tuple(
+                item.symbol
+                for item in ctx.store.get_positions().values()
+                if item.closed_at is None
+            ),
+            universe=tuple(ctx.store.get_quotes()),
+        )
+
+    return bus.subscribe(observer)
+
+
+def _unsubscribe_monitor(ctx: AppContext) -> None:
+    if ctx.monitor_subscription is not None:
+        get_bus().unsubscribe(ctx.monitor_subscription)
+        ctx.monitor_subscription = None
 
 
 def _self_check(ctx, scheduler, logger) -> int:
@@ -262,21 +302,30 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Stock Tracker 启动被拒绝：{exc}", file=sys.stderr)
         return 2
 
+    ctx.monitor_subscription = _subscribe_monitor(ctx)
     target_server = ctx.api_target_server
     power_guard = ctx.power_guard
     target_thread: threading.Thread | None = None
     target_started = False
     api_serve_entered = False
+    runtime_event_worker_started = False
+    notification_worker_started = False
 
     if args.once:
+        runtime_event_worker_started = ctx.monitor_service.start_runtime_event_worker()
         try:
             return _self_check(ctx, scheduler, logger)
         finally:
+            _unsubscribe_monitor(ctx)
+            if runtime_event_worker_started:
+                ctx.monitor_service.stop_runtime_event_worker()
             if target_server is not None:
                 target_server.server_close()
             api_server.server_close()
 
     try:
+        runtime_event_worker_started = ctx.monitor_service.start_runtime_event_worker()
+        notification_worker_started = ctx.monitor_service.start_notification_worker()
         if target_server is not None:
             target_thread = threading.Thread(
                 target=target_server.serve_forever,
@@ -302,6 +351,11 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         logger.info("收到中断信号，正在关闭…")
     finally:
+        _unsubscribe_monitor(ctx)
+        if runtime_event_worker_started:
+            ctx.monitor_service.stop_runtime_event_worker()
+        if notification_worker_started:
+            ctx.monitor_service.stop_notification_worker()
         if power_guard is not None:
             power_guard.stop()
         try:

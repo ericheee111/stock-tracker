@@ -237,6 +237,16 @@ UNKNOWN
 - Sidecar 服务端口不得暴露公网，真实启用前必须固定发行版、二进制、manifest 和数据快照身份；
 - `HiThink-Tech/Financial-API` 首期只允许作为默认关闭的 A 股日线 exact-raw 捕获源；固定官方 HTTPS Origin，凭据只从 `HITHINK_FINANCE_API_KEY` 环境读取；
 - HiThink Adapter 必须保持 `T1_BEST_EFFORT`、只读、`allow_live_decision=false`、`allow_model_training=false`、`allow_public_redistribution=false`；不得因官方运营主体、HTTP 200 或仓库 MIT License 自行升级数据 Trust Tier 或再分发权；
+- XTP 首期只允许作为独立 CPython 3.9/C++ 的 A 股 Quote Sidecar；主 CPython 3.14 进程不得加载 XTP native binary；Sidecar 只监听字面 IPv4 loopback，最多 20 个 PoC 标的，凭据仅来自本机环境变量；
+- XTP 算法账户、Trader/Order/Algo API、报单、撤单、账户资产、持仓同步、成交回报和自动交易在新安全规格与用户单独授权之前一律禁止；
+- XTP `callback_seq` 只代表本地回调顺序，不得冒充交易所序列；Provider Sequence 不存在时必须明确不可用，不得计算或声称不存在丢包；
+- XTP Event Payload、Hash、Event ID、A 股交易日、Metadata/Session/Cursor 必须在 IPC 和 Store 写边界重新验证；调用方 mutation、`dataclasses.replace()`、跨 Session 快照和 URL 变化不能绕过身份合同；
+- XTP callback snapshot、Market Event Store 和本地 Replay 不得自动进入正式 Runtime Router、PIT 回测、训练、校准或模型晋级；固定 `allow_live_decision=false`、`allow_model_training=false`、`allow_public_redistribution=false`、`auto_trade=false`；
+- Monitor Engine 只能观察白名单事实，不得修改 ActionState、SignalState、评分、Trust Tier、模型或订单；缺失事实必须失败关闭，不能因 `NE` 等比较制造假阳性；
+- EventBus 发布线程不得直接执行 Monitor SQLite 规则；运行态事实必须通过有界非阻塞 Queue 与独立 Worker 隔离，满队列增加可见 dropped 计数且不得阻塞 HOT/WARM 信号线程；
+- Monitor Outbox 必须使用原子租约/状态条件更新防止并发重复领取，运行 Engine 必须有独立派发 Worker；SSE 客户端队列必须有界，内部 `monitor_facts` 不得转发到浏览器；
+- Market Event Store 与 Monitor Store 必须拒绝复用生产 `data/stock_tracker.db` 或共用同一 SQLite；Event/Quarantine Root 不得重叠；协调提交失败必须补偿恢复，持久化分钟 Bar 不得标为 `LIVE`；
+- Monitor 的 GET Replay 不得写 Replay Catalog，事件行和分钟 Bar 必须使用同一时间窗口；本地 Replay 不得冒充正式 PIT Replay；
 - 全市场多年回填应单独审计 Market Dumps/marketdb，不得用逐标的 REST 循环制造高频请求或冒充完整 PIT 数据库。
 
 ## 10. 事件和 LLM 边界
@@ -583,15 +593,15 @@ python -m stock_tracker --once
 4. Stage 1.5 / Hybrid H0：Backend 显式 loopback + Tailscale Serve 整站同源 Bootstrap（工程实现与本地远程式验收已完成；真实 Serve/两设备 operational 验收待补）；
 5. Stage 1.5 / Hybrid H1：前端 Runtime Config、Allowed API Origin/Engine ID、统一 URL Builder 与 Origin-scoped Token（已完成并通过本地双 Origin 浏览器验收）；
 6. Stage 1.5 / Hybrid H2：精确 CORS、`OPTIONS`、Runtime Health、版本握手、非法 Health hard block 与离线状态（已完成并通过同源回归）；
-7. Stage 1.5 / Hybrid H3/H4：Tailscale Serve Target Lane、开机自启及 Cloudflare Pages/GitHub Pages 静态部署（当前下一步）；
-8. Stage 2：A 股数据与决策质量；
-9. Stage 3A/3B：Event Intelligence + Big Trend v1；
-10. Stage 3C.1：可选本地行情 Sidecar 隔离合同，默认关闭；
-11. Stage 3C.2/3C.3：固定发行版与真实数据审计，通过后再进入 WARM/COLD Shadow；
-12. Stage 4：Strategy Scoreboard + Replay；
+7. Stage 1.5 / Hybrid H3–H5：API Target、恢复计划、静态构建和公开入口失败关闭门禁（仓库侧工程已完成；真实 Tailscale/Windows/Pages operational 证据待补）；
+8. Stage 2：A 股真实 Calendar/Status/Universe/Corporate Action、跨源 reconciliation、覆盖缺口和 T3 Snapshot（当前主线）；
+9. Stage 3C：free-stockdb 与 HiThink 等可选数据 Sidecar/捕获源继续默认关闭，在真实许可、覆盖与对账通过后再晋级；
+10. Stage 3D–5C：XTP read-only Sidecar、Market Event Store、Signal Monitor、Monitor Workspace 和 synthetic Shadow（工程已完成；真实 Login/Subscribe、Level 1/2、Live Shadow、吞吐与保存权待 operational 验收）；
+11. Stage 3A/3B：Event Intelligence + Big Trend v1；
+12. Stage 4：Strategy Scoreboard + 正式 PIT Replay；
 13. Stage 5：真实数据上的模型准确率迭代；
 14. Stage 6：港股通与美股独立扩展；
-15. Stage 7：可选券商只读能力及单独审批的执行路线。
+15. Stage 7：可选券商只读能力；任何执行/报单能力必须另立安全规格并取得用户单独授权。
 
 不要因为已有旧 Wave 编号而跳过用户价值和依赖关系。
 

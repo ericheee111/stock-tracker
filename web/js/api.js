@@ -58,10 +58,10 @@
     }
   }
 
-  function resolvedUrl(path) {
+  function resolvedUrl(path, query) {
     if (!Runtime) throw new APIRequestError(0, 'RUNTIME_MISSING', 'Runtime 模块未加载', null, path);
     try {
-      return Runtime.apiUrl(path);
+      return query ? Runtime.apiUrlWithQuery(path, query) : Runtime.apiUrl(path);
     } catch (error) {
       throw new APIRequestError(
         0,
@@ -76,7 +76,7 @@
 
   async function requestJSON(path, opts) {
     opts = opts || {};
-    const url = resolvedUrl(path);
+    const url = resolvedUrl(path, opts.query || null);
     const ctrl = new AbortController();
     const timer = setTimeout(function () { ctrl.abort(); }, opts.timeout || DEFAULT_TIMEOUT_MS);
     const method = opts.method || 'GET';
@@ -256,6 +256,63 @@
     },
     getConfig: function () {
       return fetchJSON('/api/config', { private: true }).then(function (data) { return data || {}; });
+    },
+    getMonitorSummary: function () {
+      return fetchJSON('/api/monitor/summary', { private: true });
+    },
+    getMonitorDataLink: function () {
+      return fetchJSON('/api/monitor/data-link', { private: true });
+    },
+    getMonitorRules: function () {
+      return fetchJSON('/api/monitor/rules', { private: true })
+        .then(function (data) { return unwrap(data, 'rules') || []; });
+    },
+    getMonitorInbox: function (filters) {
+      filters = filters || {};
+      const query = {};
+      if (filters.states && filters.states.length) query.state = filters.states;
+      if (filters.limit != null) query.limit = filters.limit;
+      return fetchJSON('/api/monitor/inbox', { private: true, query: query })
+        .then(function (data) { return unwrap(data, 'inbox') || []; });
+    },
+    getMonitorOutbox: function (limit) {
+      return fetchJSON('/api/monitor/outbox', {
+        private: true,
+        query: { limit: limit || 100 }
+      }).then(function (data) { return unwrap(data, 'outbox') || []; });
+    },
+    getMonitorReplay: function (params) {
+      params = params || {};
+      return fetchJSON('/api/monitor/replay', {
+        private: true,
+        query: {
+          symbol: params.symbol,
+          start: params.start,
+          end: params.end,
+          backend: params.backend || 'python',
+          limit: params.limit || 5000
+        }
+      });
+    },
+    createMonitorRule: function (payload) {
+      return requestJSON('/api/monitor/rules', {
+        method: 'POST', private: true, body: payload
+      });
+    },
+    updateMonitorRule: function (ruleId, payload) {
+      return requestJSON('/api/monitor/rules/' + encodeURIComponent(ruleId), {
+        method: 'PUT', private: true, body: payload
+      });
+    },
+    deleteMonitorRule: function (ruleId) {
+      return requestJSON('/api/monitor/rules/' + encodeURIComponent(ruleId), {
+        method: 'DELETE', private: true
+      });
+    },
+    transitionMonitorInbox: function (inboxId, payload) {
+      return requestJSON('/api/monitor/inbox/' + encodeURIComponent(inboxId) + '/transition', {
+        method: 'POST', private: true, body: payload
+      });
     },
     requestJSON: requestJSON,
     fetchJSON: fetchJSON,

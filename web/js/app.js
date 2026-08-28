@@ -13,7 +13,7 @@
   const API = window.API;
   const SSE = window.SSE;
 
-  const PAGES = ['today', 'overview', 'watch', 'radar', 'research'];
+  const PAGES = ['today', 'overview', 'watch', 'radar', 'monitor', 'research'];
 
   const state = {
     market: 'A',
@@ -145,6 +145,9 @@
     state.providers = [];
     state.config = {};
     Object.keys(state.loaded).forEach(function (key) { state.loaded[key] = false; });
+    if (window.MonitorWorkspace && typeof window.MonitorWorkspace.clear === 'function') {
+      window.MonitorWorkspace.clear(error || null);
+    }
   }
 
   function renderAllRuntimeViews() {
@@ -155,11 +158,17 @@
     renderWatch();
     renderRadar();
     renderHolding();
+    if (window.MonitorWorkspace && typeof window.MonitorWorkspace.render === 'function') {
+      window.MonitorWorkspace.render();
+    }
   }
 
   function handleRuntimeSnapshot(snapshot) {
     state.runtime = snapshot;
     renderRuntimeStatus();
+    if (window.MonitorWorkspace && typeof window.MonitorWorkspace.onRuntimeSnapshot === 'function') {
+      window.MonitorWorkspace.onRuntimeSnapshot(snapshot);
+    }
     if (!Runtime) return;
     if (snapshot.status === 'STALE') {
       clearDecisionData();
@@ -237,8 +246,11 @@
       const page = $('#page-' + p);
       if (page) page.classList.toggle('active', p === name);
     });
-    $$('.nav-btn').forEach(function (b) { b.classList.toggle('active', b.dataset.page === name); });
+    document.querySelectorAll('.nav-btn').forEach(function (b) { b.classList.toggle('active', b.dataset.page === name); });
     positionNavIndicator();
+    if (name === 'monitor' && window.MonitorWorkspace && typeof window.MonitorWorkspace.activate === 'function') {
+      window.MonitorWorkspace.activate();
+    }
   }
 
   function setMarket(m) {
@@ -542,6 +554,7 @@
     else if (id === 'page-overview') renderOverview();
     else if (id === 'page-watch') renderWatch();
     else if (id === 'page-radar') renderRadar();
+    else if (id === 'page-monitor' && window.MonitorWorkspace) window.MonitorWorkspace.render();
   }
 
   /* ---------------- 信号详情弹层 ---------------- */
@@ -866,6 +879,12 @@
         else if (arr && arr.providers) state.providers = arr.providers;
         renderBanner();
       },
+      'monitor.inbox': function (payload) {
+        if (window.MonitorWorkspace) window.MonitorWorkspace.handleSSE('monitor.inbox', payload);
+      },
+      'monitor.notification': function (payload) {
+        if (window.MonitorWorkspace) window.MonitorWorkspace.handleSSE('monitor.notification', payload);
+      },
       open: function () { /* 连接建立，可选提示 */ },
       error: function (error) {
         if (error && (error.status === 401 || error.status === 403 ||
@@ -1040,6 +1059,9 @@
     initRipple();
     initIndicators();
     bindEvents();
+    if (window.MonitorWorkspace && typeof window.MonitorWorkspace.init === 'function') {
+      window.MonitorWorkspace.init();
+    }
     initRuntimeMonitoring();
     // 先渲染占位加载态，避免白屏
     const pp = $('#portfolioPanel'); if (pp) pp.innerHTML = UI.loadingBox('加载账户与持仓…');

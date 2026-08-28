@@ -684,4 +684,60 @@ circuit_fail_threshold = 5
 7. 零第三方依赖：`python -m stock_tracker` 在无网安装环境可起。
 
 ---
-*本文为 Phase 1 设计基线。Phase 2–5（概率模型/回测/组合/高级研究）的接口已在 `success_probability=None`、`events` 占位表、`regime`/`sector` 规则分类器、`ProviderRouter` 可插拔、证据族可扩展等处预留。*
+## 16. Stage 3D–5C：XTP 与 Monitor 扩展架构（2026-08-28）
+
+```text
+XTP Quote SDK / Simulator (isolated CPython 3.9)
+        │ loopback HTTP/JSON + independent Bearer
+        ▼
+XtpSidecarClient (main CPython 3.14)
+        │ explicit ingestion only; no Runtime Router promotion
+        ▼
+Market Event Store
+  ├── immutable canonical event files
+  ├── SHA-256 partition chain + manifest
+  ├── separate SQLite catalog
+  ├── findings + minute aggregation
+  └── Python / optional DuckDB replay
+        │
+        ▼
+Signal Monitor Engine
+  ├── non-eval rule whitelist
+  ├── bounded scopes/cooldown/dedup
+  ├── separate monitor SQLite
+  ├── inbox lifecycle + outbox
+  └── browser SSE / optional HTTPS webhook
+        │ private REST/SSE
+        ▼
+Monitor Workspace
+  ├── Inbox
+  ├── Rules
+  ├── Data Link
+  └── Replay
+```
+
+边界：
+
+- 主进程不 import XTP native binary；
+- Sidecar 只读、字面 IPv4 loopback、最多 20 个 PoC 标的；
+- Event Payload/Hash/ID、A 股交易日与 Session 快照在 IPC/Store 边界重验；
+- 算法账户、Trader/Order/Algo API 不进入架构；
+- Event Store 与 Monitor Store 不复用生产 `stock_tracker.db`，也不共用同一 SQLite；
+- Event/Quarantine Root 不得重叠，Replay GET 不写 Catalog；
+- Monitor 运行态事实先进入上限 1024 的非阻塞 Queue，由独立 Worker 执行 SQLite 规则；Outbox 使用原子租约与独立 Worker，SSE 对慢客户端有界断开；
+- Monitor 不改变决策、评分、Trust、模型或订单；
+- XTP 当前不参加正式 Quote/BAR Router；
+- `allow_live_decision=false`、`allow_model_training=false`、`auto_trade=false`；
+- 真实 XTP operational、持续吞吐与 Live Shadow 是独立门禁。
+
+详细合同见：
+
+- `docs/STAGE3D-XTP-QUALIFICATION-AND-DATA-CONTRACT.md`；
+- `docs/STAGE3E-XTP-SIDECAR-CONTRACT.md`；
+- `docs/STAGE3F-MARKET-EVENT-STORE-CONTRACT.md`；
+- `docs/STAGE4D-SIGNAL-MONITOR-CONTRACT.md`；
+- `docs/STAGE4E-MONITOR-WORKSPACE-HANDOFF.md`；
+- `docs/STAGE5C-XTP-SHADOW-ACCEPTANCE.md`。
+
+---
+*本文为 Phase 1 设计基线并含后续扩展补充。Phase 2–5（概率模型/回测/组合/高级研究）的接口已在 `success_probability=None`、`events` 占位表、`regime`/`sector` 规则分类器、`ProviderRouter` 可插拔、证据族可扩展等处预留。*

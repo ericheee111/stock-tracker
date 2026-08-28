@@ -1,6 +1,6 @@
 # ChatGPT Handoff
 
-> Updated: 2026-08-25
+> Updated: 2026-08-28
 > Workspace: `D:\Projects\stock-tracker`
 > Branch: `main` tracking `origin/main`
 > Purpose: preserve the exact continuation state for ChatGPT-led repository work.
@@ -323,3 +323,24 @@ Status: `IMPLEMENTED / LIVE_KEY_ACCEPTANCE_PENDING`
 - Final verified gates: HiThink/provider/CLI/router/config tests 37/37; H3 20/20; complete runtime unittest 436 passed with one expected skip; runtime pytest excluding the duplicate H3 module 416 passed with one skip; H0/H1-H2/H4 browser-style acceptance passed; full staged Quant/source-distribution 563 passed plus 248 subtests; targeted Ruff, compileall, `pip check`, and cached-diff checks passed.
 - No live HiThink request was made because the user credential was not supplied to the session. The exact environment variable and a bounded one-month acceptance command are documented; the key must not be pasted into chat or committed.
 - Implementation/review commit `2a736f09434acf4cd0e5f44d5b7bae85fbc062f0` (`feat: add gated HiThink financial API capture`) was pushed to `origin/main`; local `HEAD`, local `origin/main`, and remote `refs/heads/main` were verified equal before this handoff-only completion commit.
+
+## 23. Task Q — Stage 3D–5C XTP, event store and Monitor delivery
+
+Status: `ENGINEERING_READY / GIT_DELIVERY_PENDING`
+
+- Recorded the user's stock-type and algorithm-type XTP test-account categories without storing identifiers or secrets. The engineering implementation uses neither account; algorithm access, Trader/Order/Algo APIs, account/position sync and automatic trading remain absent.
+- Added a CPython 3.9-compatible read-only XTP Quote Sidecar contract, loopback HTTP/JSON IPC, Simulator, strict event/cursor/session/metric validation, a fail-closed official Quote-module/environment probe and a CPython 3.14 main-process client. Real XTP login/subscription remains an operational gate.
+- Added a separate append-only Market Event Store with immutable canonical records, partition SHA-256 chain/manifest, duplicate/gap/out-of-order findings, metadata-only quarantine, atomic minute aggregation, targeted/full integrity verification and Python/optional DuckDB replay. It never opens production `data/stock_tracker.db`.
+- Added a non-eval Signal Monitor Engine, bounded scopes, cooldown/duplicate suppression, transactional Inbox/Outbox lifecycle, Browser SSE, optional allowlisted HTTPS webhook and private `/api/monitor/*` REST endpoints.
+- Added the Monitor Workspace with Signal Inbox, Rule Center, Data Link and Replay, CSP-safe native SVG, strict Runtime query construction, HTML escaping, Auth/Offline states and no external asset dependency.
+- Added deterministic Stage 5C synthetic Shadow for 64 A-share symbols, four boards, 16 scenarios and 256 comparisons. Conflicts and unavailable/frequency-mismatched sources remain explicit; no source is promoted.
+- Adversarial Review repaired coordinated raw/derived storage, nested Payload mutation and identity drift, A-share trading-day semantics, Sidecar exact URL/metadata/session snapshots, production-SQLite path isolation, concurrent first-trigger dedup, immutable Rule snapshots, missing-fact `NE` false positives, synchronous EventBus isolation through a bounded runtime-event worker, Outbox leases and the independent Notification Worker, bounded SSE backpressure, per-poll full integrity scans, SQLite parameter scaling, Replay GET side effects/time windows, query-field bounds, static UTF-8 and Monitor fact/UI evidence defects.
+- Latest verified pre-staging gates: targeted Stage tests `83 passed, 1 skipped + 19 subtests`; runtime `512 passed, 1 skipped + 316 subtests`; Quant `563 passed + 248 subtests`; Monitor browser `49/49`; H0 `12/12`; H1/H2 `28/28 + 11/11`; H4 `18/18`; Mock/real Today `17/17`; Portfolio `13/13`; source distribution/no tracked bytecode `3 passed + 49 subtests`; targeted Ruff, six-file JS syntax, six-file CPython 3.9 grammar parse, compileall, pip check, Quant smoke/benchmark, secret scan and production migration dry-run passed. Production DB SHA remained `1cde40aa66846630d89b10d080a8837d204266c5ce32001a45d3b0c0c06197b1`.
+- Full-repository Ruff is not claimed; only the complete Stage 3D–5C changed/new Python surface is claimed as passing targeted Ruff. `ruff format --check` is not claimed.
+- `LIVE_XTP_ACCEPTANCE`, real CPython 3.9 + official binary execution, Login/Subscribe, Level 1/2 proof, sustained throughput, live 50–100-symbol Shadow and data storage/training/redistribution rights remain `PENDING`.
+
+## 24. Task R — Stage 3D–5C GitHub delivery
+
+Status: `PENDING`
+
+- Implementation commit, staged-tree evidence, handoff commit, push and local/remote SHA equality will be recorded here after the final Git gates pass.

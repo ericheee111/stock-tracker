@@ -303,6 +303,42 @@
     return resolved.href;
   }
 
+  function apiUrlWithQuery(path, query) {
+    const active = assertConfigured();
+    const normalizedPath = normalizeApiPath(path);
+    if (!query || typeof query !== 'object' || Array.isArray(query)) {
+      throw new RuntimeError('RUNTIME_CONFIG_ERROR', 'API query 必须是对象');
+    }
+    const resolved = new URL(normalizedPath, active.apiOrigin + '/');
+    const keys = Object.keys(query).sort();
+    keys.forEach(function (key) {
+      if (!/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(key) ||
+          /(?:token|secret|password|access|authorization)/i.test(key)) {
+        throw new RuntimeError('RUNTIME_CONFIG_ERROR', 'API query key 非法或包含敏感语义');
+      }
+      const raw = query[key];
+      const values = Array.isArray(raw) ? raw : [raw];
+      if (!values.length || values.length > 32) {
+        throw new RuntimeError('RUNTIME_CONFIG_ERROR', 'API query value 数量超限');
+      }
+      values.forEach(function (value) {
+        if (value === undefined || value === null) return;
+        if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') {
+          throw new RuntimeError('RUNTIME_CONFIG_ERROR', 'API query value 类型非法');
+        }
+        const text = String(value);
+        if (!text || text.length > 256 || /[\u0000-\u001f\u007f]/.test(text)) {
+          throw new RuntimeError('RUNTIME_CONFIG_ERROR', 'API query value 非法');
+        }
+        resolved.searchParams.append(key, text);
+      });
+    });
+    if (resolved.origin !== active.apiOrigin || resolved.pathname !== normalizedPath || resolved.hash) {
+      throw new RuntimeError('RUNTIME_CONFIG_ERROR', 'API query 规范化后逃离 /api/... 边界');
+    }
+    return resolved.href;
+  }
+
   function sseUrl() {
     const active = assertConfigured();
     return apiUrl(active.ssePath);
@@ -724,6 +760,7 @@
     normalizeOrigin: normalizeOrigin,
     normalizeApiPath: normalizeApiPath,
     apiUrl: apiUrl,
+    apiUrlWithQuery: apiUrlWithQuery,
     sseUrl: sseUrl,
     secureFetchOptions: secureFetchOptions,
     refreshHealth: refreshHealth,

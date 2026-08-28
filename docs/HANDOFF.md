@@ -2,7 +2,7 @@
 
 > 主理人：齐活林（Delivery Director）｜团队：许清楚(PM) / 高见远(Architect) / 寇豆码(Engineer) / 严过关(QA)
 > 对应 PRD：`docs/PRD-股票辅助判断与交易参考网站.md`（v1.1；A 股优先的个人交易决策驾驶舱）
-> 最新对齐日期：2026-08-26
+> 最新对齐日期：2026-08-28
 > 用途：供其他 Agent / 开发者按 v1.1 产品优先级、Hybrid H0–H5 与后续 Stage 路线接续工作。
 
 ---
@@ -36,6 +36,12 @@ stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + �
 - 新增 `RawDataArtifact + Trust Tier + request_parameters + normalized_dataset_id + capture_id` 的内容寻址捕获与重放合同；descriptor 绑定端点、复权模式、请求起止范围和 parser version；
 - 新增 `scripts/capture_quant_bars.py`，默认只生成 `BEST_EFFORT` Artifact，不修改生产 SQLite，也不能自我升级为 `RESEARCH_GRADE`；
 - 新增默认关闭的 `HithinkFinanceProvider` 与 `scripts/capture_hithink_bars.py`：只通过同花顺官方 HTTPS REST 捕获 A 股 `1d` exact raw JSON，凭据仅来自进程环境；它不参加 Runtime Quote/Snapshot/BAR 路由，不用于训练或公开再分发；
+- 2026-08-28 Stage 3D–5C 已完成 XTP/Monitor 工程链：独立 Python 3.9 Quote Sidecar、严格 loopback IPC、Simulator、官方 Quote 模块探针、独立 Market Event Store、Hash Chain/Manifest、分钟聚合、Monitor Rule/Inbox/API/SSE、Notification Worker、Monitor Workspace 与 64 标的 synthetic Shadow；
+- 用户已注册股票类型和算法类型 XTP 测试账户，但当前实现只允许未来使用股票 Quote 能力；算法账户、Trader/Order/Algo API、账户同步和自动交易均未接入；
+- XTP 真实凭据只允许通过 `STOCK_TRACKER_XTP_QUOTE_USER`、`STOCK_TRACKER_XTP_QUOTE_PASSWORD`、`STOCK_TRACKER_XTP_QUOTE_SERVER`、`STOCK_TRACKER_XTP_QUOTE_PORT`、`STOCK_TRACKER_XTP_QUOTE_PROTOCOL=TCP`、`STOCK_TRACKER_XTP_CLIENT_ID` 与 `STOCK_TRACKER_XTP_SIDECAR_ACCESS` 注入本机 Sidecar 环境；
+- Stage 3D–5C 最新门禁：专项 83 项通过/1 项跳过及 19 subtests、Runtime 512 项通过/1 项跳过及 316 subtests、Quant 563 项及 248 subtests、Monitor Workspace 49/49、H0 12/12、H1/H2 28/28 + 11/11、H4 18/18、Today 17/17、Portfolio 13/13、targeted Ruff、JS syntax、CPython 3.9 grammar、compileall、pip check、source distribution/no tracked bytecode、Quant smoke/benchmark 与 migration dry-run 通过；
+- Review 修复了 Event/分钟派生半提交、嵌套 Payload 可变与身份漂移、A 股交易日时区、Sidecar Session 快照/精确 URL、生产 SQLite 路径隔离、Monitor 并发首次 Trigger、规则版本快照、缺失事实 `NE` 假阳性、同步 EventBus 到有界异步 Worker 隔离、Notification Outbox 租约/Worker、SSE 背压、全库 Integrity 扫描、SQLite `IN` 参数上限、Replay GET 副作用/窗口、Query 数量、UTF-8 静态资源和 UI 事实选项等问题；
+- 真实 XTP Login/Subscribe、Level 1/2 权限、50–100 标的 Live Shadow、持续吞吐与数据存储/训练/再分发权仍为 `PENDING`；`allow_live_decision=false`、`allow_model_training=false`、`auto_trade=false`；
 - Scheduler 的重复 BAR 方法定义已收敛为一套；BAR Universe 覆盖 radar、自选、持仓和活跃信号；
 - 日线有效数据标记为 `DELAYED` 而不是 `LIVE`，避免把 EOD 数据伪装成盘中实时；
 - 下一阶段：A/HK/US golden raw payload、跨源 reconciliation、覆盖缺口报告，然后组装带 Calendar/Status/Universe/Corporate Action 的 T3 Snapshot。

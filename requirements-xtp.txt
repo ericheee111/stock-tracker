@@ -1,0 +1,4 @@
+# Optional main-runtime acceleration for Stage 3F replay.
+# The CPython 3.9 XTP sidecar itself remains standard-library-only and does not
+# install this file. DuckDB is used by the CPython 3.14 stock-tracker process.
+duckdb==1.5.5

@@ -1,13 +1,13 @@
 # Stock Tracker v1.1 产品 Gap Matrix 与 Stage 1/1.5 实施入口
 
 > 初始审计日期：2026-08-14
-> 最新对齐日期：2026-08-26
+> 最新对齐日期：2026-08-27
 > 工作区：`D:\Projects\stock-tracker`
 > 分支：`main`
 > 产品基准：`docs/PRD-股票辅助判断与交易参考网站.md` v1.1
 > 部署基准：`docs/HYBRID-DEPLOYMENT-ARCHITECTURE-v1.md`
 > Agent 规则：根目录 `AGENTS.md`
-> 状态：Stage 1 与 Stage 1.5 H0–H5 仓库侧工程合同已实现并通过本地回归；真实 Tailscale/两设备、Windows 主机恢复与 Pages 实际部署仍待 operational 验收，公开 Funnel/Tunnel 保持失败关闭
+> 状态：Stage 1、Hybrid H0–H5 与 Stage 3D–5C XTP/Monitor 仓库侧工程合同已实现并通过本地回归；真实 Tailscale/Pages、真实 XTP Quote、Level 1/2、持续吞吐和 Live Shadow 仍待 operational 验收，公开 Funnel/Tunnel 与自动交易保持失败关闭
 
 ---
 
@@ -40,15 +40,31 @@ Oracle Cloud 因实际无法注册，已从候选和应急依赖中移除。Rend
 | Engine/Tunnel/Auth/CORS/Stale UI | `IMPLEMENTED_VERIFIED` | Runtime 状态条、hard-failure 清理、STALE 决策阻断、SSE 401 不热重试 | 真实 Tunnel 故障演练 |
 | Tailscale Serve 私有访问 | `PARTIAL` | H0 提供 preflight/enable/status/disable、冲突配置失败关闭及临时 DB server/client 验收工具；本地远程式 REST/SSE/Portfolio CRUD 已通过 | 当前宿主未安装 Tailscale；真实 Serve 与两台不同 Tailnet 设备验收待执行 |
 | 开机自启、休眠与崩溃恢复 | `PARTIAL` | 有 start/stop 脚本 | 缺受支持的 Windows Service/Task Scheduler 验收 |
-| Cloudflare Pages 静态部署 | `NOT_IMPLEMENTED` | `web/` 已是静态资源 | Hybrid H4 |
-| GitHub Pages 静态备选 | `NOT_IMPLEMENTED` | `web/` 已是静态资源 | Hybrid H4 |
-| Tailscale Funnel / Cloudflare Tunnel | `NOT_IMPLEMENTED` | 无公开访问配置 | Hybrid H5，可选而非默认 |
+| Cloudflare Pages 静态部署 | `IMPLEMENTED_GATED` | H4 deterministic no-secret build、CSP/_headers、Manifest 与在线/离线浏览器验收 | 实际 Pages 项目部署与真实 API Origin 验收 |
+| GitHub Pages 静态备选 | `IMPLEMENTED_GATED` | 手工触发 Pages Workflow、官方 Artifact、no-secret Runtime Config | 仓库 Pages 实际启用与跨网络验收 |
+| Tailscale Funnel / Cloudflare Tunnel | `BLOCKED_BY_DESIGN` | H5 只读 preflight；公开限流与 enable action 未实现 | 新安全阶段和用户单独授权之前不启用 |
 | HiThink Financial-API A 股日线 exact-raw 捕获 | `IMPLEMENTED_GATED` | 官方 HTTPS REST Adapter、严格信封解析、内容寻址 Artifact CLI；默认关闭且不进入 Runtime | 真实 Key 小窗验收、账号授权/留存/训练/再分发条款、覆盖与跨源对账；当前仅 T1 |
 | Render 纯云部署 | `EXPERIMENTAL` | Docker/Blueprint 存在 | 休眠、持久化、Provider 可达性和安全门禁未通过 |
 
 部署切片顺序仍是：**H0 Tailscale Serve 整站同源 Bootstrap → H1 前端解耦 → H2 CORS/Health → H3 Serve Target Lane 加固 → H4 静态云部署 → H5 可选公开访问**。H0–H4 的仓库侧工程实现和本地验收已经通过；H5 已实现可信 Tailnet 优先、公开模式失败关闭的只读 preflight。当前不再有未实现的 Hybrid 主线代码切片，后续重点是补真实 Tailscale/两设备、Windows 恢复和 Pages operational 证据，以及继续 Stage 2 的真实 A 股数据质量与研究证据。在真实部署验收前，不能声称远程服务或云端静态网页已经正式上线。
 
-## 0.1 2026-08-14 Stage 1 集成更新
+## 0.1 2026-08-28 XTP / Market Event / Monitor 更新
+
+| 能力 | 当前状态 | 当前证据 | 剩余缺口 |
+|---|---|---|---|
+| XTP 资格与账户边界 | `IMPLEMENTED_GATED` | 股票/算法测试账户类别已记录；凭据仅环境变量；算法账户未使用；no-trading 合同 | 真实权限、SDK/ABI、Level 1/2 和数据保存权复验 |
+| XTP Read-only Sidecar | `IMPLEMENTED_GATED` | Python 3.9 隔离、IPv4 loopback、Simulator、严格 IPC/事件、Payload/Hash/交易日重验、Session 快照、官方 Quote 模块探针 | 真实 Login/Subscribe Adapter、CPython 3.9 + 官方二进制运行与账户验收 |
+| Market Event Store | `IMPLEMENTED_VERIFIED` | 独立 SQLite、生产库路径失败关闭、immutable files、Hash Chain、Manifest、协调提交、分钟聚合、分区 Integrity | 真实持续 Level 2 吞吐、磁盘保留/压缩/轮转基准 |
+| Signal Monitor Engine | `IMPLEMENTED_VERIFIED` | non-eval 规则、Scope、Cooldown、并发去重、不可变 Rule Snapshot、异步 Runtime Event Worker、Outbox 租约/Worker、有界 SSE、私有 API | 真实行情期长期误报率、规则模板库和通知渠道运营验收 |
+| Monitor Workspace | `IMPLEMENTED_VERIFIED` | Inbox/Rules/Data Link/Replay；390/768/1280 真实 API 浏览器验收 `49/49` | 真实 XTP 长时运行后的密度、性能和交互优化 |
+| XTP Synthetic Shadow | `IMPLEMENTED_FIXTURE_ONLY` | 64 标的、四板块、16 场景、256 比较；冲突保留 | 50–100 标的真实 Shadow、开收盘/停牌/涨跌停/断网样本 |
+| XTP 正式 Runtime Router | `BLOCKED` | `allow_live_decision=false`，主 Router 未接入 | 真实 operational 与 Trust 晋级证据 |
+| XTP 模型训练/PIT | `BLOCKED` | `allow_model_training=false`、`T3_NOT_REACHED` | 历史 Universe、公司行为、许可和研究级数据链 |
+| Trader/Algo/自动交易 | `NOT_IMPLEMENTED_BY_DESIGN` | 无交易端点、算法账户未使用、`auto_trade=false` | 新安全规格和用户单独授权之前不实施 |
+
+这条 Lane 改善的是盘中可观察性、数据链路审计和本地 Replay，不代表 Big Trend、Event Intelligence、真实策略战绩或模型准确率已完成。
+
+## 0.2 2026-08-14 Stage 1 集成更新
 
 本节覆盖下文基线审计中关于 Stage 1 “未实现/尚未开始”的旧状态。下文仍保留，用于说明实现前的差距和设计依据。
 

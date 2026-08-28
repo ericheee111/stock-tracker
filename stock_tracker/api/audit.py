@@ -26,6 +26,12 @@ _KNOWN_ROUTES = frozenset(
         "/api/config",
         "/api/events",
         "/api/overview",
+        "/api/monitor/summary",
+        "/api/monitor/data-link",
+        "/api/monitor/rules",
+        "/api/monitor/inbox",
+        "/api/monitor/replay",
+        "/api/monitor/outbox",
         "/api/portfolio",
         "/api/portfolio/positions",
         "/api/portfolio/profile",
@@ -44,6 +50,11 @@ _DYNAMIC_ROUTE_PATTERNS = (
     (re.compile(r"^/api/portfolio/positions/[^/]+$"), "/api/portfolio/positions/{position_id}"),
     (re.compile(r"^/api/signal/[^/]+$"), "/api/signal/{signal_id}"),
     (re.compile(r"^/api/quote/[^/]+$"), "/api/quote/{symbol}"),
+    (re.compile(r"^/api/monitor/rules/[^/]+$"), "/api/monitor/rules/{rule_id}"),
+    (
+        re.compile(r"^/api/monitor/inbox/[^/]+/transition$"),
+        "/api/monitor/inbox/{inbox_id}/transition",
+    ),
 )
 
 

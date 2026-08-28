@@ -2,11 +2,11 @@
 
 > **副标题：A 股优先的个人交易决策驾驶舱**
 >
-> 文档版本：v1.1（Grill 对齐 + 混合部署重构版）
+> 文档版本：v1.1.1（混合部署 + XTP/Monitor 工程补充）
 >
-> 文档状态：Design Freeze（v1.1 产品与混合部署合同已冻结；实现验收按 Stage 路线继续）
+> 文档状态：Design Freeze（产品与混合部署合同冻结；Stage 3D–5C XTP/Monitor 工程合同已对齐）
 >
-> 对齐日期：2026-08-24
+> 对齐日期：2026-08-27
 >
 > 产品定位：个人交易辅助系统；不承诺收益，当前不直接下单
 >
@@ -2148,6 +2148,53 @@ Render 免费 Web Service 只保留 Demo/可达性实验定位，不作为默认
 12. 组合风险。
 
 这是模型准确率提升的第一基础阶段。
+
+## Stage 3D：XTP 资格、账户与数据合同
+
+> **工程状态（2026-08-28）**：账户类别、ABI、只读 Quote、环境变量、Trust 与 no-trading 边界已完成审计。用户已注册股票类型和算法类型测试账户；本阶段只允许使用股票 Quote 能力，算法账户、Trader/Order/Algo API 均不使用。真实账号标识和秘密不得进入 Git、配置、URL、日志或前端。
+
+1. XTP 固定为本地 read-only A 股行情 Sidecar；
+2. 官方 Python 二进制与主运行时 ABI 隔离；
+3. 真实权限、Level 1/2、字段单位和保存权在 operational 验收中复验；
+4. XTP 不能自动替代历史 PIT、公司行为、Universe 或基本面数据；
+5. 真实连接也不能自动提升 Trust Tier。
+
+## Stage 3E：XTP Read-only Sidecar PoC
+
+> **工程状态（2026-08-28）**：loopback-only Simulator、严格事件信封、Bearer、Cursor、Session、延迟/Gap 指标和官方 Quote 模块探针已实现。事件 Payload/Hash/ID 在 Runtime 与 Store 边界重新验证，A 股 `trading_day` 按 UTC+08:00 校验；Health/Session/Metrics/Events 必须属于同一 Session。真实 XTP Login/Subscribe Adapter 仍保持失败关闭，`LIVE_XTP_ACCEPTANCE=PENDING`。
+
+1. 独立 Python 3.9/C++ 进程；
+2. 主 Python 3.14 不加载 XTP DLL/SO；
+3. 最多 20 个 PoC 标的；
+4. 不继承 Proxy，不允许 Redirect；
+5. 只提供 Health/Session/Metrics/Events GET；
+6. 不提供任何写入、订单或交易端点；
+7. `callback_seq` 只表示本地回调顺序。
+
+## Stage 3F：本地 Market Event Store
+
+> **工程状态（2026-08-28）**：独立 SQLite Catalog、immutable event files、SHA-256 Hash Chain、Manifest、Finding、分钟聚合和 Python/可选 DuckDB Replay 已实现并通过故障注入 Review。配置会拒绝复用生产 `data/stock_tracker.db`、Event/Monitor 共库和 Event/Quarantine 根重叠；Monitor GET Replay 保持无写副作用并绑定统一时间窗口。
+
+1. Event/Session/Finding/分钟聚合/Manifest 原子提交；
+2. Duplicate、Gap、Out-of-order 和时间回退可审计；
+3. 累计成交量/成交额按 Session 计算增量；
+4. 持久化分钟 Bar 不得标为 LIVE；
+5. 每 Poll 校验受影响分区，发布验收可执行全量 Integrity；
+6. 本地事件 Replay 不得冒充正式 Point-in-Time Replay。
+
+## Stage 4D：Signal Monitor Engine
+
+> **工程状态（2026-08-28）**：non-eval 规则、Scope、Cooldown、Duplicate Suppression、Inbox 生命周期、Browser SSE、可选 HTTPS Webhook 和私有 REST API 已实现。运行态事实通过上限 1024 的非阻塞 Queue 与独立 Worker 隔离，Monitor SQLite 不在 HOT/WARM 信号线程执行；Notification Outbox 使用原子租约并由独立 Worker 派发；SSE 慢客户端有界断开重连。Monitor 只观察允许事实，不改 ActionState、SignalState、评分、Trust、模型或订单。
+
+## Stage 4E：Monitor Workspace
+
+> **工程状态（2026-08-28）**：新增“盘中监控”页面，包括信号收件箱、规则中心、数据链路和 Replay。390/768/1280、真实 Python API、认证、离线、HTML escape、规则版本证据、Replay 同窗和生产数据库不变验收共 `49/49` 通过。现有 Today Decision Mode 保持产品主入口。
+
+## Stage 5C：XTP Shadow Acceptance
+
+> **工程状态（2026-08-28）**：64 标的、四板块、16 场景、256 次跨源比较的 synthetic fixture 已通过。冲突和不可用源被保留，HiThink/free-stockdb 日频数据不冒充盘中同频验证。真实股票 Quote 账号 Shadow、Level 1/2 权限、持续吞吐以及数据保存/训练/再分发权验收仍为 `PENDING`。
+
+以上 3D–5C 为运行监控扩展 Lane，不替代下述 Event Intelligence、真实 Outcome/PIT Replay 和模型晋级主线。
 
 ## Stage 3：Event Intelligence + Big Trend v1
 

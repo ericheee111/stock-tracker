@@ -6,7 +6,10 @@
   'use strict';
 
   const Runtime = global.Runtime;
-  const TYPES = ['quote', 'signal', 'regime', 'sector', 'provider_health'];
+  const TYPES = [
+    'quote', 'signal', 'regime', 'sector', 'provider_health',
+    'monitor.inbox', 'monitor.notification'
+  ];
   const listeners = {};
   TYPES.forEach(function (type) { listeners[type] = []; });
   listeners.open = [];

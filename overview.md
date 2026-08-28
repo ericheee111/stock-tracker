@@ -41,7 +41,11 @@ Stock Tracker 不把“指标很多”或“模型分数很高”当成最终答
 - 基础 Market Regime、Sector、S1/S2/S3；
 - Opportunity / Timing / Risk / Confidence；
 - Risk Gate、信号状态机、Next Trigger、What Changed、拥挤度；
-- REST、SSE 与原有驾驶舱页面。
+- REST、SSE 与原有驾驶舱页面；
+- 默认关闭的 XTP read-only Quote Sidecar 工程链：Python 3.9 隔离、IPv4 loopback IPC、Simulator、严格 Event/Session/Hash/交易日合同和官方 Quote 模块探针；
+- 独立 Market Event Store：生产库路径失败关闭、immutable files、SHA-256 Hash Chain、Manifest、协调提交、分钟聚合和本地 Replay；
+- Signal Monitor Engine、私有 Monitor REST/SSE、不可变 Rule Snapshot、Outbox 租约/Notification Worker 与 Inbox/Rules/Data Link/Replay 工作台；
+- 64 标的 synthetic XTP Shadow；真实 XTP、Level 1/2、持续吞吐、保存权和 Live Shadow 仍待验收。
 
 ### 部署现状与目标
 
@@ -54,15 +58,15 @@ Stock Tracker 不把“指标很多”或“模型分数很高”当成最终答
 - 本地远程式静态页、REST、SSE、Profile/Position CRUD 验收通过；
 - Docker / Render Demo 配置只以 `PURE_CLOUD_EXPERIMENTAL` 显式 opt-in。
 
-当前尚未具备完整混合部署能力：
+仓库侧 Hybrid H0–H5 已实现；当前尚待 operational 验收：
 
-- 前端 REST/SSE 仍写死同源相对路径；
-- 真实宿主上的 Tailscale Serve 尚未启用，且未在两台不同 Tailnet 设备上完成 operational 验收；
-- 尚无无密钥 Runtime Config 和统一 `apiBaseUrl`；
-- 尚无精确 CORS Allowlist、`OPTIONS` 和 `/api/runtime/health`；
-- 尚未完成 Cloudflare Pages/GitHub Pages、开机自启、休眠防护和断线恢复验收。
+- 真实 Tailscale Serve 和两台不同 Tailnet 设备；
+- Windows 重启、休眠/唤醒和网络恢复；
+- Cloudflare Pages/GitHub Pages 实际部署；
+- 任何公开 Funnel/Tunnel；
+- 真实 XTP Quote、Level 1/2、50–100 标的 Live Shadow 和持续吞吐。
 
-因此 Render 免费后端只保留实验定位；默认目标是本地引擎承担采集、计算、SQLite 和私有持仓，云端只托管静态网页。
+因此 Render 免费后端只保留实验定位；默认目标是本地引擎承担采集、计算、SQLite、XTP Sidecar、Monitor 和私有持仓，云端只托管无密钥静态网页。
 
 ### Stage 1 Today Action
 

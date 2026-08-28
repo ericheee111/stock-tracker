@@ -1,7 +1,7 @@
 """SSE 推送（§9.2 / PRD #26）。
 
-``SSEHub`` 订阅 ``core.eventbus`` 的 ``quote`` / ``signal`` / ``regime`` / ``sector`` /
-``provider_health`` 事件，向所有已连接客户端广播。每个客户端持有一个 ``queue.Queue``，
+``SSEHub`` 订阅 ``core.eventbus`` 的行情、信号、市场状态与 Monitor Inbox/通知
+主题，向所有已连接客户端广播。每个客户端持有一个 ``queue.Queue``，
 由 HTTP handler 长连读取并逐条写出 ``event:`` / ``data:`` 帧。
 
 注意：本模块只做转发，不触上游；所有事件由 Collector / SignalManager 发布。
@@ -11,7 +11,22 @@ from __future__ import annotations
 
 import queue
 import threading
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
+
+SSE_OVERFLOW_TOPIC = "__stock_tracker_sse_overflow__"
+
+_FORWARD_TOPICS = frozenset(
+    {
+        "quote",
+        "signal",
+        "regime",
+        "sector",
+        "provider_health",
+        "monitor.inbox",
+        "monitor.notification",
+    }
+)
 
 
 class SSEHub:
@@ -25,23 +40,32 @@ class SSEHub:
 
     def _on_event(self, topic: str, payload: Any) -> None:
         # 只转发关注的事件类型，避免噪音
-        if topic not in ("quote", "signal", "regime", "sector", "provider_health"):
+        if topic not in _FORWARD_TOPICS:
             return
         with self._lock:
             dead = []
             for q in list(self._clients):
                 try:
                     q.put_nowait((topic, payload))
-                except Exception:
+                except queue.Full:
+                    try:
+                        q.get_nowait()
+                    except queue.Empty:
+                        pass
+                    try:
+                        q.put_nowait((SSE_OVERFLOW_TOPIC, {}))
+                    except queue.Full:
+                        q.get_nowait()
+                        q.put_nowait((SSE_OVERFLOW_TOPIC, {}))
                     dead.append(q)
             for q in dead:
                 self._clients.discard(q)
 
-    def add_client(self, q: "queue.Queue") -> None:
+    def add_client(self, q: queue.Queue) -> None:
         with self._lock:
             self._clients.add(q)
 
-    def remove_client(self, q: "queue.Queue") -> None:
+    def remove_client(self, q: queue.Queue) -> None:
         with self._lock:
             self._clients.discard(q)
 
