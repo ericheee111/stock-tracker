@@ -375,9 +375,11 @@ Status: `COMPLETED`
 
 ## 27. Task U — Stage 2G post-review hardening
 
-Status: `ENGINEERING_READY / GIT_DELIVERY_PENDING`
+Status: `COMPLETED / REAL_SOURCE_RECONCILIATION_PENDING`
 
 - Added UTF-8-BOM-aware body HTML rejection, canonical URL and authority/credential Header refusal, duplicate header-name rejection, Eastmoney duplicate/chronology validation, Symbol/Market identity validation, pinned Golden Pack identities, future-artifact exclusion, capture-local non-final Daily Session exclusion, symlink/junction-safe report writes, and exact raw-bytes/parser revalidation with detached canonical Bar copies.
 - Preserved the published v1 Golden Pack and its legacy Eastmoney parser identity; added default v2 bound to `eastmoney-bars-v3-strict-research`.
 - Exact Git Index export passed focused Stage/Provider `93 + 54 subtests`, Runtime `520/1`, Quant `602/2 + 220 subtests`, H0 `12/12`, H1/H2 `28/28 + 11/11`, H4 `18/18`, Monitor `49/49`, Mock/real Today `17/17`, Portfolio `13/13`, targeted Ruff, compileall and cached-diff.
-- Index boundary contained 28 Stage 2G hardening files and no `web/**`, generated artifact, database, bytecode, archive or credential finding. Git commit/push and final remote SHA equality remain pending.
+- Index boundary contained 28 Stage 2G hardening files and no `web/**`, generated artifact, database, bytecode, archive or credential finding.
+- Hardening commit `57b06e1ac230e6b7b770ffc876f40b07942979b2` (`fix: harden Stage 2G evidence boundaries`) has verified tree `fb09a33987b1743ed540bb94a7973d189c724cc9` and was pushed to `origin/main`.
+- After push, local `HEAD`, local `origin/main`, and GitHub `refs/heads/main` were verified equal at `57b06e1ac230e6b7b770ffc876f40b07942979b2`. Real-source reconciliation, licence clearance, authoritative auxiliary-data binding and T3 remain pending.

@@ -330,7 +330,7 @@ git diff --cached --check      PASSED
 Index generated/secret scan    28 staged files / 0 findings
 ```
 
-两个 Quant skip 仅因为 Git archive 导出树没有 `.git`；相同 source-distribution/no-bytecode 门禁已在真实 checkout 中通过 `3 passed + 70 subtests`。本报告不预写尚未创建的 hardening commit 或远端 SHA。
+两个 Quant skip 仅因为 Git archive 导出树没有 `.git`；相同 source-distribution/no-bytecode 门禁已在真实 checkout 中通过 `3 passed + 70 subtests`。已验收 tree `fb09a33987b1743ed540bb94a7973d189c724cc9` 由 hardening commit `57b06e1ac230e6b7b770ffc876f40b07942979b2` 提交并推送；推送后 local `HEAD`、local `origin/main` 与 GitHub `refs/heads/main` 三方一致。
 
 ## 6. Final Verdict
 

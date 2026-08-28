@@ -337,12 +337,26 @@ delivery handoff commit:
 2d7d96e52fb18c58c8af4440cfd5ea13f30c157b
 ```
 
-本轮新增的 post-review hardening 状态为：
+本轮 post-review hardening 已完成交付：
 
 ```text
-PENDING_FINAL_INDEX_REVIEW_AND_PUSH
+hardening commit:
+57b06e1ac230e6b7b770ffc876f40b07942979b2
+
+hardening tree:
+fb09a33987b1743ed540bb94a7973d189c724cc9
+
+commit message:
+fix: harden Stage 2G evidence boundaries
 ```
 
-只有在最新加固的定向暂存、精确 Git Index 导出、staged-tree 回归、generated/secret scan 和 `git diff --cached --check` 全部通过后，才会追加 hardening commit、tree 与远端 SHA。
+该 tree 即本文件记录的精确 Git Index 验收树。推送后已验证：
 
-并行 UI 工作继续保持未暂存，不得进入 Stage 2G hardening 提交。
+```text
+local HEAD
+= local origin/main
+= GitHub refs/heads/main
+= 57b06e1ac230e6b7b770ffc876f40b07942979b2
+```
+
+并行 UI 工作继续保持未暂存，没有进入 Stage 2G hardening 提交。
