@@ -10,9 +10,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypeAlias
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from stock_tracker.collector.eastmoney import EastmoneyProvider
 from stock_tracker.collector.tencent import TencentProvider
@@ -40,6 +46,29 @@ def _date(value: str) -> datetime:
         return datetime.strptime(value, "%Y-%m-%d")  # noqa: DTZ007
     except ValueError as exc:
         raise argparse.ArgumentTypeError("date must use YYYY-MM-DD") from exc
+
+
+def _is_link(path: Path) -> bool:
+    isjunction = getattr(os.path, "isjunction", lambda _: False)
+    return path.is_symlink() or bool(isjunction(path))
+
+
+def _validated_output_root(path: Path) -> Path:
+    output = path.expanduser().absolute()
+    for candidate in (output, *output.parents):
+        if candidate.exists() and _is_link(candidate):
+            raise RuntimeError(
+                "artifact output root cannot traverse a symlink or junction"
+            )
+    resolved = output.resolve(strict=False)
+    production_database = (PROJECT_ROOT / "data" / "stock_tracker.db").resolve(
+        strict=False
+    )
+    if resolved == production_database:
+        raise RuntimeError("artifact output root cannot target the production database")
+    if resolved.exists() and not resolved.is_dir():
+        raise RuntimeError("artifact output root must be a directory")
+    return resolved
 
 
 def _provider(config_path: Path, provider_name: str = "eastmoney") -> RawBarProvider:
@@ -92,14 +121,18 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     market = Market(args.market)
+    output_root = _validated_output_root(args.output_root)
+    if args.start is not None and args.end is not None and args.end < args.start:
+        raise RuntimeError("--end cannot precede --start")
     provider = _provider(args.providers_config, args.provider)
     if not provider.applies_to(market):
         raise RuntimeError(
             f"{args.provider} is not configured for market {market.value}"
         )
-    if not provider.supports_adjustment(args.adjust):
+    if not provider.supports_market_adjustment(market, args.adjust):
         raise RuntimeError(
-            f"{args.provider} cannot honestly provide adjustment={args.adjust}"
+            f"{args.provider} cannot honestly provide adjustment={args.adjust} "
+            f"for market={market.value}"
         )
     strict_parser = provider.parse_bars_strict
     raw = provider.fetch_bars_raw(
@@ -111,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         adjust=args.adjust,
     )
     captured = capture_market_bars(
-        args.output_root,
+        output_root,
         raw_bytes=raw,
         parser=strict_parser,
         symbol=args.symbol,

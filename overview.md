@@ -93,6 +93,7 @@ Stock Tracker 不把“指标很多”或“模型分数很高”当成最终答
 - Point-in-Time Fact / Snapshot；
 - 稳定 fingerprint 与 Manifest；
 - Stage 2G 三市场 synthetic Golden Raw、Eastmoney/Tencent exact-raw 安全捕获、字段级跨源对账与 Calendar Session Coverage 合同；
+- Stage 2H–2J A 股 `1d + qfq` Acceptance Manifest、untrusted Assurance Declaration Registry 与 fail-closed T3 Preflight；声明为非 synthetic 的 Capture 最多进入 `PENDING_INDEPENDENT_AUTHORITY`，不会自我晋级为 T3；
 - 交易日历、证券状态和可信数据合同；
 - Market Rule、Cost Schedule、next executable price；
 - A 股 T+1、停牌、涨跌停与交易单位执行合同；
@@ -188,7 +189,7 @@ Stage 1 只实际启用已经有确定性证据支持的动作；部分止盈和
 - 真实 free-stockdb 发行包、同步网络和数据许可审计；
 - free-stockdb 在 WARM/COLD Shadow Scanner 中的真实启用；
 - 使用真实 T3 快照的 Point-in-Time Replay 产品与 UI；
-- Stage 2G Synthetic Golden 已完成，但真实双源行情独立性、字段单位/币种、复权等价和许可尚未完成；
+- Stage 2H–2J 工程合同已实现，但当前只有 Tencent 单源真实 Capture；Eastmoney 当前网络失败，真实双源、来源独立性、字段单位/币种、复权等价、许可和 Trusted Authority 尚未完成；
 - T3 研究级完整 A 股 Snapshot；
 - 模型已经真实击败简单基线；
 - 港股通和美股独立校准；
@@ -202,6 +203,8 @@ Model Score != 胜率
 Opportunity / 100 != 概率
 Synthetic benchmark != 真实投资战绩
 Stage 2G Synthetic Golden != 真实跨源行情证据
+Stage 2H non-synthetic-declared != 独立真实来源证明或 T3
+Assurance Declaration != Trusted Authority Approval
 运行 SQLite Bar != 自动成为训练数据
 free-stockdb 本地可达 != T2/T3 或可训练
 free-stockdb 当前板块映射 != 历史 PIT 成分
@@ -279,7 +282,7 @@ Stage 2B—6A 的后端工程合同已经形成。Hybrid H0—H5 的仓库侧工
 5. **Hybrid H5（失败关闭）：可信朋友优先加入 Tailnet；公开 Funnel/Tunnel 在独立限流与安全 Review 前不启用；**
 6. **Stage 3C.2：固定真实 free-stockdb Release，审计二进制、首次运行网络、同步源、manifest 和数据许可；**
 7. **HiThink Financial-API：使用真实账户凭据做小窗口 exact-raw 日线捕获与许可审查；保持默认关闭和 T1，不进入 Runtime、训练或再分发；**
-8. **Stage 2G 真实证据：使用 `capture_quant_bars.py --provider eastmoney|tencent` 对 A/HK/US 小窗口做双源 exact-raw 捕获，审计来源独立性、字段单位/币种、QFQ 等价、许可和权威 Calendar；Synthetic Golden 不得替代这一步；**
+8. **Stage 2H operational：恢复 Eastmoney 可达性或配置另一个获准来源，与已成功的 Tencent A 股 QFQ Capture 形成真实双源 Acceptance；再由仓库外独立主体提供 Source Independence、字段单位/币种、复权、许可、Calendar/Status/Universe/Corporate Action 证据。Stage 2I Declaration 只登记输入，不能替代 Trusted Authority；**
 9. **建设真实 Outcome 的追加式持久化与独立样本收集，达到门槛前 Strategy Scoreboard 保持 `INSUFFICIENT_REAL_EVIDENCE`；**
 10. **闭环 T3 A 股 Snapshot、正式 PIT Replay、Replay UI、真实新样本 Shadow 与受控模型部署；**
 11. **依次进入 Stage 6B—6F 的港股通、美股独立数据、校准、Scoreboard、Shadow 与真实证据审查。**

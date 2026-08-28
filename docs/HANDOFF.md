@@ -38,6 +38,8 @@ stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + �
 - 新增默认关闭的 `HithinkFinanceProvider` 与 `scripts/capture_hithink_bars.py`：只通过同花顺官方 HTTPS REST 捕获 A 股 `1d` exact raw JSON，凭据仅来自进程环境；它不参加 Runtime Quote/Snapshot/BAR 路由，不用于训练或公开再分发；
 - 2026-08-28 Stage 2G 已完成 A/HK/US 三市场 synthetic Golden Raw 与 Market-Bar Reconciliation 工程合同：Eastmoney/Tencent exact-raw 使用系统 CA、无 Proxy/Redirect/Host Override，拒绝 authority/credential Header、非规范 URL、Header 注入及带 BOM 的伪 HTML；Tencent QFQ 不回退未复权节点；v1 Golden Pack 保持已发布固定身份，默认 v2 绑定 Eastmoney strict parser v3；Raw/Parser/Schema/Source/Case/Pack ID、exact raw bytes 与 Parser 均重新验证并形成 detached canonical rows；字段冲突、Calendar Session 缺口、future Artifact、Capture 当地同日/未来 Daily Bar 和 Report link 越界失败关闭；来源独立性、字段单位、复权、许可、权威 Calendar 和 T3 仍保持 blocker；
 - Stage 2G post-review hardening 门禁：checkout focused `93 + 54 subtests`、Runtime `520/1`、Quant `604 + 290 subtests`、source-distribution/no-bytecode `3 + 70 subtests`；精确 Index export 通过 focused `93 + 54`、Runtime `520/1`、Quant `602/2 + 220`、H0 `12/12`、H1/H2 `28/28 + 11/11`、H4 `18/18`、Monitor `49/49`、Mock/real Today `17/17`、Portfolio `13/13`，compileall、targeted Ruff、pip check、Quant smoke/benchmark、SQLite-forbidden CLI sandbox、read-only backup migration dry-run、cached-diff 与 28 文件 generated/secret scan 全部通过；Review 为 `ENGINEERING_READY_FOR_MERGE / REAL_SOURCE_RECONCILIATION_PENDING / T3_NOT_REACHED`；
+- 2026-08-29 Stage 2H–2J 已实现 exact-raw Acceptance Manifest、Assurance Declaration Registry 与永不自我晋级的 T3 Preflight：至少双来源、`1d + qfq`、Parser/Schema/Descriptor/Raw 重放、Calendar Session、内容寻址 Case/Manifest/Report、synthetic Declaration 排除、source scope、PIT 时间和 symlink/junction/生产 DB 路径失败关闭；状态最多为 `NON_SYNTHETIC_DECLARED_STRUCTURALLY_CONSTRUCTIBLE / PENDING_INDEPENDENT_AUTHORITY`，固定 `research_grade=false / t3_reached=false`；
+- 本机真实探针中 Tencent `600519.SH` 2026-08-18..20 QFQ Capture 成功并保存为本地 BEST_EFFORT Artifact；Eastmoney 同窗口在响应前 `RemoteDisconnected`，未形成双源证据。真实双源、许可、字段单位、复权等价、权威 Calendar/Status/Universe/Corporate Action 和 Trusted Authority 均保持 `PENDING`；
 - 2026-08-28 Stage 3D–5C 已完成 XTP/Monitor 工程链：独立 Python 3.9 Quote Sidecar、严格 loopback IPC、Simulator、官方 Quote 模块探针、独立 Market Event Store、Hash Chain/Manifest、分钟聚合、Monitor Rule/Inbox/API/SSE、Notification Worker、Monitor Workspace 与 64 标的 synthetic Shadow；
 - 用户已注册股票类型和算法类型 XTP 测试账户，但当前实现只允许未来使用股票 Quote 能力；算法账户、Trader/Order/Algo API、账户同步和自动交易均未接入；
 - XTP 真实凭据只允许通过 `STOCK_TRACKER_XTP_QUOTE_USER`、`STOCK_TRACKER_XTP_QUOTE_PASSWORD`、`STOCK_TRACKER_XTP_QUOTE_SERVER`、`STOCK_TRACKER_XTP_QUOTE_PORT`、`STOCK_TRACKER_XTP_QUOTE_PROTOCOL=TCP`、`STOCK_TRACKER_XTP_CLIENT_ID` 与 `STOCK_TRACKER_XTP_SIDECAR_ACCESS` 注入本机 Sidecar 环境；
@@ -46,7 +48,7 @@ stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + �
 - 真实 XTP Login/Subscribe、Level 1/2 权限、50–100 标的 Live Shadow、持续吞吐与数据存储/训练/再分发权仍为 `PENDING`；`allow_live_decision=false`、`allow_model_training=false`、`auto_trade=false`；
 - Scheduler 的重复 BAR 方法定义已收敛为一套；BAR Universe 覆盖 radar、自选、持仓和活跃信号；
 - 日线有效数据标记为 `DELAYED` 而不是 `LIVE`，避免把 EOD 数据伪装成盘中实时；
-- 下一阶段：用真实小窗口 A/HK/US 双源 exact-raw 数据运行 Stage 2G 对账，完成来源独立性、字段单位/币种、复权和许可审计，并绑定权威 Calendar/Status/Universe/Corporate Action；只有全部 blocker 有独立证据关闭后才评估 T3 Snapshot。
+- 下一阶段：恢复 Eastmoney 或配置另一个获准来源，完成 A 股真实双源 Stage 2H Acceptance；随后由仓库外独立主体提供可审计、可撤销的 Source Independence、字段单位/币种、复权、许可与辅助事实证据。只有 Trusted Authority Registry 能验证并关闭全部 blocker 后，才另立 T3 Snapshot Assembler。
 
 ---
 

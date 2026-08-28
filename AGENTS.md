@@ -145,6 +145,18 @@ qa/                       前端/可视化 QA 工具
 - 来源名称不同不等于独立来源已证明；字段单位、币种、复权等价、许可和权威 Calendar 均必须由外部证据关闭 blocker；
 - Stage 2G 输出不得自动进入训练、回测、校准、模型晋级或正式决策。
 
+### 5.5 Stage 2H–2J Acceptance / Assurance / T3 Preflight 边界
+
+- Acceptance 只能消费已存在的 exact-raw Capture descriptor，并重新验证 Raw、Artifact、Parser、Schema、Normalized Dataset 与 Capture ID；
+- 当前 Acceptance 只允许 `1d + qfq`，至少两个唯一来源；
+- `synthetic_fixture=false` 只能称为 `NON_SYNTHETIC_DECLARED`，不得写成独立证明的真实来源；
+- Assurance Declaration 是未受信任的审查输入，不是批准权；synthetic、future、scope 不匹配或未引用 Declaration 不得满足 Coverage；
+- Source-scoped Assurance 必须明确来源；Source Independence 必须在同一声明中覆盖全部比较来源；
+- 辅助 Reconciliation/Corporate Action report ID 的存在只代表引用已声明，必须继续保留未独立验证 blocker；
+- T3 Preflight 只允许 `HARD_BLOCKED / EVIDENCE_PACKAGE_INCOMPLETE / PENDING_INDEPENDENT_AUTHORITY`，不得实现调用方可达的自动 `T3_REACHED`；
+- Acceptance 输出固定 `research_grade=false`、`t3_reached=false`、`license_clearance_complete=false`，直到新阶段建立受信任、独立、可撤销的 Authority Registry；
+- `data/` 下真实 Capture、Manifest 与 Report 不得提交 Git，也不得修改生产 SQLite。
+
 ## 6. 数据可信等级
 
 统一使用：

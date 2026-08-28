@@ -111,6 +111,9 @@ class TestCaptureHithinkBarsCli(unittest.TestCase):
                 value["request_parameters"]["upstream_adjustment"],
                 "none",
             )
+            self.assertFalse(
+                value["request_parameters"]["synthetic_fixture"]
+            )
             storage_path = Path(directory) / value["storage_key"]
             self.assertTrue(storage_path.is_file())
             self.assertEqual(storage_path.read_bytes(), raw)
@@ -122,6 +125,54 @@ class TestCaptureHithinkBarsCli(unittest.TestCase):
             self.assertEqual(descriptor["artifact"]["source"], "hithink_finance")
             self.assertEqual(descriptor["artifact"]["market"], T.Market.A.value)
             self.assertFalse((Path(directory) / "stock_tracker.db").exists())
+
+    def test_cli_rejects_invalid_range_and_unsafe_output_before_provider(self) -> None:
+        with patch.object(cli, "_provider") as provider, self.assertRaisesRegex(
+            RuntimeError,
+            "--end cannot precede --start",
+        ):
+            cli.main(
+                [
+                    "--symbol",
+                    "600519.SH",
+                    "--start",
+                    "2024-01-03",
+                    "--end",
+                    "2024-01-02",
+                ]
+            )
+        provider.assert_not_called()
+
+        with self.assertRaisesRegex(RuntimeError, "production database"):
+            cli.main(
+                [
+                    "--symbol",
+                    "600519.SH",
+                    "--start",
+                    "2024-01-02",
+                    "--end",
+                    "2024-01-03",
+                    "--output-root",
+                    str(ROOT / "data" / "stock_tracker.db"),
+                ]
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            output_file = Path(directory) / "artifact-file"
+            output_file.write_text("not a directory", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "must be a directory"):
+                cli._validated_output_root(output_file)
+
+            root = Path(directory).absolute()
+            with patch.object(
+                cli,
+                "_is_link",
+                side_effect=lambda path: path == root,
+            ), self.assertRaisesRegex(
+                RuntimeError,
+                "traverse a symlink or junction",
+            ):
+                cli._validated_output_root(root / "nested" / "artifacts")
 
 
 if __name__ == "__main__":

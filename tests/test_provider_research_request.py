@@ -263,6 +263,59 @@ class TestResearchExactRawRequest(unittest.TestCase):
                     max_response_bytes=100,
                 )
 
+    def test_explicit_mislabeled_json_exception_requires_strict_json_body(self) -> None:
+        url = "https://example.com/api"
+        valid = _Opener(
+            response=_Response(
+                url=url,
+                body=b'{"code":0,"data":{}}',
+                headers={"Content-Type": "text/html; charset=UTF-8"},
+            )
+        )
+        with patch(
+            "stock_tracker.collector.provider.urllib_request.build_opener",
+            return_value=valid,
+        ):
+            raw = self._provider()._request_research(
+                url,
+                allow_mislabeled_json=True,
+            )
+        self.assertEqual(raw, b'{"code":0,"data":{}}')
+
+        cases = (
+            (b"<html><body>error</body></html>", "HTML error page"),
+            (b"not-json", "not valid JSON"),
+            (b'{"code":0,"code":1}', "duplicate keys"),
+            (b'{"value":NaN}', "non-finite token"),
+            (b"123", "object or array"),
+        )
+        for body, expected in cases:
+            opener = _Opener(
+                response=_Response(
+                    url=url,
+                    body=body,
+                    headers={"Content-Type": "text/html; charset=UTF-8"},
+                )
+            )
+            with self.subTest(expected=expected), patch(
+                "stock_tracker.collector.provider.urllib_request.build_opener",
+                return_value=opener,
+            ), self.assertRaisesRegex(ValueError, expected):
+                self._provider()._request_research(
+                    url,
+                    allow_mislabeled_json=True,
+                )
+
+    def test_mislabeled_json_flag_requires_boolean(self) -> None:
+        with patch(
+            "stock_tracker.collector.provider.urllib_request.build_opener"
+        ) as build_opener, self.assertRaisesRegex(ValueError, "must be boolean"):
+            self._provider()._request_research(
+                "https://example.com/api",
+                allow_mislabeled_json=1,  # type: ignore[arg-type]
+            )
+        build_opener.assert_not_called()
+
     def test_non_json_content_type_and_invalid_content_length_fail_closed(self) -> None:
         url = "https://example.com/api"
         cases = (

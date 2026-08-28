@@ -2168,6 +2168,47 @@ Render 免费 Web Service 只保留 Demo/可达性实验定位，不作为默认
 docs/STAGE2G-MARKET-BAR-GOLDEN-RECONCILIATION-CONTRACT.md
 ```
 
+## Stage 2H：Exact-Raw Market-Bar Acceptance
+
+> **工程状态（2026-08-29）**：已建立基于已捕获 descriptor 的离线接受 Manifest、Parser/Schema/Raw 重放、至少双来源、`1d + qfq`、Calendar Session 与 Stage 2G Reconciliation 复验合同。状态只允许 `HARD_BLOCKED / SYNTHETIC_CONTRACT_ONLY / NON_SYNTHETIC_DECLARED_STRUCTURALLY_CONSTRUCTIBLE`；`synthetic_fixture=false` 仅是本地声明，不是独立真实来源证明。
+
+1. Capture Reference 绑定 source、descriptor key 与 parser-binding ID；
+2. Manifest 绑定 Case、as-of、Calendar Snapshot、Open Sessions、Comparable Fields 与外部声明；
+3. Raw/Descriptor/Parser/Schema/Normalized Dataset/Capture ID 任一不一致均失败；
+4. 当前真实兼容交集固定为 A 股日线 `qfq`；
+5. Capture/Manifest/Report 路径拒绝 symlink/junction 和生产 SQLite；
+6. 数据输出只进入本地 `data/`，不得提交真实 raw payload；
+7. 2026-08-28 本机探针中 Tencent A 股三日 QFQ Capture 成功，Eastmoney 在当前网络 `RemoteDisconnected`，因此真实双源仍为 `PENDING`。
+
+## Stage 2I：External Assurance Declaration Registry
+
+> **工程状态（2026-08-29）**：已建立内容寻址的 Assurance Declaration 与 Coverage 合同，但仓库没有 Trusted Assurance Authority。Declaration 只作为审查输入，不能自行关闭 Trust Blocker。
+
+1. 支持 Calendar、Policy、Source Independence、Field Unit、Adjustment、Artifact、Live Provenance、License、Security/Universe、Corporate Action 与 T3 Decision 类型；
+2. `known_at <= usable_from <= manifest.created_at`；
+3. Source-scoped 声明必须列出来源，Source Independence 至少覆盖两个来源；
+4. synthetic 声明不满足 Coverage；
+5. 未覆盖 Case market/source/as-of 的声明无效；
+6. 不允许未引用声明、缺失声明或 ID/内容不一致；
+7. 多个单源声明可覆盖 License/Unit/Adjustment，但 Source Independence 必须同一声明覆盖全部来源。
+
+## Stage 2J：T3 Preflight
+
+> **工程状态（2026-08-29）**：已实现 `HARD_BLOCKED / EVIDENCE_PACKAGE_INCOMPLETE / PENDING_INDEPENDENT_AUTHORITY` 三态 Preflight；没有自动 `T3_REACHED` 路径。
+
+1. Reconciliation 硬冲突直接 `HARD_BLOCKED`；
+2. synthetic Capture、Assurance 类型缺失或辅助报告引用缺失为 `EVIDENCE_PACKAGE_INCOMPLETE`；
+3. 非 synthetic-declared Capture、声明包和引用齐全后最多为 `PENDING_INDEPENDENT_AUTHORITY`；
+4. 辅助报告 ID 只表示引用存在，仍保留 Security/Universe 与 Corporate Action 未独立验证阻断；
+5. 输出固定 `trusted_assurance_authority_configured=false`、`research_grade=false`、`t3_reached=false`、`license_clearance_complete=false`；
+6. 只有未来新增受信任、独立、可撤销的 Authority Registry 后，才能另立 T3 组装阶段。
+
+规范见：
+
+```text
+docs/STAGE2H-STAGE2J-MARKET-BAR-ACCEPTANCE-DESIGN.md
+```
+
 ## Stage 3D：XTP 资格、账户与数据合同
 
 > **工程状态（2026-08-28）**：账户类别、ABI、只读 Quote、环境变量、Trust 与 no-trading 边界已完成审计。用户已注册股票类型和算法类型测试账户；本阶段只允许使用股票 Quote 能力，算法账户、Trader/Order/Algo API 均不使用。真实账号标识和秘密不得进入 Git、配置、URL、日志或前端。

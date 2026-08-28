@@ -212,9 +212,14 @@ class TencentProvider(MarketDataProvider):
         return True
 
     def supports_adjustment(self, adjust: str) -> bool:
-        """腾讯当前只能诚实提供其前复权日线合同。"""
+        """Tencent's strict parser supports the qfqday response contract."""
 
         return adjust == "qfq"
+
+    def supports_market_adjustment(self, market: T.Market, adjust: str) -> bool:
+        """The live endpoint has only demonstrated qfqday for A shares."""
+
+        return self.applies_to(market) and market is T.Market.A and adjust == "qfq"
 
     def _bars_url(
         self,
@@ -252,7 +257,8 @@ class TencentProvider(MarketDataProvider):
         self._validate_bar_identity(symbol, market)
         self._rl.acquire()
         return self._request_research(
-            self._bars_url(symbol, market, interval, start, end, adjust)
+            self._bars_url(symbol, market, interval, start, end, adjust),
+            allow_mislabeled_json=True,
         )
 
     def _parse_bars(

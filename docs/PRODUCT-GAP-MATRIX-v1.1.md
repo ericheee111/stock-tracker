@@ -77,7 +77,21 @@ Oracle Cloud 因实际无法注册，已从候选和应急依赖中移除。Rend
 
 Stage 2G 的 `STRUCTURALLY_CONSTRUCTIBLE` 只表示当前输入没有结构硬冲突，不是 `verified/complete/research_grade`。下一步是进行真实小窗口双源 exact-raw 捕获与权威事实绑定，而不是把 committed fixture 直接送入回测或训练。
 
-## 0.3 2026-08-14 Stage 1 集成更新
+## 0.3 2026-08-29 Stage 2H–2J Acceptance / Assurance / T3 Preflight 更新
+
+| 能力 | 当前状态 | 当前证据 | 剩余缺口 |
+|---|---|---|---|
+| Exact-Raw Acceptance Manifest | `IMPLEMENTED_GATED` | 至少双来源、Parser/Schema/Descriptor/Raw 重放、`1d + qfq`、Calendar Session、内容寻址 Case/Manifest | 当前网络只有 Tencent 实际 Capture 成功；Eastmoney 可达性失败，真实双源待补 |
+| Assurance Declaration Registry | `IMPLEMENTED_UNTRUSTED_INPUT_ONLY` | 11 类 Declaration、PIT 时间、market/source scope、synthetic 排除、ID/引用/未来证据失败关闭 | 受信任、独立、可撤销的 Authority Registry 尚不存在 |
+| Security/Status/Universe Reference | `REFERENCE_ONLY` | Manifest 可绑定 Stage 2 Reconciliation report ID | 当前只验证引用格式；内容和权威性未独立验证 |
+| Corporate Action Reference | `REFERENCE_ONLY` | Manifest 可绑定 Corporate Action report ID | 当前只验证引用格式；真实公司行为报告与权威性未完成 |
+| T3 Preflight | `IMPLEMENTED_FAIL_CLOSED` | `HARD_BLOCKED / EVIDENCE_PACKAGE_INCOMPLETE / PENDING_INDEPENDENT_AUTHORITY`；固定 `research_grade=false / t3_reached=false` | Trusted Authority、License、真实双源、辅助事实全部通过后另立 T3 Assembler |
+| Tencent A-share Live Capture Probe | `OBSERVED_SINGLE_SOURCE` | `600519.SH`、2026-08-18..20、QFQ、3 rows、BEST_EFFORT、无生产 DB 写入 | 单源不可作为真实 reconciliation 或 T3 证据 |
+| Eastmoney Live Capture Probe | `CURRENT_NETWORK_FAILED` | 同窗口在响应前 `RemoteDisconnected`，未生成 descriptor | 需后续网络/上游恢复后重试，不允许弱化 TLS/Proxy/Redirect 边界 |
+
+Stage 2H–2J 只把真实或声明为非 synthetic 的 Capture 组织成可审计输入；它不关闭 Stage 2G 的来源独立性、字段单位、复权、许可、权威 Calendar 或 T3 Blocker。
+
+## 0.4 2026-08-14 Stage 1 集成更新
 
 本节覆盖下文基线审计中关于 Stage 1 “未实现/尚未开始”的旧状态。下文仍保留，用于说明实现前的差距和设计依据。
 

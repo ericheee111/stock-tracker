@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -32,6 +33,27 @@ def _date(value: str) -> datetime:
         return datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=_SHANGHAI)
     except ValueError as exc:
         raise argparse.ArgumentTypeError("date must use YYYY-MM-DD") from exc
+
+
+def _is_link(path: Path) -> bool:
+    isjunction = getattr(os.path, "isjunction", lambda _: False)
+    return path.is_symlink() or bool(isjunction(path))
+
+
+def _validated_output_root(path: Path) -> Path:
+    output = path.expanduser().absolute()
+    for candidate in (output, *output.parents):
+        if candidate.exists() and _is_link(candidate):
+            raise RuntimeError(
+                "HiThink artifact output root cannot traverse a symlink or junction"
+            )
+    resolved = output.resolve(strict=False)
+    production_database = (ROOT / "data" / "stock_tracker.db").resolve(strict=False)
+    if resolved == production_database:
+        raise RuntimeError("HiThink artifact output cannot target the production database")
+    if resolved.exists() and not resolved.is_dir():
+        raise RuntimeError("HiThink artifact output root must be a directory")
+    return resolved
 
 
 def _provider(config_path: Path) -> HithinkFinanceProvider:
@@ -74,6 +96,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.end < args.start:
+        raise RuntimeError("--end cannot precede --start")
+    output_root = _validated_output_root(args.output_root)
     provider = _provider(args.providers_config)
     request_parameters = provider.historical_request_parameters(
         args.symbol,
@@ -92,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         adjust=args.adjust,
     )
     captured = capture_market_bars(
-        args.output_root,
+        output_root,
         raw_bytes=raw,
         parser=provider.parse_bars_strict,
         symbol=args.symbol,
@@ -112,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
             "upstream_adjustment": request_parameters["adjust"],
             "interval": "1d",
             "offset": 0,
+            "synthetic_fixture": False,
         },
         known_at_policy="retrieved-at",
         revision_policy="content-addressed-immutable",

@@ -40,7 +40,7 @@ class _Patched:
         self._orig = provider._request_research
 
     def __enter__(self):
-        self.provider._request_research = lambda url: self.payload
+        self.provider._request_research = lambda url, **kwargs: self.payload
         return self.provider
 
     def __exit__(self, *exc):

@@ -779,6 +779,15 @@ class TestTencentRawBarBoundary(MarketBarReconciliationFixture):
         self.assertTrue(self.tencent.supports_raw_bars())
         self.assertTrue(self.tencent.supports_adjustment("qfq"))
         self.assertFalse(self.tencent.supports_adjustment("raw"))
+        self.assertTrue(
+            self.tencent.supports_market_adjustment(Market.A, "qfq")
+        )
+        self.assertFalse(
+            self.tencent.supports_market_adjustment(Market.HK, "qfq")
+        )
+        self.assertFalse(
+            self.tencent.supports_market_adjustment(Market.US, "qfq")
+        )
 
     def test_symbol_market_mismatch_fails_before_network_or_parsing(self) -> None:
         for provider in (self.eastmoney, self.tencent):

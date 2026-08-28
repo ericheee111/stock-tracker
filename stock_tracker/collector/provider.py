@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 import ssl
 import time
 from abc import ABC, abstractmethod
@@ -121,8 +122,14 @@ class MarketDataProvider(ABC):
         return False
 
     def supports_adjustment(self, adjust: str) -> bool:
-        """Whether this provider can honestly satisfy the requested bar adjustment."""
+        """Whether this provider supports the adjustment label in any configured market."""
         return adjust in {"raw", "none", "qfq", "hfq"}
+
+    def supports_market_adjustment(self, market: T.Market, adjust: str) -> bool:
+        """Whether the provider can satisfy an adjustment for one explicit market."""
+        return isinstance(market, T.Market) and self.applies_to(
+            market
+        ) and self.supports_adjustment(adjust)
 
     def fetch_bars_raw(
         self,
@@ -169,6 +176,7 @@ class MarketDataProvider(ABC):
         headers: dict[str, str] | None = None,
         *,
         max_response_bytes: int = 16 * 1024 * 1024,
+        allow_mislabeled_json: bool = False,
     ) -> bytes:
         """Fetch exact research bytes with system CA, no proxy and no redirects."""
 
@@ -176,6 +184,8 @@ class MarketDataProvider(ABC):
             raise ValueError("research exact-raw requests forbid host override")
         if type(max_response_bytes) is not int or max_response_bytes <= 0:
             raise ValueError("max_response_bytes must be a positive integer")
+        if type(allow_mislabeled_json) is not bool:
+            raise ValueError("allow_mislabeled_json must be boolean")
         if (
             type(url) is not str
             or not url
@@ -252,10 +262,12 @@ class MarketDataProvider(ABC):
             if response.geturl() != url:
                 raise ValueError("research exact-raw response URL changed")
             content_type = response.headers.get("Content-Type", "").lower()
-            if "html" in content_type:
+            mislabeled_json = "html" in content_type and allow_mislabeled_json
+            if "html" in content_type and not mislabeled_json:
                 raise ValueError("research exact-raw endpoint returned HTML")
-            if not content_type or not any(
-                token in content_type for token in ("json", "text/plain")
+            if not mislabeled_json and (
+                not content_type
+                or not any(token in content_type for token in ("json", "text/plain"))
             ):
                 raise ValueError("research exact-raw content type is unsupported")
             content_length = response.headers.get("Content-Length")
@@ -286,6 +298,42 @@ class MarketDataProvider(ABC):
         prefix = prefix.lstrip().lower()
         if prefix.startswith((b"<!doctype html", b"<html", b"<head", b"<body")):
             raise ValueError("research exact-raw endpoint returned an HTML error page")
+        if mislabeled_json:
+
+            def pairs_hook(pairs):
+                output = {}
+                for key, value in pairs:
+                    if key in output:
+                        raise ValueError(
+                            "research exact-raw mislabeled JSON contains duplicate keys"
+                        )
+                    output[key] = value
+                return output
+
+            def reject_constant(value: str):
+                raise ValueError(
+                    "research exact-raw mislabeled JSON contains non-finite token: "
+                    + value
+                )
+
+            try:
+                value = json.loads(
+                    raw.decode("utf-8"),
+                    object_pairs_hook=pairs_hook,
+                    parse_constant=reject_constant,
+                )
+            except UnicodeDecodeError as exc:
+                raise ValueError(
+                    "research exact-raw mislabeled JSON must use UTF-8"
+                ) from exc
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    "research exact-raw mislabeled response is not valid JSON"
+                ) from exc
+            if not isinstance(value, (dict, list)):
+                raise ValueError(
+                    "research exact-raw mislabeled JSON must be an object or array"
+                )
         return raw
 
     def _request(self, url: str, headers: dict | None = None) -> bytes:
