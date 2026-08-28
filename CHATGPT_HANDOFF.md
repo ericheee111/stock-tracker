@@ -365,6 +365,11 @@ Status: `COMPLETED / REAL_SOURCE_RECONCILIATION_PENDING`
 
 ## 26. Task T — Stage 2G GitHub delivery
 
-Status: `READY_FOR_GIT_DELIVERY`
+Status: `COMPLETED`
 
-- Exact staging, source-distribution, Git Index export, staged-tree Runtime/Quant/QA and generated/secret scan passed. Implementation commit, push, handoff completion commit and local/remote SHA equality remain to be recorded.
+- Exact staging, source-distribution, Git Index export, staged-tree Runtime/Quant/QA and generated/secret scan passed.
+- Implementation/review commit `4a9b04eccf182e4545ab6d70fc3eee9cf8afbf48` (`feat: add Stage 2G market bar reconciliation`) was pushed to `origin/main`.
+- The implementation commit tree is the independently verified Git Index tree `f56e9965534dbebe6fbff26a3e41c499ff3f0573`.
+- After the implementation push, local `HEAD`, local `origin/main`, and GitHub `refs/heads/main` were verified equal at `4a9b04eccf182e4545ab6d70fc3eee9cf8afbf48`.
+- This handoff-only completion commit records the delivery without staging or modifying the parallel UI work under `web/**`, `qa/shots/live-*.png`, or `qa/ui-fix-report-2026-08-28.md`.
+- Real-source reconciliation, licence clearance, authoritative Calendar/Status/Universe/Corporate Action binding, and T3 promotion remain explicit pending gates.

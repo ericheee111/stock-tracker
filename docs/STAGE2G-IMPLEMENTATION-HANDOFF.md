@@ -329,3 +329,27 @@ T3 Snapshot promotion
 5. 运行真实 Coverage/Conflict 报告；
 6. 设计独立 Policy/License/Source Verification Authority；
 7. 只有所有 Blocker 有独立证据关闭后，再设计首个 T3 Snapshot。
+
+## 8. GitHub 交付
+
+```text
+implementation commit:
+4a9b04eccf182e4545ab6d70fc3eee9cf8afbf48
+
+commit message:
+feat: add Stage 2G market bar reconciliation
+
+verified implementation tree:
+f56e9965534dbebe6fbff26a3e41c499ff3f0573
+```
+
+实现提交已推送到 `origin/main`，并在交接提交前验证：
+
+```text
+local HEAD
+= local origin/main
+= GitHub refs/heads/main
+= 4a9b04eccf182e4545ab6d70fc3eee9cf8afbf48
+```
+
+并行 UI 工作保持未暂存，没有进入 Stage 2G 提交。最终远端交接 SHA 由本文件与 `CHATGPT_HANDOFF.md` 的文档提交完成后再次验证。
