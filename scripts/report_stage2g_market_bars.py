@@ -38,7 +38,7 @@ DEFAULT_MANIFEST = (
     / "tests_quant"
     / "fixtures"
     / "market_bar_golden"
-    / "v1"
+    / "v2"
     / "manifest.json"
 )
 _CASE_TOKEN = re.compile(r"^[A-Za-z0-9._-]+$")

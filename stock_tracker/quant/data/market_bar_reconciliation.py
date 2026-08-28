@@ -272,11 +272,12 @@ class MarketBarSeriesEvidence:
         if not isinstance(self.captured, CapturedBarArtifact):
             raise MarketBarReconciliationError("captured must be CapturedBarArtifact")
         try:
-            validate_captured_market_bars(self.captured)
+            validated_capture = validate_captured_market_bars(self.captured)
         except ManifestContractError as exc:
             raise MarketBarReconciliationError(
                 "captured market-bar identity is invalid"
             ) from exc
+        object.__setattr__(self, "captured", validated_capture)
         _require_text(self.source_family, "source_family")
         _require_text(self.adjustment, "adjustment")
         if not isinstance(self.license_status, MarketBarLicenseStatus):
@@ -855,6 +856,31 @@ class MarketBarReconciliationReport:
                         evidence_ids=(item.raw_artifact_id,),
                     )
                 )
+            capture_local_date = exchange_local_date(
+                item.artifact_retrieved_at,
+                item.market,
+            )
+            non_final_capture_sessions = tuple(
+                point.session_date
+                for point in item.rows
+                if point.session_date >= capture_local_date
+            )
+            if non_final_capture_sessions:
+                findings.append(
+                    MarketBarFinding(
+                        code="MARKET_BAR_SESSION_NOT_FINAL_AT_CAPTURE",
+                        severity=MarketBarFindingSeverity.HARD_BLOCK,
+                        scope=item.series_id,
+                        message=(
+                            "daily-bar sessions must precede the artifact retrieval local date"
+                        ),
+                        evidence_ids=(item.raw_artifact_id,),
+                        details=tuple(
+                            session.isoformat()
+                            for session in non_final_capture_sessions
+                        ),
+                    )
+                )
             if item.artifact_validation_state != "SOURCE_DECLARED_VERIFIED":
                 findings.append(
                     MarketBarFinding(
@@ -886,7 +912,10 @@ class MarketBarReconciliationReport:
                     )
                 )
 
-        source_counts = Counter(item.source_family for item in ordered_series)
+        visible_series = tuple(
+            item for item in ordered_series if item.artifact_retrieved_at <= cutoff
+        )
+        source_counts = Counter(item.source_family for item in visible_series)
         for source_family, count in sorted(source_counts.items()):
             if count > 1:
                 findings.append(
@@ -897,7 +926,7 @@ class MarketBarReconciliationReport:
                         message="multiple captures from one source family are not independent corroboration",
                         subject_ids=tuple(
                             item.series_id
-                            for item in ordered_series
+                            for item in visible_series
                             if item.source_family == source_family
                         ),
                     )
@@ -909,7 +938,7 @@ class MarketBarReconciliationReport:
                     severity=MarketBarFindingSeverity.TRUST_BLOCK,
                     scope="REPORT",
                     message="market-bar evidence has fewer independent sources than policy requires",
-                    subject_ids=tuple(item.series_id for item in ordered_series),
+                    subject_ids=tuple(item.series_id for item in visible_series),
                     details=(
                         f"observed={len(source_counts)}",
                         f"required={self.policy.minimum_independent_sources}",
@@ -917,7 +946,19 @@ class MarketBarReconciliationReport:
                 )
             )
 
-        maps = {item.series_id: item.bars_by_session() for item in ordered_series}
+        maps = {
+            item.series_id: (
+                {
+                    point.session_date: point
+                    for point in item.rows
+                    if point.session_date
+                    < exchange_local_date(item.artifact_retrieved_at, item.market)
+                }
+                if item.artifact_retrieved_at <= cutoff
+                else {}
+            )
+            for item in ordered_series
+        }
         expected = set(sessions)
         observed_union = set().union(*(set(value) for value in maps.values()))
         fully_observed = set(sessions)
@@ -1131,7 +1172,23 @@ def reconcile_market_bars(
     )
 
 
+def _is_link(path: Path) -> bool:
+    isjunction = getattr(os.path, "isjunction", lambda _: False)
+    return path.is_symlink() or bool(isjunction(path))
+
+
+def _checked_output_path(path: Path) -> Path:
+    absolute = path.expanduser().absolute()
+    for candidate in (absolute, *absolute.parents):
+        if candidate.exists() and _is_link(candidate):
+            raise MarketBarReconciliationError(
+                "market-bar report path cannot traverse a symlink or junction"
+            )
+    return absolute
+
+
 def _atomic_write_text(path: Path, text: str) -> None:
+    path = _checked_output_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         if not path.is_file() or path.read_text(encoding="utf-8") != text:

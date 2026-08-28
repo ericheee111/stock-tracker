@@ -353,23 +353,31 @@ Status: `COMPLETED`
 
 ## 25. Task S — Stage 2G Golden Raw and market-bar reconciliation
 
-Status: `COMPLETED / REAL_SOURCE_RECONCILIATION_PENDING`
+Status: `ENGINEERING_COMPLETE / REAL_SOURCE_RECONCILIATION_PENDING`
 
-- Added an exact-raw research HTTP boundary with system CA/hostname verification, no inherited proxy, no redirect, no Host override, exact final URL, strict content type, declared/actual length and bounded-body checks. The legacy Runtime Quote request path was not relabelled as secure.
-- Split Tencent QFQ raw fetch/strict parse and prohibited fallback from `qfqday` to unadjusted `day`; hardened Eastmoney/Tencent strict JSON/OHLC/date parsing.
-- Added in-memory `CapturedBarArtifact` identity revalidation, immutable `MarketBarPoint`, A/HK/US synthetic Golden Pack v1, exact Parser/Schema binding, cross-source field comparison, Calendar Session coverage, content-addressed reports and fail-closed Trust/License/T3 blockers.
+- Added an exact-raw research HTTP boundary with system CA/hostname verification, no inherited proxy, no redirect, no Host override, exact final URL, strict content type, declared/actual length and bounded-body checks. The public channel rejects authority/credential headers, duplicate case-insensitive header names and header injection. The legacy Runtime Quote request path was not relabelled as secure.
+- Split Tencent QFQ raw fetch/strict parse and prohibited fallback from `qfqday` to unadjusted `day`; hardened Eastmoney/Tencent strict JSON/OHLC/date parsing, strict chronological uniqueness and canonical Symbol/Market identity before network or parsing.
+- Added in-memory `CapturedBarArtifact` identity revalidation, immutable `MarketBarPoint`, A/HK/US synthetic Golden Pack v2（v1 identity preserved）, exact Parser/Schema binding, cross-source field comparison, Calendar Session coverage, content-addressed reports and fail-closed Trust/License/T3 blockers.
 - Extended `capture_quant_bars.py` to explicit Eastmoney or Tencent exact-raw capture while retaining the `BEST_EFFORT` ceiling; added offline `report_stage2g_market_bars.py` for committed synthetic cases.
-- Final gates: Git checkout focused Stage/Provider `80 passed + 32 subtests`, runtime `517 passed, 1 skipped`, Quant `594 passed + 277 subtests`, source-distribution/no-bytecode `3 passed + 63 subtests`; exact Git Index export passed focused `80 + 32`, runtime `517/1`, Quant `592/2 + 214`; H0 `12/12`, H1/H2 `28/28 + 11/11`, H4 `18/18`, Monitor `49/49`, Mock/real Today `17/17`, Portfolio `13/13`, compileall, targeted Ruff, pip check, Quant smoke/benchmark, cached-diff and Index secret/generated scan.
-- The committed fixtures are synthetic vendor-shaped envelopes. Every case remains `STRUCTURALLY_CONSTRUCTIBLE` only, with `LICENSE_PENDING / T3_NOT_REACHED` and source/calendar/unit/adjustment/policy blockers open.
-- Two existing Engines on ports 8080/8090 predated this task and continuously write the production DB/WAL. Stage 2G has no production write path, but global task-window hash stability is not provable; migration validation used a read-only consistent backup snapshot and reported `database_modified=false`.
+- Current checkout gates: focused Stage/Provider `93 passed + 54 subtests`, Runtime `520 passed, 1 skipped`, Quant `604 passed + 290 subtests`, source-distribution/no-bytecode `3 passed + 70 subtests`; targeted Ruff, compileall, pip check, Quant smoke/benchmark and SQLite-backup migration dry-run passed.
+- The CLI passed a subprocess sandbox where both `sqlite3.connect` and `sqlite3.dbapi2.connect` were forced to fail, proving the three-market report path has no SQLite dependency.
+- The committed fixtures are synthetic vendor-shaped envelopes. Every case remains `STRUCTURALLY_CONSTRUCTIBLE` only, with 0 hard blocks and 11 Trust findings; `LICENSE_PENDING / T3_NOT_REACHED` plus source/calendar/unit/adjustment/policy blockers remain open.
+- Two existing Engines on ports 8080/8090 predated this task and continuously write the production DB/WAL. Stage 2G has no production write path, but global task-window hash stability is not provable; a read-only SQLite backup snapshot retained SHA `3de90a42057cca61479278131b53e2359bab83bdf325c210977b5b9ad3dd857f` across migration dry-run with `database_modified=false`.
 
-## 26. Task T — Stage 2G GitHub delivery
+## 26. Task T — Stage 2G initial GitHub delivery
 
 Status: `COMPLETED`
 
-- Exact staging, source-distribution, Git Index export, staged-tree Runtime/Quant/QA and generated/secret scan passed.
-- Implementation/review commit `4a9b04eccf182e4545ab6d70fc3eee9cf8afbf48` (`feat: add Stage 2G market bar reconciliation`) was pushed to `origin/main`.
-- The implementation commit tree is the independently verified Git Index tree `f56e9965534dbebe6fbff26a3e41c499ff3f0573`.
-- After the implementation push, local `HEAD`, local `origin/main`, and GitHub `refs/heads/main` were verified equal at `4a9b04eccf182e4545ab6d70fc3eee9cf8afbf48`.
-- This handoff-only completion commit records the delivery without staging or modifying the parallel UI work under `web/**`, `qa/shots/live-*.png`, or `qa/ui-fix-report-2026-08-28.md`.
-- Real-source reconciliation, licence clearance, authoritative Calendar/Status/Universe/Corporate Action binding, and T3 promotion remain explicit pending gates.
+- Initial implementation/review commit `4a9b04eccf182e4545ab6d70fc3eee9cf8afbf48` (`feat: add Stage 2G market bar reconciliation`) and delivery-handoff commit `2d7d96e52fb18c58c8af4440cfd5ea13f30c157b` are on `origin/main`.
+- The initial implementation tree was `f56e9965534dbebe6fbff26a3e41c499ff3f0573`.
+- This record covers the initial Stage 2G delivery only; the later Task U post-review hardening still requires a separate final Index review and push.
+- Parallel UI work under `web/**`, `qa/shots/live-*.png`, and `qa/ui-fix-report-2026-08-28.md` remains outside the Stage 2G lane.
+
+## 27. Task U — Stage 2G post-review hardening
+
+Status: `ENGINEERING_READY / GIT_DELIVERY_PENDING`
+
+- Added UTF-8-BOM-aware body HTML rejection, canonical URL and authority/credential Header refusal, duplicate header-name rejection, Eastmoney duplicate/chronology validation, Symbol/Market identity validation, pinned Golden Pack identities, future-artifact exclusion, capture-local non-final Daily Session exclusion, symlink/junction-safe report writes, and exact raw-bytes/parser revalidation with detached canonical Bar copies.
+- Preserved the published v1 Golden Pack and its legacy Eastmoney parser identity; added default v2 bound to `eastmoney-bars-v3-strict-research`.
+- Exact Git Index export passed focused Stage/Provider `93 + 54 subtests`, Runtime `520/1`, Quant `602/2 + 220 subtests`, H0 `12/12`, H1/H2 `28/28 + 11/11`, H4 `18/18`, Monitor `49/49`, Mock/real Today `17/17`, Portfolio `13/13`, targeted Ruff, compileall and cached-diff.
+- Index boundary contained 28 Stage 2G hardening files and no `web/**`, generated artifact, database, bytecode, archive or credential finding. Git commit/push and final remote SHA equality remain pending.

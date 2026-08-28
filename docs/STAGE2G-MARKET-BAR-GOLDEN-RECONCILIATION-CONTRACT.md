@@ -50,6 +50,7 @@ scripts/capture_quant_bars.py
 scripts/report_stage2g_market_bars.py
 
 tests_quant/fixtures/market_bar_golden/v1/**
+tests_quant/fixtures/market_bar_golden/v2/**
 tests_quant/test_bar_artifact_capture.py
 tests_quant/test_capture_quant_bars_cli.py
 tests_quant/test_market_bar_reconciliation.py
@@ -68,10 +69,13 @@ hostname verification
 no inherited HTTP(S)_PROXY
 no redirect
 no Host override
+canonical URL / no control chars or backslash
+no Host/Authorization/Cookie/Proxy-Authorization/API-Key headers
+no duplicate or injected headers
 exact final URL
 bounded Content-Length
 bounded response bytes
-HTML error page rejection
+UTF-8-BOM/whitespace aware HTML error page rejection
 JSON/text content-type allowlist
 ```
 
@@ -86,7 +90,7 @@ endpoint: push2his.eastmoney.com/api/qt/stock/kline/get
 interval: 1d
 adjustment: qfq / hfq / raw
 raw schema: eastmoney-kline-f51-f58-v1
-parser: eastmoney-bars-v2-raw-split
+parser: eastmoney-bars-v3-strict-research
 ```
 
 ### 4.2 Tencent
@@ -118,7 +122,9 @@ Tencent 严格解析必须存在 `qfqday`。请求 `qfq` 时不得静默回退�
 
 运行 Parser 可以跳过孤立坏行；正式 Artifact 捕获必须使用严格 Parser。
 
-## 5. Golden Pack v1
+## 5. Golden Pack v2（v1 保留）
+
+当前默认 Materialization 使用 v2。v1 已发布后保持内容不变并由固定 Pack ID 继续验证，但它绑定旧 `eastmoney-bars-v2-raw-split` Parser，因此当前 v3 Parser 不得冒充 v1 Parser 重放。v2 绑定 `eastmoney-bars-v3-strict-research`，补入重复/乱序交易日失败关闭语义。
 
 Committed Fixture：
 
@@ -164,7 +170,7 @@ source IDs
 case ID
 ```
 
-Pack 绑定全部 Case、固定 `retrieved_at`、`synthetic_fixture=true` 与 Pack ID。Raw、Source ID、Case ID、Pack ID 或 Schema 任一变化都会失败关闭。
+Pack 绑定全部 Case、固定 `retrieved_at`、`synthetic_fixture=true` 与代码内固定 Pack ID。当前 pin 为 `v1=569886a2…2480`、`v2=04b0bb91…466b`；未知 Version、自洽重算后的新 ID、Raw、Source ID、Case ID 或 Schema 任一变化都会失败关闭。
 
 Golden Pack 是 **synthetic vendor-shaped fixture**。它不是某日真实 Provider 响应，也不能通过修改布尔值或重算部分 ID 被改写为真实证据。
 
@@ -174,10 +180,13 @@ Golden Pack 是 **synthetic vendor-shaped fixture**。它不是某日真实 Prov
 
 ```text
 Trust 上限
+exact raw bytes type / byte size / SHA-256
+Parser callable
+same raw bytes deterministic reparse
 request parameters
 normalized rows
 row count
-content bounds
+exchange-local content bounds
 normalized dataset ID
 descriptor key
 capture ID
@@ -192,13 +201,13 @@ capture ID
 - Descriptor 重复 JSON Key；
 - Parser/Artifact Version 漂移。
 
-`MarketBarSeriesEvidence` 构造时把可变 `Bar` 转为不可变 `MarketBarPoint`，报告之后不再读取调用方可变 Capture 内容。
+Validator 使用同一 Parser 重新解析 exact raw bytes，并返回与调用方对象分离的 canonical `Bar` 副本。`MarketBarSeriesEvidence` 再把这些行转为不可变 `MarketBarPoint`，报告之后不再读取调用方可变 Capture 内容。布尔值不得伪装数值；aware timestamp 的 Session Date 按交易所本地日期计算，排序按 UTC instant 计算。
 
 ## 7. Reconciliation
 
 ### 7.1 可比较字段
 
-v1 Golden Case 只声明：
+v1/v2 Golden Case 均只声明：
 
 ```text
 OPEN
@@ -242,7 +251,9 @@ unexpected closed sessions by series
 
 - 缺 Calendar-open Session：`HARD_BLOCK`；
 - Calendar-closed Session 出现 Bar：`HARD_BLOCK`；
-- 与 `as_of` 同日或未来的 Daily Session 尚未最终形成：`HARD_BLOCK`；
+- 与 Report `as_of` 同日或未来的 Daily Session 尚未最终形成：`HARD_BLOCK`；
+- 与 Artifact `retrieved_at` 当地同日或未来的 Daily Session 不得贡献 Coverage/Comparison：`HARD_BLOCK`；
+- `retrieved_at > as_of` 的 Artifact 不得贡献 Source Count/Coverage/Comparison：`HARD_BLOCK`；
 - Symbol/Market/Interval/Adjustment 不同：`HARD_BLOCK`；
 - 字段超过容差：`HARD_BLOCK`。
 
@@ -252,6 +263,7 @@ Stage 2G 保留：
 
 ```text
 CALENDAR_BINDING_NOT_INDEPENDENTLY_VERIFIED
+RECONCILIATION_POLICY_NOT_INDEPENDENTLY_APPROVED
 SOURCE_FAMILY_INDEPENDENCE_UNVERIFIED
 MARKET_BAR_FIELD_UNIT_POLICY_UNVERIFIED
 ADJUSTMENT_POLICY_EQUIVALENCE_UNVERIFIED
@@ -273,6 +285,8 @@ STRUCTURALLY_CONSTRUCTIBLE
 ```
 
 `STRUCTURALLY_CONSTRUCTIBLE` 仅表示当前字段、日期、身份和覆盖没有硬冲突，不表示 Trust 已通过。
+
+JSON/Markdown 使用 `<case>/<report_id>` 内容寻址写入：同路径同内容幂等、不同内容失败关闭，并逐级拒绝 symlink 与 Windows junction，防止报告越界覆盖。
 
 报告输出递归禁止：
 

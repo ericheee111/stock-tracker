@@ -69,10 +69,10 @@ Oracle Cloud 因实际无法注册，已从候选和应急依赖中移除。Rend
 
 | 能力 | 当前状态 | 当前证据 | 剩余缺口 |
 |---|---|---|---|
-| Eastmoney/Tencent exact-raw 研究请求 | `IMPLEMENTED_VERIFIED` | 系统 CA、hostname 校验、无 Proxy、无 Redirect、禁止 Host Override、大小与 Content-Type 边界故障注入 | 真实目标网络与源端长期稳定性复验 |
+| Eastmoney/Tencent exact-raw 研究请求 | `IMPLEMENTED_VERIFIED` | 系统 CA、hostname 校验、无 Proxy/Redirect、canonical URL、禁止 Host/credential Header、长度/类型边界、UTF-8 BOM/HTML 伪装故障注入 | 真实目标网络与源端长期稳定性复验 |
 | Tencent 严格 QFQ Parser | `IMPLEMENTED_VERIFIED` | exact bytes 与 strict parser 分离；重复 Key/非有限值/重复日期失败关闭；`qfqday` 缺失不回退 `day` | 真实 A/HK/US 小窗响应与字段单位审计 |
-| A/HK/US Golden Pack v1 | `SYNTHETIC_VALIDATED` | `600519.SH / 00700.HK / AAPL.US`；Eastmoney/Tencent vendor-shaped fixture；Raw/Source/Case/Pack ID | 这些是合成 Envelope，不是历史真实响应；需真实 Golden Capture |
-| Market-Bar Reconciliation | `IMPLEMENTED_FIXTURE_ONLY` | OHLC/Volume BPS 比较、Calendar Open Session Coverage、冲突/缺口 HARD_BLOCK、报告身份稳定 | 来源独立性、字段单位/币种、复权等价和真实 Coverage 证据 |
+| A/HK/US Golden Pack v2（v1 保留） | `SYNTHETIC_VALIDATED` | `600519.SH / 00700.HK / AAPL.US`；Eastmoney/Tencent vendor-shaped fixture；v1/v2 固定 Pack ID；v2 绑定 Eastmoney strict parser v3 | 这些是合成 Envelope，不是历史真实响应；需真实 Golden Capture |
+| Market-Bar Reconciliation | `IMPLEMENTED_FIXTURE_ONLY` | exact raw bytes/Parser 重放、immutable rows、OHLC/Volume BPS、Calendar Coverage、future/capture-day 证据排除、内容寻址且无 link 越界的报告 | 来源独立性、字段单位/币种、复权等价和真实 Coverage 证据 |
 | T3 Snapshot Promotion | `BLOCKED` | Synthetic、Calendar、Source Independence、Unit、Adjustment、License、T3 均为显式 blocker | 权威 Calendar/Status/Universe/Corporate Action、许可和独立批准证据 |
 
 Stage 2G 的 `STRUCTURALLY_CONSTRUCTIBLE` 只表示当前输入没有结构硬冲突，不是 `verified/complete/research_grade`。下一步是进行真实小窗口双源 exact-raw 捕获与权威事实绑定，而不是把 committed fixture 直接送入回测或训练。

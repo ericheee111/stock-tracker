@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -15,25 +15,35 @@ _MANIFEST = (
     / "tests_quant"
     / "fixtures"
     / "market_bar_golden"
-    / "v1"
+    / "v2"
     / "manifest.json"
 )
-_PRODUCTION_DB = _PROJECT_ROOT / "data" / "stock_tracker.db"
 
 
 class TestStage2GMarketBarCli(unittest.TestCase):
-    @staticmethod
-    def _database_hash() -> str | None:
-        if not _PRODUCTION_DB.is_file():
-            return None
-        return hashlib.sha256(_PRODUCTION_DB.read_bytes()).hexdigest()
-
-    def test_cli_materializes_all_cases_without_touching_production_database(self) -> None:
-        before = self._database_hash()
+    def test_cli_materializes_all_cases_with_sqlite_forbidden(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             artifact_root = root / "artifacts"
             output_dir = root / "reports"
+            guard_root = root / "sqlite-guard"
+            guard_root.mkdir()
+            (guard_root / "sitecustomize.py").write_text(
+                "import sqlite3\n"
+                "def _forbidden(*args, **kwargs):\n"
+                "    raise RuntimeError('STAGE2G_SQLITE_FORBIDDEN')\n"
+                "sqlite3.connect = _forbidden\n"
+                "sqlite3.dbapi2.connect = _forbidden\n",
+                encoding="utf-8",
+            )
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = os.pathsep.join(
+                (
+                    str(guard_root),
+                    str(_PROJECT_ROOT),
+                    environment.get("PYTHONPATH", ""),
+                )
+            )
             result = subprocess.run(
                 [
                     sys.executable,
@@ -46,6 +56,7 @@ class TestStage2GMarketBarCli(unittest.TestCase):
                     str(output_dir),
                 ],
                 cwd=_PROJECT_ROOT,
+                env=environment,
                 capture_output=True,
                 text=True,
                 check=False,
@@ -77,7 +88,6 @@ class TestStage2GMarketBarCli(unittest.TestCase):
                     Path(item["markdown_output"]).stem,
                     item["report_id"],
                 )
-        self.assertEqual(self._database_hash(), before)
 
     def test_cli_rejects_output_overlap_with_fixture_tree(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -65,7 +65,7 @@ class EastmoneyProvider(MarketDataProvider):
         return True
 
     KLINE_SCHEMA_VERSION = "eastmoney-kline-f51-f58-v1"
-    KLINE_ADAPTER_VERSION = "eastmoney-bars-v2-raw-split"
+    KLINE_ADAPTER_VERSION = "eastmoney-bars-v3-strict-research"
 
     def supports_bars(self) -> bool:
         """历史 K 线主源（东财 push2his 三市场 + 港股指数）。"""
@@ -110,6 +110,7 @@ class EastmoneyProvider(MarketDataProvider):
         """Fetch exact provider bytes; parsing is deliberately separate."""
         if not self.applies_to(market):
             raise ValueError(f"{self.name} is not configured for market {market.value}")
+        self._validate_bar_identity(symbol, market)
         self._rl.acquire()
         return self._request_research(
             self._bars_url(symbol, interval, start, end, adjust)
@@ -126,6 +127,7 @@ class EastmoneyProvider(MarketDataProvider):
     ) -> list[T.Bar]:
         if type(strict) is not bool:
             raise TypeError("strict must be a boolean")
+        self._validate_bar_identity(symbol, market)
         if not isinstance(raw, bytes) or not raw:
             raise ValueError("raw K-line response must be non-empty bytes")
         payload = (
@@ -145,6 +147,8 @@ class EastmoneyProvider(MarketDataProvider):
 
         scale = 100 if market == T.Market.A else 1
         bars: list[T.Bar] = []
+        previous: datetime | None = None
+        seen: set[datetime] = set()
         for index, line in enumerate(klines):
             if not isinstance(line, str):
                 if strict:
@@ -187,26 +191,33 @@ class EastmoneyProvider(MarketDataProvider):
                     raise ValueError(
                         "Eastmoney K-line volume/amount/turnover cannot be negative"
                     )
-                bars.append(
-                    T.Bar(
-                        symbol=symbol,
-                        market=market,
-                        timestamp=datetime.strptime(date_s, "%Y-%m-%d"),
-                        interval=interval,
-                        open=open_price,
-                        high=high,
-                        low=low,
-                        close=close,
-                        volume=round(raw_volume * scale),
-                        amount=amount,
-                        turnover=turnover_value,
-                        source=self.name,
-                        adjustment_factor=1.0,
+                timestamp = datetime.strptime(date_s, "%Y-%m-%d")
+                if timestamp in seen or (previous is not None and timestamp <= previous):
+                    raise ValueError(
+                        "Eastmoney K-line rows must be strictly chronological and unique"
                     )
+                bar = T.Bar(
+                    symbol=symbol,
+                    market=market,
+                    timestamp=timestamp,
+                    interval=interval,
+                    open=open_price,
+                    high=high,
+                    low=low,
+                    close=close,
+                    volume=round(raw_volume * scale),
+                    amount=amount,
+                    turnover=turnover_value,
+                    source=self.name,
+                    adjustment_factor=1.0,
                 )
             except (ValueError, TypeError) as exc:
                 if strict:
                     raise ValueError(f"Eastmoney K-line row {index} is invalid") from exc
+                continue
+            bars.append(bar)
+            seen.add(timestamp)
+            previous = timestamp
         return bars
 
     def parse_bars(

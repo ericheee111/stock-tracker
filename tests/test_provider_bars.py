@@ -10,14 +10,18 @@
 - 单根解析失败（字段不足/非法）被跳过，不中断整批。
 """
 
+# Runtime Bar timestamps intentionally remain market-local naive datetimes until
+# that existing contract is migrated as a unit.
+# ruff: noqa: DTZ001
+
 import json
 import unittest
 from datetime import datetime
 
-from stock_tracker.core import types as T
-from stock_tracker.core.config import ProviderConfig
 from stock_tracker.collector.eastmoney import EastmoneyProvider
 from stock_tracker.collector.tencent import TencentProvider
+from stock_tracker.core import types as T
+from stock_tracker.core.config import ProviderConfig
 
 
 def _eastmoney_cfg(name="eastmoney", markets=("a", "hk", "us")):

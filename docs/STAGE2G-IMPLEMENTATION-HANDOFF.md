@@ -212,54 +212,29 @@ Policy 不能关闭 Open Session Coverage 或 License Gate。
 
 ## 4. 当前验证证据
 
-最终发布门禁：
+当前 Git checkout 门禁：
 
 ```text
-Git checkout Stage 2G / Provider focused:
-80 passed + 32 subtests
+Stage 2G / Provider focused:
+93 passed + 54 subtests
 
-Git checkout Runtime full unittest:
-517 passed, 1 expected live-probe skip
+Runtime full unittest:
+520 passed, 1 expected live-probe skip
 
-Git checkout Quant full:
-594 passed + 277 subtests
+Quant full:
+604 passed + 290 subtests
 
 Source distribution / no tracked bytecode:
-3 passed + 63 subtests
+3 passed + 70 subtests
 
-Exact Git Index export:
-Stage 2G / Provider 80 passed + 32 subtests
-Runtime 517 passed, 1 skipped
-Quant 592 passed, 2 expected no-.git skips + 214 subtests
-
-Hybrid H0:
-12/12
-
-Hybrid H1/H2:
-28/28 main + 11/11 negative
-
-Hybrid H4:
-18/18
-
-Monitor Workspace:
-49/49
-
-Mock Today:
-17/17
-
-Real Today:
-17/17
-
-Portfolio CRUD:
-13/13
-
-compileall / targeted Ruff / pip check / git diff --cached --check:
+compileall:
 PASSED
 
-Index generated-file and secret scan:
-578 tracked files / 36 staged files
-0 forbidden generated paths
-0 staged credential findings
+targeted Ruff:
+PASSED
+
+pip check:
+PASSED
 
 Quant contract smoke:
 PASSED / synthetic_fixture_only=true
@@ -275,36 +250,36 @@ A/HK/US all STRUCTURALLY_CONSTRUCTIBLE
 T3_NOT_REACHED / LICENSE_PENDING remain open
 ```
 
+精确 Git Index 隔离导出也已通过：Stage 2G `93 + 54 subtests`、Runtime `520/1`、Quant `602/2 + 220 subtests`、H0 `12/12`、H1/H2 `28/28 + 11/11`、H4 `18/18`、Monitor `49/49`、Mock/real Today `17/17`、Portfolio `13/13`、targeted Ruff、compileall 与 `git diff --cached --check`。Index 共 28 个 hardening 文件，generated/secret scan 为 0 findings。两个 Quant skip 仅因 archive 没有 `.git`；对应门禁已在真实 checkout 通过。尚未发生的 hardening commit 与远端 SHA 不在本节预写。
+
 ## 5. 生产数据库并行写入说明
 
-本轮开始时生产数据库 SHA-256：
+本轮开始前最近一次静止环境基线 SHA-256 为：
 
 ```text
 1cde40aa66846630d89b10d080a8837d204266c5ce32001a45d3b0c0c06197b1
 ```
 
-后续发现两个既有 Engine 持续持有并写入同一 DB/WAL：
+回归期间只读进程审计确认两个既有 Engine 持续持有并写入同一 DB/WAL：
 
 ```text
 PID 55468: python -m stock_tracker --host 127.0.0.1 --port 8080
-started 2026-08-28T07:59:37Z
-
 PID 52008: python -m stock_tracker --host 127.0.0.1 --port 8090
-started 2026-08-28T08:08:29Z
 ```
 
-它们均在本轮 Stage 2G 验证前启动。Stage 2G CLI、专项测试和 H0 验收未写生产 DB；H0 自身的 before/after hash 相同。但由于上述并行 Engine 持续写 WAL，无法诚实声称“本轮全局时间窗内生产数据库 Hash 不变”。
+它们均在 Stage 2G 发布验证之前启动。由于运行态 Engine 正常采集并写库，不能把全局任务时间窗内的文件 SHA 变化归因给 Stage 2G，也不能诚实声称该活体文件在整个窗口内保持不变。
 
-本轮采用的发布证据：
+本轮采用更强且可归因的发布证据：
 
-- Stage 2G CLI 明确不打开生产 DB；
-- CLI 单测逐次比较生产 DB before/after；
-- 所有写测试使用临时目录/临时数据库；
-- 从生产 DB 只读备份得到一致 Snapshot；
-- Quant Migration 在该 Snapshot 上 dry-run：`database_modified=false`，4 个 migration pending；
-- 最终合并证据将来自精确 Git Index 导出，不依赖运行中生产 DB。
+- Stage 2G CLI 源码不导入 Repository 或 SQLite；
+- subprocess 验收通过 `sitecustomize` 将 `sqlite3.connect` 与 `sqlite3.dbapi2.connect` 替换为强制异常，三市场报告仍完整生成；
+- 所有 Artifact/Report 写入均位于调用方指定的临时或 `/data/` 生成目录；
+- 从生产 DB 通过 SQLite read-only connection + backup API 得到一致 Snapshot；
+- Snapshot SHA-256 在 Quant Migration dry-run 前后均为 `3de90a42057cca61479278131b53e2359bab83bdf325c210977b5b9ad3dd857f`；
+- Migration 输出 `database_modified=false`，4 个 migration pending；
+- 最终合并证据来自精确 Git Index 导出，不依赖运行中生产 DB 的全局静态哈希。
 
-没有终止、重启或修改这两个既有 Engine。
+没有终止、重启、覆盖、恢复或迁移这两个既有 Engine 及其生产数据库。
 
 ## 6. 不在本次范围
 
@@ -330,26 +305,44 @@ T3 Snapshot promotion
 6. 设计独立 Policy/License/Source Verification Authority；
 7. 只有所有 Blocker 有独立证据关闭后，再设计首个 T3 Snapshot。
 
+## 7.1 Post-review hardening
+
+初版实现完成后，独立 Review 流继续发现并修复：
+
+- 研究 HTTP Body 即使错误标注为 `text/plain`，仍按 HTML 前缀失败关闭；
+- Eastmoney Strict Parser 拒绝重复/乱序交易日；
+- Golden Pack Version 绑定固定 Pack ID，拒绝整体重算后的自洽替换；
+- 保留 v1 Pack 与旧 Eastmoney Parser v2 身份，新增默认 v2 Pack 与 `eastmoney-bars-v3-strict-research`；
+- future Artifact 不再参与 source count、coverage 或 comparison；
+- `CapturedBarArtifact` 绑定 exact raw bytes 与 Parser，重新解析并与 frozen rows 对比，并返回与调用方对象分离的 canonical Bar 副本；
+- Bar numeric 边界拒绝 boolean，aware timestamp 使用交易所本地 Session Date 与 UTC 排序；
+- Capture 当地同日/未来 Daily Session 与 future Artifact 均从 Coverage/Comparison 排除并 HARD_BLOCK；
+- public exact-raw 通道拒绝非规范 URL、authority/credential Header、Header 注入以及带 UTF-8 BOM 的伪装 HTML；
+- Report 内容寻址写入逐级拒绝 symlink/junction。
+
+这些修复构成单独的 post-review hardening 提交，不改变 `LICENSE_PENDING / T3_NOT_REACHED`。
+
 ## 8. GitHub 交付
+
+Stage 2G 初版实现与交接已经完成：
 
 ```text
 implementation commit:
 4a9b04eccf182e4545ab6d70fc3eee9cf8afbf48
 
-commit message:
-feat: add Stage 2G market bar reconciliation
-
-verified implementation tree:
+implementation tree:
 f56e9965534dbebe6fbff26a3e41c499ff3f0573
+
+delivery handoff commit:
+2d7d96e52fb18c58c8af4440cfd5ea13f30c157b
 ```
 
-实现提交已推送到 `origin/main`，并在交接提交前验证：
+本轮新增的 post-review hardening 状态为：
 
 ```text
-local HEAD
-= local origin/main
-= GitHub refs/heads/main
-= 4a9b04eccf182e4545ab6d70fc3eee9cf8afbf48
+PENDING_FINAL_INDEX_REVIEW_AND_PUSH
 ```
 
-并行 UI 工作保持未暂存，没有进入 Stage 2G 提交。最终远端交接 SHA 由本文件与 `CHATGPT_HANDOFF.md` 的文档提交完成后再次验证。
+只有在最新加固的定向暂存、精确 Git Index 导出、staged-tree 回归、generated/secret scan 和 `git diff --cached --check` 全部通过后，才会追加 hardening commit、tree 与远端 SHA。
+
+并行 UI 工作继续保持未暂存，不得进入 Stage 2G hardening 提交。

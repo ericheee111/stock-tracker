@@ -116,6 +116,67 @@ class TestResearchExactRawRequest(unittest.TestCase):
                     self._provider()._request_research(url)
         build_opener.assert_not_called()
 
+    def test_authority_credential_and_malformed_headers_fail_before_network(self) -> None:
+        url = "https://example.com/api"
+        cases = (
+            ({"Host": "other.example"}, "authority or credential"),
+            ({"Authorization": "Bearer secret"}, "authority or credential"),
+            ({"X-Api-Key": "secret"}, "authority or credential"),
+            ({"X-Test\nHeader": "value"}, "header name"),
+            ({"X-Test": "value\r\nInjected: true"}, "header value"),
+        )
+        with patch(
+            "stock_tracker.collector.provider.urllib_request.build_opener"
+        ) as build_opener:
+            with self.assertRaisesRegex(ValueError, "must be a dictionary"):
+                self._provider()._request_research(url, headers=[("X-Test", "value")])  # type: ignore[arg-type]
+            for headers, expected in cases:
+                with self.subTest(headers=headers), self.assertRaisesRegex(
+                    ValueError,
+                    expected,
+                ):
+                    self._provider()._request_research(url, headers=headers)
+        build_opener.assert_not_called()
+
+    def test_noncanonical_url_fails_before_network(self) -> None:
+        with patch(
+            "stock_tracker.collector.provider.urllib_request.build_opener"
+        ) as build_opener:
+            for url in (
+                " https://example.com/api",
+                "https://example.com\\api",
+                "https://example.com/api\n",
+            ):
+                with self.subTest(url=url), self.assertRaisesRegex(
+                    ValueError,
+                    "not canonical",
+                ):
+                    self._provider()._request_research(url)
+        build_opener.assert_not_called()
+
+    def test_authority_credential_and_invalid_headers_fail_before_network(self) -> None:
+        cases = (
+            ({"Host": "other.example"}, "authority or credential"),
+            ({"Authorization": "Bearer secret"}, "authority or credential"),
+            ({"Cookie": "session=secret"}, "authority or credential"),
+            ({"X-Api-Key": "secret"}, "authority or credential"),
+            ({"Accept": "application/json", "accept": "text/plain"}, "duplicate names"),
+            ({"X-Test": "bad\nvalue"}, "header value is invalid"),
+        )
+        with patch(
+            "stock_tracker.collector.provider.urllib_request.build_opener"
+        ) as build_opener:
+            for headers, expected in cases:
+                with self.subTest(headers=headers), self.assertRaisesRegex(
+                    ValueError,
+                    expected,
+                ):
+                    self._provider()._request_research(
+                        "https://example.com/api",
+                        headers=headers,
+                    )
+        build_opener.assert_not_called()
+
     def test_redirect_changed_url_html_size_and_empty_payload_fail_closed(self) -> None:
         url = "https://example.com/api"
         cases = (
@@ -131,6 +192,28 @@ class TestResearchExactRawRequest(unittest.TestCase):
                     )
                 ),
                 "returned HTML",
+            ),
+            (
+                _Opener(
+                    response=_Response(
+                        url=url,
+                        body=b"  <!DOCTYPE html><html><body>upstream error</body></html>",
+                        headers={"Content-Type": "text/plain"},
+                    )
+                ),
+                "HTML error page",
+            ),
+            (
+                _Opener(
+                    response=_Response(
+                        url=url,
+                        body=(
+                            b"\xef\xbb\xbf  <html><body>upstream error</body></html>"
+                        ),
+                        headers={"Content-Type": "text/plain"},
+                    )
+                ),
+                "HTML error page",
             ),
             (
                 _Opener(

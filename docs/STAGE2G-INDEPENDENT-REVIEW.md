@@ -176,6 +176,78 @@ Content-Type/Length/body bounds
 
 **状态**：`CLOSED`。
 
+### IMPORTANT-11 — HTML 错误页可伪装成允许的 `text/plain`
+
+**风险**：仅依赖响应 Header 会保存被网关错误标注的 HTML 页面。
+
+**修复**：在 Content-Type 校验后继续检查去除 UTF-8 BOM/空白后的 Body 前缀，拒绝 `<!doctype html`、`<html`、`<head` 与 `<body`。
+
+**状态**：`CLOSED`。
+
+### IMPORTANT-12 — Eastmoney Strict Parser 未拒绝重复/乱序交易日
+
+**风险**：重复或乱序 Row 会改变内容边界、Coverage 与下游 PIT 顺序。
+
+**修复**：Strict Parser 对 duplicate/non-chronological 日期失败关闭；Operational Parser 只跳过损坏 Row。
+
+**状态**：`CLOSED`。
+
+### IMPORTANT-13 — Self-consistent Golden Pack 可整体重算后替换
+
+**风险**：仅校验内部 Pack ID，攻击者可同时修改 Raw、Source/Case ID 和 Pack ID，得到另一份自洽 Fixture。
+
+**修复**：每个 Pack Version 绑定代码内固定 ID；未知版本或 ID 不匹配失败关闭。
+
+**状态**：`CLOSED`。
+
+### IMPORTANT-14 — Parser 语义改变但版本未升级
+
+**风险**：Eastmoney 严格 JSON/OHLC/Chronology 语义改变后仍使用旧 Parser Version，会让新 Parser 冒充旧证据重放。
+
+**修复**：保留已发布 v1 Pack 与 `eastmoney-bars-v2-raw-split` 身份；新增默认 v2 Pack，绑定 `eastmoney-bars-v3-strict-research`。当前 Parser 不能重放 v1。
+
+**状态**：`CLOSED`。
+
+### IMPORTANT-15 — Future Artifact 仍可能贡献 Source Count/Coverage/Comparison
+
+**风险**：虽然有 `ARTIFACT_NOT_VISIBLE_AS_OF` HARD_BLOCK，未来 Artifact 若仍参与派生指标，会污染报告证据。
+
+**修复**：future Artifact 在 source count、observed union、fully observed 和字段 comparison 中按空证据处理，同时保留 HARD_BLOCK。
+
+**状态**：`CLOSED`。
+
+### IMPORTANT-16 — In-memory Capture 未绑定 exact raw bytes 与 Parser
+
+**风险**：只冻结 normalized Bars 与 Artifact 元数据，调用方仍可能替换 raw bytes 或 Parser 后保留旧 Capture ID。
+
+**修复**：`CapturedBarArtifact` 保存 exact `raw_bytes` 与 Parser callable；Validator 校验 byte size/hash，重新解析 exact bytes，并要求 reparsed rows 与 frozen rows 完全一致。Validator 返回与调用方对象分离的 canonical Bar 副本；布尔数值、市场本地 Session Date 与 aware timestamp 排序也在同一边界失败关闭。
+
+**状态**：`CLOSED`。
+
+### IMPORTANT-17 — Capture 当地同日/未来 Daily Bar 仍可参与对账
+
+**风险**：Report `as_of` 虽然可能在更晚日期，但某条日线在 Artifact 抓取时仍属于当地同日或未来 Session；如果继续参与 Coverage/MATCH，会把抓取时尚未最终形成的数据当成历史事实。
+
+**修复**：每个 Series 以 Artifact `retrieved_at` 转为交易所本地日期；只有严格早于该日期的 Daily Session 才能贡献 Coverage 和字段比较。同日/未来 Session 产生 `MARKET_BAR_SESSION_NOT_FINAL_AT_CAPTURE / HARD_BLOCK` 并从派生指标排除。
+
+**状态**：`CLOSED`。
+
+### IMPORTANT-18 — Public exact-raw Header 可绕过 Host/凭据边界
+
+**风险**：调用方即使不能设置配置层 Host Override，仍可能通过 `Host`、`Authorization`、`Cookie`、`Proxy-Authorization` 或 API-Key Header 改变 authority 或把秘密带入公共 Capture 通道；非规范 URL/Header 还可能触发请求分歧。
+
+**修复**：公共 exact-raw 通道要求 canonical HTTPS URL，拒绝反斜杠、控制字符、首尾空白、非 dictionary Header、大小写重复 Header、authority/cookie/credential Header 和 Header 注入。需要认证的数据源必须使用独立专用 Adapter。
+
+**状态**：`CLOSED`。
+
+### IMPORTANT-19 — Report 输出可经 Symlink/Junction 越界
+
+**风险**：即使文件名由 `report_id` 决定，预先放置的目录链接仍可能把 immutable JSON/Markdown 写到目标树之外。
+
+**修复**：写入前逐级拒绝 symlink 与 Windows junction；内容寻址路径继续保持“同路径同内容幂等、不同内容失败关闭”。
+
+**状态**：`CLOSED`。
+
 ## 3. 仍然 OPEN 的证据问题
 
 这些不是当前工程 Bug，而是 Stage 2G 有意保留的外部门禁：
@@ -209,7 +281,7 @@ PID 55468 / port 8080 / started 07:59:37Z
 PID 52008 / port 8090 / started 08:08:29Z
 ```
 
-两个既有 Engine 均在 Stage 2G 验证之前启动并持续持有 DB/WAL。没有证据表明 Stage 2G 代码写生产 DB；Stage 2G CLI 不打开该库，CLI tests 使用 before/after hash，所有写测试使用 temp paths。
+两个既有 Engine 均在 Stage 2G 验证之前启动并持续持有 DB/WAL。没有证据表明 Stage 2G 代码写生产 DB；Stage 2G CLI 不导入 Repository/SQLite，subprocess 验收通过 `sitecustomize` 强制禁止 `sqlite3.connect` 与 `sqlite3.dbapi2.connect` 后仍完整生成三市场报告，所有 Artifact/Report 写入使用 temp 或 `/data/` 生成路径。
 
 Review 判定：
 
@@ -222,39 +294,43 @@ GLOBAL_PRODUCTION_DB_HASH_STABLE = NOT_PROVABLE_DUE_TO_EXISTING_CONCURRENT_ENGIN
 
 ## 5. 当前门禁结果
 
-最终门禁结果：
+当前 Git checkout 门禁：
 
 ```text
-Git checkout Stage 2G/provider: 80 passed + 32 subtests
-Git checkout Runtime:          517 passed, 1 skipped
-Git checkout Quant:            594 passed + 277 subtests
-Source distribution/bytecode:  3 passed + 63 subtests
-
-Exact Git Index export:
-Stage 2G/provider              80 passed + 32 subtests
-Runtime                        517 passed, 1 skipped
-Quant                          592 passed, 2 expected no-.git skips + 214 subtests
-
-Hybrid H0                     12/12
-Hybrid H1/H2                  28/28 + 11/11
-Hybrid H4                     18/18
-Monitor Workspace             49/49
-Mock Today                    17/17
-Real Today                    17/17
-Portfolio CRUD                13/13
-
-compileall                    PASSED
-Targeted Ruff                 PASSED
-pip check                     PASSED
-git diff --cached --check     PASSED
-Index generated/secret scan   PASSED (578 tracked / 36 staged / 0 findings)
-Quant smoke                   PASSED / synthetic only
-Quant benchmark               PASSED / no promotion
-Stage 2G CLI                  3 cases / 0 HARD_BLOCK / 11 TRUST_BLOCK each
-Migration snapshot dry-run    database_modified=false / pending=4
+Stage 2G/provider              93 passed + 54 subtests
+Runtime                        520 passed, 1 skipped
+Quant                          604 passed + 290 subtests
+Source distribution/bytecode  3 passed + 70 subtests
+compileall                     PASSED
+Targeted Ruff                  PASSED
+pip check                      PASSED
+Quant smoke                    PASSED / synthetic only
+Quant benchmark                PASSED / no promotion
+Stage 2G CLI                   v2 pack / 3 cases / 0 HARD_BLOCK / 11 TRUST_BLOCK each
+Migration snapshot dry-run     database_modified=false / pending=4
+SQLite-forbidden CLI sandbox   PASSED
 ```
 
-两个 Git Index Quant skip 只因为导出目录不含 `.git`，对应 source-distribution/no-bytecode 门禁已经在真实 checkout 中通过。
+精确 Git Index 隔离导出同样通过：
+
+```text
+Stage 2G/provider              93 passed + 54 subtests
+Runtime                        520 passed, 1 skipped
+Quant                          602 passed, 2 expected no-.git skips + 220 subtests
+Hybrid H0                      12/12
+Hybrid H1/H2                   28/28 + 11/11
+Hybrid H4                      18/18
+Monitor Workspace              49/49
+Mock Today                     17/17
+Real Today                     17/17
+Portfolio CRUD                 13/13
+Targeted Ruff                  PASSED
+compileall                     PASSED
+git diff --cached --check      PASSED
+Index generated/secret scan    28 staged files / 0 findings
+```
+
+两个 Quant skip 仅因为 Git archive 导出树没有 `.git`；相同 source-distribution/no-bytecode 门禁已在真实 checkout 中通过 `3 passed + 70 subtests`。本报告不预写尚未创建的 hardening commit 或远端 SHA。
 
 ## 6. Final Verdict
 
@@ -264,9 +340,10 @@ NETWORK_SECURITY_REVIEW = PASSED
 PARSER_AND_IDENTITY_REVIEW = PASSED
 SYNTHETIC_GOLDEN_ACCEPTANCE = PASSED
 FINANCIAL_CORRECTNESS_REVIEW = PASSED
-REGRESSION_GATES = PASSED
+CHECKOUT_REGRESSION_GATES = PASSED
 SOURCE_DISTRIBUTION = PASSED
-INDEX_SECRET_SCAN = PASSED
+FINAL_INDEX_REVIEW = PASSED
+INDEX_GENERATED_AND_SECRET_SCAN = PASSED
 ENGINEERING_READY_FOR_MERGE = TRUE
 
 REAL_SOURCE_RECONCILIATION = PENDING

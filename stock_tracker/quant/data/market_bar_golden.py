@@ -33,6 +33,10 @@ from .market_bar_reconciliation import (
 )
 
 PACK_SCHEMA = "stage2g-market-bar-golden-pack-v1"
+PINNED_PACK_IDS = {
+    "v1": "569886a2e486c159422b207242bfb07c4648b7ec26e8568e1e2866a7dba82480",
+    "v2": "04b0bb9141711807bfdfb24940cda4b5226d006a66e25137728e5f451ccb466b",
+}
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 Parser = Callable[[bytes, str, Market, str], list[Bar]]
 
@@ -488,6 +492,11 @@ def load_market_bar_golden_pack(
     )
     if _sha256(payload["pack_id"], "pack_id") != pack.pack_id:
         raise MarketBarGoldenError("golden pack identity mismatch")
+    pinned_id = PINNED_PACK_IDS.get(pack.pack_version)
+    if pinned_id is None:
+        raise MarketBarGoldenError("golden pack version has no pinned identity")
+    if pack.pack_id != pinned_id:
+        raise MarketBarGoldenError("golden pack differs from its pinned identity")
     root = path.parent
     for case in pack.cases:
         for source in case.sources:
@@ -575,6 +584,7 @@ def materialize_golden_case(
 
 __all__ = [
     "PACK_SCHEMA",
+    "PINNED_PACK_IDS",
     "GoldenMarketBarCase",
     "GoldenMarketBarPack",
     "GoldenMarketBarSource",

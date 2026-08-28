@@ -2151,13 +2151,13 @@ Render 免费 Web Service 只保留 Demo/可达性实验定位，不作为默认
 
 ## Stage 2G：A/HK/US Golden Raw 与跨源行情对账
 
-> **工程状态（2026-08-28）**：A/HK/US 三组版本化 vendor-shaped synthetic raw payload、Eastmoney/Tencent exact-raw 安全抓取、严格 Parser Binding、内容寻址 Capture、字段级 BPS 对账和 Calendar Session 覆盖缺口报告已实现。Golden Fixture 只证明工程合同；来源独立性、字段单位、复权等价、许可、权威 Calendar 和真实跨源数据仍未通过，因此 `LICENSE_PENDING / T3_NOT_REACHED` 保持不变。
+> **工程状态（2026-08-28）**：A/HK/US 三组版本化 vendor-shaped synthetic raw payload、Eastmoney/Tencent exact-raw 安全抓取、严格 Parser Binding、raw-bytes/Parser 重放验证、内容寻址 Capture、字段级 BPS 对账和 Calendar Session 覆盖缺口报告已实现。v1 Golden 身份冻结，v2 绑定 Eastmoney Parser v3；future Artifact、抓取当地同日/未来 Daily Bar、Header/HTML 伪装和 Report 路径越界均失败关闭。Golden Fixture 只证明工程合同；来源独立性、字段单位、复权等价、许可、权威 Calendar 和真实跨源数据仍未通过，因此 `LICENSE_PENDING / T3_NOT_REACHED` 保持不变。
 
-1. Eastmoney 与 Tencent 日线 raw bytes 在解析前保存，研究抓取使用系统 CA、无 Proxy、无 Redirect、禁止 Host Override；
+1. Eastmoney 与 Tencent 日线 raw bytes 在解析前保存，公共研究抓取使用系统 CA、无 Proxy、无 Redirect、禁止 Host Override/凭据 Header/非规范 URL，并拒绝 Header 或 Body 伪装；
 2. Tencent 当前只允许 `qfq`，严格 Parser 不得从 `qfqday` 回退到 `day`；
-3. Golden Pack v1 覆盖 `600519.SH / 00700.HK / AAPL.US`，每个 Case 绑定 Raw SHA、Schema/Parser Version、Source/Case/Pack ID；
+3. Golden Pack v2 覆盖 `600519.SH / 00700.HK / AAPL.US`，v1 已发布后保持固定身份；v2 绑定 Eastmoney strict parser v3，每个 Case 绑定 Raw SHA、Schema/Parser Version、Source/Case/Pack ID；
 4. 对账默认比较 OHLC 与 Volume；Amount/Turnover 在单位和币种未审计前保持 `NOT_COMPARABLE`；
-5. 缺 Open Session、Closed Session Bar、未来 Session、身份不一致和超容差字段均 HARD_BLOCK；
+5. 缺 Open Session、Closed Session Bar、Report/Capture 当地同日或未来 Session、future Artifact、身份不一致和超容差字段均 HARD_BLOCK，且不可见证据不得参与派生指标；
 6. Synthetic、来源独立性、字段单位、复权口径、License 和 T3 均保留显式 Trust Blocker；
 7. `STRUCTURALLY_CONSTRUCTIBLE` 只代表没有结构硬冲突，不代表 verified、complete 或 research grade；
 8. 下一步使用真实小窗口 exact-raw 双源数据和权威 Calendar/Status/Universe/Corporate Action 证据复验，禁止把 Fixture 直接组装成 T3 Snapshot。

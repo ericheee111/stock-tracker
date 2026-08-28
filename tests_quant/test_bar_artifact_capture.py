@@ -16,6 +16,7 @@ from stock_tracker.quant.data import (
     ManifestContractError,
     capture_market_bars,
     load_captured_market_bars,
+    validate_captured_market_bars,
 )
 
 
@@ -141,19 +142,18 @@ class TestBarArtifactCapture(unittest.TestCase):
             self.assertNotEqual(qfq.descriptor_key, narrower.descriptor_key)
 
     def test_request_parameters_require_explicit_provenance_fields(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(
-                ManifestContractError,
-                "missing fields: requested_end",
-            ):
-                self.capture(
-                    directory,
-                    request_parameters={
-                        "adjustment": "qfq",
-                        "requested_start": "2024-01-01",
-                        "endpoint": "push2his-kline",
-                    },
-                )
+        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
+            ManifestContractError,
+            "missing fields: requested_end",
+        ):
+            self.capture(
+                directory,
+                request_parameters={
+                    "adjustment": "qfq",
+                    "requested_start": "2024-01-01",
+                    "endpoint": "push2his-kline",
+                },
+            )
 
     def test_request_date_range_fails_closed(self) -> None:
         invalid = (
@@ -170,9 +170,12 @@ class TestBarArtifactCapture(unittest.TestCase):
             ),
         )
         for parameters, message in invalid:
-            with self.subTest(message=message), tempfile.TemporaryDirectory() as directory:
-                with self.assertRaisesRegex(ManifestContractError, message):
-                    self.capture(directory, request_parameters=parameters)
+            with (
+                self.subTest(message=message),
+                tempfile.TemporaryDirectory() as directory,
+                self.assertRaisesRegex(ManifestContractError, message),
+            ):
+                self.capture(directory, request_parameters=parameters)
 
     def test_recomputed_request_tamper_cannot_reuse_descriptor_path(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -230,24 +233,26 @@ class TestBarArtifactCapture(unittest.TestCase):
                 )
 
     def test_capture_cannot_claim_research_grade(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(ManifestContractError, "cannot self-promote"):
-                capture_market_bars(
-                    directory,
-                    raw_bytes=self.raw,
-                    parser=self.provider.parse_bars_strict,
-                    symbol="600519.SH",
-                    market=Market.A,
-                    interval="1d",
-                    retrieved_at=datetime(2025, 1, 5, tzinfo=timezone.utc),
-                    source="eastmoney",
-                    source_dataset="push2his-kline",
-                    provider_version="fixture",
-                    schema_version="fixture-v1",
-                    parser_version="fixture-parser-v1",
-                    request_parameters=self.request_parameters(),
-                    trust_tier=DataTrustTier.RESEARCH_GRADE,
-                )
+        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
+            ManifestContractError,
+            "cannot self-promote",
+        ):
+            capture_market_bars(
+                directory,
+                raw_bytes=self.raw,
+                parser=self.provider.parse_bars_strict,
+                symbol="600519.SH",
+                market=Market.A,
+                interval="1d",
+                retrieved_at=datetime(2025, 1, 5, tzinfo=timezone.utc),
+                source="eastmoney",
+                source_dataset="push2his-kline",
+                provider_version="fixture",
+                schema_version="fixture-v1",
+                parser_version="fixture-parser-v1",
+                request_parameters=self.request_parameters(),
+                trust_tier=DataTrustTier.RESEARCH_GRADE,
+            )
 
     def test_recomputed_descriptor_id_cannot_raise_trust_grade(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -270,15 +275,79 @@ class TestBarArtifactCapture(unittest.TestCase):
                 )
 
     def test_raw_capture_cannot_claim_operational_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, self.assertRaisesRegex(
+            ManifestContractError,
+            "cannot self-promote above BEST_EFFORT",
+        ):
+            capture_market_bars(
+                directory,
+                raw_bytes=self.raw,
+                parser=self.provider.parse_bars_strict,
+                symbol="600519.SH",
+                market=Market.A,
+                interval="1d",
+                retrieved_at=datetime(2025, 1, 5, tzinfo=timezone.utc),
+                source="eastmoney",
+                source_dataset="push2his-kline",
+                provider_version="fixture",
+                schema_version="fixture-v1",
+                parser_version="fixture-parser-v1",
+                request_parameters=self.request_parameters(),
+                trust_tier=DataTrustTier.OPERATIONAL_VERIFIED,
+            )
+
+    def test_in_memory_capture_rejects_raw_byte_replacement(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
+            captured = self.capture(directory)
+            with self.assertRaisesRegex(ManifestContractError, "byte size differs"):
+                validate_captured_market_bars(
+                    replace(captured, raw_bytes=captured.raw_bytes + b" ")
+                )
+            changed = bytes([captured.raw_bytes[0] ^ 1]) + captured.raw_bytes[1:]
+            with self.assertRaisesRegex(ManifestContractError, "artifact hash"):
+                validate_captured_market_bars(replace(captured, raw_bytes=changed))
+
+    def test_in_memory_capture_reparses_exact_raw_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            captured = self.capture(directory)
+            forged_bar = replace(captured.bars[0], close=109.0)
+            forged = replace(
+                captured,
+                parser=lambda raw, symbol, market, interval: (
+                    forged_bar,
+                    *captured.bars[1:],
+                ),
+            )
             with self.assertRaisesRegex(
                 ManifestContractError,
-                "cannot self-promote above BEST_EFFORT",
+                "deterministic parsing",
+            ):
+                validate_captured_market_bars(forged)
+
+    def test_normalized_rows_reject_boolean_numeric_values(self) -> None:
+        good = tuple(
+            self.provider.parse_bars_strict(
+                self.raw,
+                "600519.SH",
+                Market.A,
+                "1d",
+            )
+        )
+        cases = (
+            (replace(good[0], open=True), "open must be numeric"),
+            (replace(good[0], volume=True), "volume must be a non-negative integer"),
+            (replace(good[0], amount=True), "amount must be numeric"),
+        )
+        for bad_bar, message in cases:
+            with (
+                self.subTest(message=message),
+                tempfile.TemporaryDirectory() as directory,
+                self.assertRaisesRegex(ManifestContractError, message),
             ):
                 capture_market_bars(
                     directory,
                     raw_bytes=self.raw,
-                    parser=self.provider.parse_bars_strict,
+                    parser=lambda raw, symbol, market, interval, row=bad_bar: (row,),
                     symbol="600519.SH",
                     market=Market.A,
                     interval="1d",
@@ -289,8 +358,37 @@ class TestBarArtifactCapture(unittest.TestCase):
                     schema_version="fixture-v1",
                     parser_version="fixture-parser-v1",
                     request_parameters=self.request_parameters(),
-                    trust_tier=DataTrustTier.OPERATIONAL_VERIFIED,
                 )
+
+    def test_aware_bar_uses_exchange_local_session_date_for_bounds(self) -> None:
+        bar = self.provider.parse_bars_strict(
+            self.raw,
+            "600519.SH",
+            Market.A,
+            "1d",
+        )[0]
+        aware = replace(
+            bar,
+            timestamp=datetime(2024, 1, 1, 16, 30, tzinfo=timezone.utc),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            captured = capture_market_bars(
+                directory,
+                raw_bytes=self.raw,
+                parser=lambda raw, symbol, market, interval: (aware,),
+                symbol="600519.SH",
+                market=Market.A,
+                interval="1d",
+                retrieved_at=datetime(2025, 1, 5, tzinfo=timezone.utc),
+                source="eastmoney",
+                source_dataset="push2his-kline",
+                provider_version="fixture",
+                schema_version="fixture-v1",
+                parser_version="fixture-parser-v1",
+                request_parameters=self.request_parameters(),
+            )
+        self.assertEqual(captured.artifact.content_start.date().isoformat(), "2024-01-02")
+        self.assertEqual(captured.artifact.content_end.date().isoformat(), "2024-01-02")
 
     def test_normalized_rows_reject_source_and_ohlc_corruption(self) -> None:
         good = tuple(
@@ -313,23 +411,26 @@ class TestBarArtifactCapture(unittest.TestCase):
             (invalid_ohlc, "high is inconsistent"),
         )
         for parser, message in cases:
-            with self.subTest(message=message), tempfile.TemporaryDirectory() as directory:
-                with self.assertRaisesRegex(ManifestContractError, message):
-                    capture_market_bars(
-                        directory,
-                        raw_bytes=self.raw,
-                        parser=parser,
-                        symbol="600519.SH",
-                        market=Market.A,
-                        interval="1d",
-                        retrieved_at=datetime(2025, 1, 5, tzinfo=timezone.utc),
-                        source="eastmoney",
-                        source_dataset="push2his-kline",
-                        provider_version="fixture",
-                        schema_version="fixture-v1",
-                        parser_version="fixture-parser-v1",
-                        request_parameters=self.request_parameters(),
-                    )
+            with (
+                self.subTest(message=message),
+                tempfile.TemporaryDirectory() as directory,
+                self.assertRaisesRegex(ManifestContractError, message),
+            ):
+                capture_market_bars(
+                    directory,
+                    raw_bytes=self.raw,
+                    parser=parser,
+                    symbol="600519.SH",
+                    market=Market.A,
+                    interval="1d",
+                    retrieved_at=datetime(2025, 1, 5, tzinfo=timezone.utc),
+                    source="eastmoney",
+                    source_dataset="push2his-kline",
+                    provider_version="fixture",
+                    schema_version="fixture-v1",
+                    parser_version="fixture-parser-v1",
+                    request_parameters=self.request_parameters(),
+                )
 
 
 if __name__ == "__main__":

@@ -85,6 +85,25 @@ class MarketDataProvider(ABC):
     def applies_to(self, market: T.Market) -> bool:
         return market in self.markets
 
+    @staticmethod
+    def _validate_bar_identity(symbol: str, market: T.Market) -> None:
+        """Require a canonical symbol suffix that agrees with the requested market."""
+
+        if type(symbol) is not str or not symbol or symbol != symbol.strip():
+            raise ValueError("bar symbol must be a non-empty canonical string")
+        if not isinstance(market, T.Market):
+            raise TypeError("bar market must be Market")
+        code, separator, suffix = symbol.rpartition(".")
+        if not separator or not code or any(ord(char) < 33 or ord(char) == 127 for char in code):
+            raise ValueError("bar symbol must use canonical CODE.MARKET form")
+        allowed_suffixes = {
+            T.Market.A: {"SH", "SZ"},
+            T.Market.HK: {"HK"},
+            T.Market.US: {"US"},
+        }
+        if suffix.upper() not in allowed_suffixes[market]:
+            raise ValueError("bar symbol suffix does not match requested market")
+
     def supports_snapshot(self) -> bool:
         return False
 
@@ -157,6 +176,14 @@ class MarketDataProvider(ABC):
             raise ValueError("research exact-raw requests forbid host override")
         if type(max_response_bytes) is not int or max_response_bytes <= 0:
             raise ValueError("max_response_bytes must be a positive integer")
+        if (
+            type(url) is not str
+            or not url
+            or url != url.strip()
+            or "\\" in url
+            or any(ord(character) < 32 or ord(character) == 127 for character in url)
+        ):
+            raise ValueError("research exact-raw URL is not canonical")
         parsed = urlparse(url)
         if (
             parsed.scheme != "https"
@@ -172,8 +199,39 @@ class MarketDataProvider(ABC):
             "Accept": "application/json,text/plain;q=0.9",
             "User-Agent": "stock-tracker/exact-raw-research-v1",
         }
+        if headers is not None and not isinstance(headers, dict):
+            raise ValueError("research exact-raw headers must be a dictionary")
         if headers:
-            hdrs.update(headers)
+            forbidden_headers = {
+                "authorization",
+                "cookie",
+                "host",
+                "proxy-authorization",
+                "x-api-key",
+                "api-key",
+            }
+            normalized_names: set[str] = set()
+            for name, value in headers.items():
+                if (
+                    type(name) is not str
+                    or not name
+                    or name != name.strip()
+                    or any(ord(character) <= 32 or ord(character) == 127 for character in name)
+                ):
+                    raise ValueError("research exact-raw header name is invalid")
+                normalized_name = name.lower()
+                if normalized_name in normalized_names:
+                    raise ValueError("research exact-raw headers contain duplicate names")
+                if normalized_name in forbidden_headers:
+                    raise ValueError(
+                        "research exact-raw public channel forbids authority or credential headers"
+                    )
+                if type(value) is not str or any(
+                    ord(character) < 32 or ord(character) == 127 for character in value
+                ):
+                    raise ValueError("research exact-raw header value is invalid")
+                normalized_names.add(normalized_name)
+                hdrs[name] = value
         opener = urllib_request.build_opener(
             urllib_request.ProxyHandler({}),
             urllib_request.HTTPSHandler(context=ssl.create_default_context()),
@@ -222,6 +280,12 @@ class MarketDataProvider(ABC):
             )
         if not raw:
             raise ValueError("research exact-raw response is empty")
+        prefix = raw[:512]
+        if prefix.startswith(b"\xef\xbb\xbf"):
+            prefix = prefix[3:]
+        prefix = prefix.lstrip().lower()
+        if prefix.startswith((b"<!doctype html", b"<html", b"<head", b"<body")):
+            raise ValueError("research exact-raw endpoint returned an HTML error page")
         return raw
 
     def _request(self, url: str, headers: dict | None = None) -> bytes:

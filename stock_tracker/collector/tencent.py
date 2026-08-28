@@ -249,6 +249,7 @@ class TencentProvider(MarketDataProvider):
 
         if not self.applies_to(market):
             raise ValueError(f"{self.name} is not configured for market {market.value}")
+        self._validate_bar_identity(symbol, market)
         self._rl.acquire()
         return self._request_research(
             self._bars_url(symbol, market, interval, start, end, adjust)
@@ -265,6 +266,7 @@ class TencentProvider(MarketDataProvider):
     ) -> list[T.Bar]:
         if type(strict) is not bool:
             raise TypeError("strict must be a boolean")
+        self._validate_bar_identity(symbol, market)
         if interval != "1d":
             raise ValueError("Tencent fallback currently supports interval='1d' only")
         if not isinstance(raw, bytes) or not raw:

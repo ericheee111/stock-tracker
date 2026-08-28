@@ -17,7 +17,7 @@ import os
 import re
 import tempfile
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time
 from enum import StrEnum
 from pathlib import Path
@@ -25,8 +25,8 @@ from typing import Any, cast
 
 from stock_tracker.core.types import Bar, Market
 
-from ..core.fingerprint import canonical_json, fingerprint, hash_file
-from ..core.time import ensure_aware, market_timezone
+from ..core.fingerprint import canonical_json, fingerprint
+from ..core.time import ensure_aware, exchange_local_date, market_timezone, to_utc
 from .manifest import (
     DataFormat,
     DataKind,
@@ -60,6 +60,8 @@ class DataTrustTier(StrEnum):
 @dataclass(frozen=True, slots=True)
 class CapturedBarArtifact:
     artifact: RawDataArtifact
+    raw_bytes: bytes = field(repr=False)
+    parser: BarParser = field(repr=False, compare=False)
     bars: tuple[Bar, ...]
     trust_tier: DataTrustTier
     parser_version: str
@@ -229,6 +231,41 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     _atomic_write_bytes(path, encoded)
 
 
+def _bar_session_date(timestamp: datetime, market: Market) -> date:
+    if not isinstance(timestamp, datetime):
+        raise ManifestContractError("parsed bar timestamp must be datetime")
+    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        return timestamp.date()
+    return exchange_local_date(timestamp, market)
+
+
+def _bar_order_key(timestamp: datetime, market: Market) -> datetime:
+    if not isinstance(timestamp, datetime):
+        raise ManifestContractError("parsed bar timestamp must be datetime")
+    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        timestamp = timestamp.replace(tzinfo=market_timezone(market))
+    return to_utc(timestamp)
+
+
+def _finite_number(
+    value: object,
+    name: str,
+    *,
+    positive: bool = False,
+    non_negative: bool = False,
+) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ManifestContractError(f"parsed bar {name} must be numeric")
+    normalized = float(value)
+    if not math.isfinite(normalized):
+        raise ManifestContractError(f"parsed bar {name} must be finite")
+    if positive and normalized <= 0:
+        raise ManifestContractError(f"parsed bar {name} must be positive")
+    if non_negative and normalized < 0:
+        raise ManifestContractError(f"parsed bar {name} cannot be negative")
+    return normalized
+
+
 def _normalized_rows(
     bars: Sequence[Bar],
     *,
@@ -241,7 +278,7 @@ def _normalized_rows(
         raise ManifestContractError("captured market-bar response produced no rows")
 
     rows: list[dict[str, Any]] = []
-    previous: datetime | None = None
+    previous_order: datetime | None = None
     for index, bar in enumerate(bars):
         if not isinstance(bar, Bar):
             raise ManifestContractError(f"parser row {index} is not Bar")
@@ -249,39 +286,46 @@ def _normalized_rows(
             raise ManifestContractError("parsed bar identity differs from capture request")
         if bar.source != source:
             raise ManifestContractError("parsed bar source differs from capture source")
-        if previous is not None and bar.timestamp <= previous:
+        order_key = _bar_order_key(bar.timestamp, market)
+        if previous_order is not None and order_key <= previous_order:
             raise ManifestContractError("parsed bars must be strictly chronological")
-        prices = (bar.open, bar.high, bar.low, bar.close)
-        if any(not math.isfinite(value) or value <= 0 for value in prices):
-            raise ManifestContractError("parsed bar OHLC must be finite and positive")
-        if bar.low > min(bar.open, bar.close, bar.high):
+        open_price = _finite_number(bar.open, "open", positive=True)
+        high = _finite_number(bar.high, "high", positive=True)
+        low = _finite_number(bar.low, "low", positive=True)
+        close = _finite_number(bar.close, "close", positive=True)
+        if low > min(open_price, close, high):
             raise ManifestContractError("parsed bar low is inconsistent with OHLC")
-        if bar.high < max(bar.open, bar.close, bar.low):
+        if high < max(open_price, close, low):
             raise ManifestContractError("parsed bar high is inconsistent with OHLC")
-        numeric_nonnegative = (bar.amount, bar.turnover, bar.adjustment_factor)
-        if bar.volume < 0 or any(
-            not math.isfinite(value) or value < 0 for value in numeric_nonnegative
-        ):
-            raise ManifestContractError("parsed bar volume/amount metadata is invalid")
-        if bar.adjustment_factor <= 0:
-            raise ManifestContractError("parsed bar adjustment_factor must be positive")
-        previous = bar.timestamp
+        if type(bar.volume) is not int or bar.volume < 0:
+            raise ManifestContractError(
+                "parsed bar volume must be a non-negative integer"
+            )
+        amount = _finite_number(bar.amount, "amount", non_negative=True)
+        turnover = _finite_number(bar.turnover, "turnover", non_negative=True)
+        adjustment_factor = _finite_number(
+            bar.adjustment_factor,
+            "adjustment_factor",
+            positive=True,
+        )
+        session_date = _bar_session_date(bar.timestamp, market)
+        previous_order = order_key
         rows.append(
             {
                 "symbol": bar.symbol,
                 "market": bar.market.value,
                 "timestamp": bar.timestamp.isoformat(),
-                "session_date": bar.timestamp.date().isoformat(),
+                "session_date": session_date.isoformat(),
                 "interval": bar.interval,
-                "open": bar.open,
-                "high": bar.high,
-                "low": bar.low,
-                "close": bar.close,
+                "open": open_price,
+                "high": high,
+                "low": low,
+                "close": close,
                 "volume": bar.volume,
-                "amount": bar.amount,
-                "turnover": bar.turnover,
+                "amount": amount,
+                "turnover": turnover,
                 "source": bar.source,
-                "adjustment_factor": bar.adjustment_factor,
+                "adjustment_factor": adjustment_factor,
             }
         )
     return rows
@@ -289,8 +333,10 @@ def _normalized_rows(
 
 def _content_bounds(bars: Sequence[Bar], market: Market) -> tuple[datetime, datetime]:
     zone = market_timezone(market)
-    first = datetime.combine(bars[0].timestamp.date(), time.min, tzinfo=zone)
-    last = datetime.combine(bars[-1].timestamp.date(), time.max, tzinfo=zone)
+    first_session = _bar_session_date(bars[0].timestamp, market)
+    last_session = _bar_session_date(bars[-1].timestamp, market)
+    first = datetime.combine(first_session, time.min, tzinfo=zone)
+    last = datetime.combine(last_session, time.max, tzinfo=zone)
     return first, last
 
 
@@ -447,6 +493,8 @@ def capture_market_bars(
     return validate_captured_market_bars(
         CapturedBarArtifact(
             artifact=artifact,
+            raw_bytes=raw_bytes,
+            parser=parser,
             bars=bars,
             trust_tier=trust_tier,
             parser_version=parser_version,
@@ -477,6 +525,12 @@ def validate_captured_market_bars(
     market = first.market
     interval = first.interval
     artifact = captured.artifact
+    if type(captured.raw_bytes) is not bytes or not captured.raw_bytes:
+        raise ManifestContractError("captured raw bytes must be non-empty bytes")
+    if len(captured.raw_bytes) != artifact.byte_size:
+        raise ManifestContractError("captured raw byte size differs from artifact")
+    if hashlib.sha256(captured.raw_bytes).hexdigest() != artifact.sha256:
+        raise ManifestContractError("captured raw bytes differ from artifact hash")
     if artifact.kind is not DataKind.MARKET_BARS:
         raise ManifestContractError("captured artifact kind must be MARKET_BARS")
     if artifact.market is not market:
@@ -488,6 +542,8 @@ def validate_captured_market_bars(
         verified=artifact.verified,
         calendar_snapshot_id=artifact.calendar_snapshot_id,
     )
+    if not callable(captured.parser):
+        raise ManifestContractError("captured parser must be callable")
     normalized_request_parameters = _normalize_request_parameters(
         captured.request_parameters
     )
@@ -498,6 +554,23 @@ def validate_captured_market_bars(
         interval=interval,
         source=artifact.source,
     )
+    try:
+        reparsed_bars = tuple(
+            captured.parser(captured.raw_bytes, symbol, market, interval)
+        )
+    except Exception as exc:
+        raise ManifestContractError("captured raw bytes no longer parse") from exc
+    reparsed_rows = _normalized_rows(
+        reparsed_bars,
+        symbol=symbol,
+        market=market,
+        interval=interval,
+        source=artifact.source,
+    )
+    if reparsed_rows != rows:
+        raise ManifestContractError(
+            "captured bars differ from deterministic parsing of raw bytes"
+        )
     content_start, content_end = _content_bounds(captured.bars, market)
     if artifact.row_count != len(rows):
         raise ManifestContractError("captured artifact row_count differs from rows")
@@ -536,7 +609,18 @@ def validate_captured_market_bars(
     )
     if captured.capture_id != fingerprint(payload):
         raise ManifestContractError("captured capture identity mismatch")
-    return captured
+    return CapturedBarArtifact(
+        artifact=artifact,
+        raw_bytes=captured.raw_bytes,
+        parser=captured.parser,
+        bars=tuple(replace(bar) for bar in reparsed_bars),
+        trust_tier=captured.trust_tier,
+        parser_version=captured.parser_version,
+        request_parameters=dict(normalized_request_parameters),
+        normalized_dataset_id=normalized_dataset_id,
+        descriptor_key=descriptor_key,
+        capture_id=captured.capture_id,
+    )
 
 
 def load_captured_market_bars(
@@ -620,9 +704,10 @@ def load_captured_market_bars(
     )
 
     raw_path = safe_artifact_path(root_path, artifact.storage_key)
-    if hash_file(raw_path) != artifact.sha256:
+    raw_bytes = raw_path.read_bytes()
+    if hashlib.sha256(raw_bytes).hexdigest() != artifact.sha256:
         raise ManifestContractError("raw artifact hash changed")
-    bars = tuple(parser(raw_path.read_bytes(), symbol, market, interval))
+    bars = tuple(parser(raw_bytes, symbol, market, interval))
     rows = _normalized_rows(
         bars,
         symbol=symbol,
@@ -647,6 +732,8 @@ def load_captured_market_bars(
     return validate_captured_market_bars(
         CapturedBarArtifact(
             artifact=artifact,
+            raw_bytes=raw_bytes,
+            parser=parser,
             bars=bars,
             trust_tier=trust_tier,
             parser_version=parser_version,

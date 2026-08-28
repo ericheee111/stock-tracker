@@ -8,6 +8,7 @@ import unittest
 from dataclasses import replace
 from datetime import date, datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from stock_tracker.collector.eastmoney import EastmoneyProvider
 from stock_tracker.collector.tencent import TencentProvider
@@ -38,6 +39,9 @@ from stock_tracker.quant.data import (
 )
 
 _FIXTURE_MANIFEST = (
+    Path(__file__).parent / "fixtures" / "market_bar_golden" / "v2" / "manifest.json"
+)
+_LEGACY_FIXTURE_MANIFEST = (
     Path(__file__).parent / "fixtures" / "market_bar_golden" / "v1" / "manifest.json"
 )
 _COMPARABLE_FIELDS = tuple(
@@ -263,6 +267,20 @@ class TestGoldenMarketBarPack(MarketBarReconciliationFixture):
                     )
                     self.assertNotIn("trust_tier", json.dumps(report.as_dict()))
 
+    def test_legacy_pack_identity_is_preserved_but_requires_legacy_parser(self) -> None:
+        legacy = load_market_bar_golden_pack(_LEGACY_FIXTURE_MANIFEST)
+        self.assertEqual(legacy.pack_version, "v1")
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            self.assertRaisesRegex(MarketBarGoldenError, "parser version mismatch"),
+        ):
+            materialize_golden_case(
+                manifest_path=_LEGACY_FIXTURE_MANIFEST,
+                case_name="A_600519",
+                artifact_root=directory,
+                parser_registry=self.registry,
+            )
+
     def test_input_order_and_output_writes_are_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             _, case, report = materialize_golden_case(
@@ -295,6 +313,26 @@ class TestGoldenMarketBarPack(MarketBarReconciliationFixture):
             ):
                 write_market_bar_reconciliation_json(report, json_path)
 
+    def test_report_output_rejects_link_or_junction_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            _, _, report = materialize_golden_case(
+                manifest_path=_FIXTURE_MANIFEST,
+                case_name="A_600519",
+                artifact_root=directory,
+                parser_registry=self.registry,
+            )
+            with patch(
+                "stock_tracker.quant.data.market_bar_reconciliation._is_link",
+                return_value=True,
+            ), self.assertRaisesRegex(
+                MarketBarReconciliationError,
+                "symlink or junction",
+            ):
+                write_market_bar_reconciliation_json(
+                    report,
+                    Path(directory) / "linked" / "report.json",
+                )
+
     def test_manifest_and_raw_tamper_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             copied = Path(directory) / "pack"
@@ -314,6 +352,22 @@ class TestGoldenMarketBarPack(MarketBarReconciliationFixture):
             manifest.write_text(json.dumps(value), encoding="utf-8")
             with self.assertRaisesRegex(MarketBarGoldenError, "synthetic-only"):
                 load_market_bar_golden_pack(manifest)
+
+    def test_recomputed_self_consistent_pack_still_requires_pinned_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            copied = Path(directory) / "pack"
+            shutil.copytree(_FIXTURE_MANIFEST.parent, copied)
+            original = load_market_bar_golden_pack(_FIXTURE_MANIFEST)
+            forged = replace(
+                original,
+                retrieved_at=datetime(2025, 1, 6, tzinfo=timezone.utc),
+            )
+            (copied / "manifest.json").write_text(
+                json.dumps(forged.as_dict(), sort_keys=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(MarketBarGoldenError, "pinned identity"):
+                load_market_bar_golden_pack(copied / "manifest.json")
 
     def test_manifest_rejects_duplicate_keys_and_identity_tamper(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -533,6 +587,60 @@ class TestMarketBarReconciliation(MarketBarReconciliationFixture):
             changed = replace(report, policy=changed_policy)
             self.assertNotEqual(changed.report_id, report.report_id)
 
+    def test_future_artifact_does_not_contribute_coverage_or_comparisons(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            visible_capture = self._capture(
+                directory,
+                source="source_one",
+                bars=(self._bar(source="source_one", session=date(2024, 1, 2)),),
+                retrieved_at=datetime(2025, 1, 4, tzinfo=timezone.utc),
+            )
+            future_capture = self._capture(
+                directory,
+                source="source_two",
+                bars=(self._bar(source="source_two", session=date(2024, 1, 2)),),
+                retrieved_at=datetime(2025, 1, 6, tzinfo=timezone.utc),
+            )
+            report = reconcile_market_bars(
+                as_of=datetime(2025, 1, 5, tzinfo=timezone.utc),
+                calendar_snapshot_id=self._calendar_id(),
+                expected_open_sessions=(date(2024, 1, 2),),
+                series=(self._evidence(visible_capture), self._evidence(future_capture)),
+            )
+            codes = {item.code for item in report.findings}
+            self.assertIn("MARKET_BAR_ARTIFACT_NOT_VISIBLE_AS_OF", codes)
+            self.assertIn("INSUFFICIENT_INDEPENDENT_MARKET_BAR_SOURCES", codes)
+            self.assertEqual(report.coverage.fully_observed_sessions, ())
+            self.assertEqual(report.comparisons, ())
+            self.assertIs(report.candidate_state, MarketBarCandidateState.HARD_BLOCKED)
+
+    def test_same_day_bar_at_capture_is_excluded_even_when_report_is_later(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            retrieved = datetime(2024, 1, 2, 8, tzinfo=timezone.utc)
+            first_capture = self._capture(
+                directory,
+                source="source_one",
+                bars=(self._bar(source="source_one", session=date(2024, 1, 2)),),
+                retrieved_at=retrieved,
+            )
+            second_capture = self._capture(
+                directory,
+                source="source_two",
+                bars=(self._bar(source="source_two", session=date(2024, 1, 2)),),
+                retrieved_at=retrieved,
+            )
+            report = reconcile_market_bars(
+                as_of=datetime(2024, 1, 3, 8, tzinfo=timezone.utc),
+                calendar_snapshot_id=self._calendar_id(),
+                expected_open_sessions=(date(2024, 1, 2),),
+                series=(self._evidence(first_capture), self._evidence(second_capture)),
+            )
+            codes = {item.code for item in report.findings}
+            self.assertIn("MARKET_BAR_SESSION_NOT_FINAL_AT_CAPTURE", codes)
+            self.assertEqual(report.coverage.fully_observed_sessions, ())
+            self.assertEqual(report.comparisons, ())
+            self.assertIs(report.candidate_state, MarketBarCandidateState.HARD_BLOCKED)
+
     def test_future_calendar_session_is_a_hard_block(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             retrieved = datetime(2024, 1, 1, 12, tzinfo=timezone.utc)
@@ -646,6 +754,17 @@ class TestTencentRawBarBoundary(MarketBarReconciliationFixture):
                     },
                 }
             ).encode("utf-8"),
+            json.dumps(
+                {
+                    "rc": 0,
+                    "data": {
+                        "klines": [
+                            "2024-01-02,100,105,110,95,12000,150000000,2.3",
+                            "2024-01-02,100,105,110,95,12000,150000000,2.3",
+                        ]
+                    },
+                }
+            ).encode("utf-8"),
         )
         for payload in payloads:
             with self.subTest(payload=payload[:40]), self.assertRaises(ValueError):
@@ -660,6 +779,18 @@ class TestTencentRawBarBoundary(MarketBarReconciliationFixture):
         self.assertTrue(self.tencent.supports_raw_bars())
         self.assertTrue(self.tencent.supports_adjustment("qfq"))
         self.assertFalse(self.tencent.supports_adjustment("raw"))
+
+    def test_symbol_market_mismatch_fails_before_network_or_parsing(self) -> None:
+        for provider in (self.eastmoney, self.tencent):
+            with self.subTest(provider=provider.name), patch.object(
+                provider,
+                "_request_research",
+            ) as request:
+                with self.assertRaisesRegex(ValueError, "suffix"):
+                    provider.fetch_bars_raw("AAPL.US", Market.A)
+                request.assert_not_called()
+                with self.assertRaisesRegex(ValueError, "suffix"):
+                    provider.parse_bars_strict(b"{}", "AAPL.US", Market.A, "1d")
 
     def test_strict_parser_rejects_duplicate_keys_nonfinite_and_duplicate_dates(self) -> None:
         bad_payloads = (
