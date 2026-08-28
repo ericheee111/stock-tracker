@@ -326,7 +326,7 @@ Status: `IMPLEMENTED / LIVE_KEY_ACCEPTANCE_PENDING`
 
 ## 23. Task Q — Stage 3D–5C XTP, event store and Monitor delivery
 
-Status: `ENGINEERING_READY / GIT_DELIVERY_PENDING`
+Status: `COMPLETED / LIVE_XTP_ACCEPTANCE_PENDING`
 
 - Recorded the user's stock-type and algorithm-type XTP test-account categories without storing identifiers or secrets. The engineering implementation uses neither account; algorithm access, Trader/Order/Algo APIs, account/position sync and automatic trading remain absent.
 - Added a CPython 3.9-compatible read-only XTP Quote Sidecar contract, loopback HTTP/JSON IPC, Simulator, strict event/cursor/session/metric validation, a fail-closed official Quote-module/environment probe and a CPython 3.14 main-process client. Real XTP login/subscription remains an operational gate.
@@ -341,6 +341,12 @@ Status: `ENGINEERING_READY / GIT_DELIVERY_PENDING`
 
 ## 24. Task R — Stage 3D–5C GitHub delivery
 
-Status: `PENDING`
+Status: `COMPLETED`
 
-- Implementation commit, staged-tree evidence, handoff commit, push and local/remote SHA equality will be recorded here after the final Git gates pass.
+- Implementation/review commit `4a1accfffd8c5e8b9aaffdb2fd4d872f78cbe39b` (`feat: add XTP market event monitoring lane`) was pushed to `origin/main`.
+- The exact Git index tree `7b519054bd72cb9870fdb8f16d4274213159dc6a` independently passed targeted Stage tests `83 passed, 1 skipped + 19 subtests`, runtime `512 passed, 1 skipped + 316 subtests`, Monitor Workspace `49/49`, Hybrid H0 `12/12`, H1/H2 `28/28 + 11/11`, H4 `18/18`, Mock Today `17/17`, real Today `17/17`, Portfolio CRUD `13/13`, targeted Ruff, JavaScript syntax, CPython 3.9 grammar parse and `git diff --cached --check`.
+- Its source-distribution export passed Quant `561 passed, 2 skipped + 199 subtests`; both skips were expected because the archive has no `.git`. The same source-distribution/no-tracked-bytecode gates passed `3 tests + 49 subtests` in the real checkout, where full Quant passed `563 tests + 248 subtests`.
+- Git-index secret review covered 562 tracked files and found no tracked database, bytecode, archive, `.env`, private-key file or XTP credential assignment. The only private-key marker strings were the expected scanner implementation and its negative fixture.
+- Production migration remained dry-run only and the production database SHA-256 remained `1cde40aa66846630d89b10d080a8837d204266c5ce32001a45d3b0c0c06197b1`.
+- After the implementation push, local `HEAD`, local `origin/main`, and GitHub `refs/heads/main` were verified equal at `4a1accfffd8c5e8b9aaffdb2fd4d872f78cbe39b` before this handoff-only completion commit.
+- Real CPython 3.9 plus the official XTP binary, Quote Login/Subscribe, Level 1/2 permission proof, sustained throughput, 50–100-symbol Live Shadow and data storage/training/redistribution rights remain explicit operational gates. The algorithm account remains unused and no Trader/Order/Algo or automatic-trading surface was shipped.
