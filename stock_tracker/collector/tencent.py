@@ -7,16 +7,49 @@
   或 "YYYY-MM-DD HH:MM:SS"；成交量为股（无需 ×100）。
 """
 
+# Runtime provider timestamps intentionally remain market-local naive datetimes
+# until the existing Quote/Bar contract is migrated as one unit.
+# ruff: noqa: DTZ005, DTZ007
+
 from __future__ import annotations
 
 import json
+import math
 import re
 from datetime import datetime
-from typing import Optional
 from urllib.parse import quote
 
 from ..core import types as T
 from .provider import MarketDataProvider
+
+
+def _strict_json_loads(raw: bytes) -> object:
+    """Decode Tencent research payloads without duplicate/non-finite JSON values."""
+
+    if not isinstance(raw, bytes) or not raw:
+        raise ValueError("Tencent K-line response must be non-empty bytes")
+
+    def pairs_hook(pairs):
+        output = {}
+        for key, value in pairs:
+            if key in output:
+                raise ValueError("Tencent K-line response contains duplicate JSON keys")
+            output[key] = value
+        return output
+
+    def reject_constant(value: str):
+        raise ValueError(f"Tencent K-line response contains non-finite token: {value}")
+
+    try:
+        return json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=pairs_hook,
+            parse_constant=reject_constant,
+        )
+    except UnicodeDecodeError as exc:
+        raise ValueError("Tencent K-line response must use UTF-8") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError("Tencent K-line response is invalid JSON") from exc
 
 
 def _market_of_provider_symbol(ps: str) -> T.Market:
@@ -24,7 +57,7 @@ def _market_of_provider_symbol(ps: str) -> T.Market:
         return T.Market.HK
     if ps.startswith("us"):
         return T.Market.US
-    if ps.startswith("sh") or ps.startswith("sz"):
+    if ps.startswith(("sh", "sz")):
         return T.Market.A
     return T.Market.A
 
@@ -46,7 +79,7 @@ def _parse_dt(s: str) -> datetime:
     return datetime.now()
 
 
-def _f(parts: list[str], idx: int, default: float = 0.0) -> Optional[float]:
+def _f(parts: list[str], idx: int, default: float = 0.0) -> float | None:
     """取第 idx 段并转 float。
 
     - 索引越界 → 返回 default（保持旧行为：缺字段回落 0.0，测试 test_malformed_body 依赖）。
@@ -127,7 +160,7 @@ class TencentProvider(MarketDataProvider):
             if not line or "=" not in line:
                 continue
             key = line.split("=")[0].strip()
-            ps = key[2:] if key.startswith("v_") else key
+            ps = key.removeprefix("v_")
             if ps not in mapping:
                 continue
             start = line.find('"')
@@ -150,8 +183,7 @@ class TencentProvider(MarketDataProvider):
     @staticmethod
     def _resolve_symbol(ps: str) -> str:
         # 港股/美股指数腾讯使用 r_ 前缀（如 r_hkHSI / r_usIXIC），先剥离
-        if ps.startswith("r_"):
-            ps = ps[2:]
+        ps = ps.removeprefix("r_")
         code = ps[2:]
         if ps.startswith("hk"):
             return f"{code}.HK"
@@ -165,67 +197,223 @@ class TencentProvider(MarketDataProvider):
         return code
 
     # ---- 历史 K 线（腾讯 web.ifzq.gtimg.cn 兜底源，本环境实测可达） ----
-    def supports_bars(self) -> bool:
-        """腾讯 K 线作为「兜底源」，默认不声明为主 K 线源（``supports_bars=False``）。
+    KLINE = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+    KLINE_SCHEMA_VERSION = "tencent-fqkline-qfqday-v1"
+    KLINE_ADAPTER_VERSION = "tencent-bars-v2-raw-split"
 
-        Router 通过独立的 ``bars_fallback`` 配置标记将其纳入 K 线候选（仅在 eastmoney
-        主源不可用/熔断时兜底）。这样既保留「腾讯默认 OFF」的契约（``supports_bars=False``），
-        又提供 K 线韧性，不改动既有单测断言。
-        """
+    def supports_bars(self) -> bool:
+        """保持 Runtime 兜底源默认 OFF；Router 仅按 ``bars_fallback`` 显式使用。"""
+
         return False
 
-    def fetch_bars(self, symbol: str, market: T.Market, interval: str = "1d",
-                   start: "datetime | None" = None, end: "datetime | None" = None,
-                   adjust: str = "qfq") -> "list[T.Bar]":
-        """腾讯历史 K 线（兜底源）：``web.ifzq.gtimg.cn/appstock/app/fqkline/get``。
+    def supports_raw_bars(self) -> bool:
+        """Expose exact response bytes before normalization for research capture."""
 
-        响应 ``data[prov_sym][qfqday]`` 为**列表**数组，每行：
-        ``[日期, 开, 收, 高, 低, 成交量(, 成交额)]``（注意：收在开后、高/低之前）。
-        - A 股 prov_sym=``sh/sz``+code；港股=``hk``+code；美股=``us``+CODE``.OQ``
-          （腾讯美股 K 线需交易所后缀，NASDAQ 为 ``.OQ``）。
-        - A 股成交量单位为「手」需 ×100 → 股；HK/US 已是股。
-        - 空 / 无数据 → 返回 ``[]``（不抛、不阻塞，交由 Router 兜底或调度跳过）。
-        """
+        return True
+
+    def supports_adjustment(self, adjust: str) -> bool:
+        """腾讯当前只能诚实提供其前复权日线合同。"""
+
+        return adjust == "qfq"
+
+    def _bars_url(
+        self,
+        symbol: str,
+        market: T.Market,
+        interval: str = "1d",
+        start: datetime | None = None,
+        end: datetime | None = None,
+        adjust: str = "qfq",
+    ) -> str:
         if interval != "1d":
             raise ValueError("Tencent fallback currently supports interval='1d' only")
         if adjust != "qfq":
             raise ValueError("Tencent fallback currently supports adjust='qfq' only")
-        self._rl.acquire()
         prov_sym = self._kline_symbol(symbol, market)
         start_s = start.strftime("%Y-%m-%d") if start else ""
         end_s = end.strftime("%Y-%m-%d") if end else ""
-        count = 320  # 覆盖约 1.3 年日 K（满足 MA60/ROC60/52 周所需窗口）
+        count = 320
         param = f"{prov_sym},day,{start_s},{end_s},{count},qfq"
-        url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={quote(param)}"
-        raw = self._request(url).decode("utf-8", "ignore")
-        payload = json.loads(raw)
-        node = (payload.get("data") or {}).get(prov_sym, {})
-        key = "qfqday" if adjust in ("qfq", "") else "day"
-        rows = node.get(key) or node.get("day") or []
-        scale = 100 if market == T.Market.A else 1  # A 股手→股
+        return f"{self.KLINE}?param={quote(param)}"
+
+    def fetch_bars_raw(
+        self,
+        symbol: str,
+        market: T.Market,
+        interval: str = "1d",
+        start: datetime | None = None,
+        end: datetime | None = None,
+        adjust: str = "qfq",
+    ) -> bytes:
+        """Fetch exact Tencent K-line bytes; parsing is deliberately separate."""
+
+        if not self.applies_to(market):
+            raise ValueError(f"{self.name} is not configured for market {market.value}")
+        self._rl.acquire()
+        return self._request_research(
+            self._bars_url(symbol, market, interval, start, end, adjust)
+        )
+
+    def _parse_bars(
+        self,
+        raw: bytes,
+        symbol: str,
+        market: T.Market,
+        interval: str,
+        *,
+        strict: bool,
+    ) -> list[T.Bar]:
+        if type(strict) is not bool:
+            raise TypeError("strict must be a boolean")
+        if interval != "1d":
+            raise ValueError("Tencent fallback currently supports interval='1d' only")
+        if not isinstance(raw, bytes) or not raw:
+            raise ValueError("Tencent K-line response must be non-empty bytes")
+        if strict:
+            payload = _strict_json_loads(raw)
+        else:
+            payload = json.loads(raw.decode("utf-8", "ignore"))
+        if not isinstance(payload, dict):
+            raise TypeError("Tencent K-line response must be a JSON object")
+        if payload.get("code", 0) != 0:
+            if strict:
+                raise ValueError("Tencent K-line response returned a non-zero code")
+            return []
+        data = payload.get("data")
+        if data in (None, {}):
+            return []
+        if not isinstance(data, dict):
+            if strict:
+                raise ValueError("Tencent K-line data must be a JSON object")
+            return []
+        prov_sym = self._kline_symbol(symbol, market)
+        node = data.get(prov_sym)
+        if node in (None, {}):
+            return []
+        if not isinstance(node, dict):
+            if strict:
+                raise ValueError("Tencent K-line symbol node must be a JSON object")
+            return []
+        rows = node.get("qfqday")
+        if rows is None:
+            if strict:
+                raise ValueError("Tencent qfqday node is missing")
+            return []
+        if not isinstance(rows, list):
+            if strict:
+                raise ValueError("Tencent K-line rows must be a JSON array")
+            return []
+
+        def number(value: object, name: str, *, positive: bool = False) -> float:
+            if isinstance(value, bool):
+                raise TypeError(f"Tencent K-line {name} must be numeric")
+            try:
+                result = float(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Tencent K-line {name} must be numeric") from exc
+            if not math.isfinite(result):
+                raise ValueError(f"Tencent K-line {name} must be finite")
+            if positive and result <= 0:
+                raise ValueError(f"Tencent K-line {name} must be positive")
+            return result
+
+        scale = 100 if market == T.Market.A else 1
         bars: list[T.Bar] = []
-        for r in rows:
-            # 腾讯返回为列表：[日期, 开, 收, 高, 低, 成交量(, 成交额?)]
-            if not isinstance(r, (list, tuple)) or len(r) < 6:
+        previous: datetime | None = None
+        seen: set[datetime] = set()
+        for index, row in enumerate(rows):
+            if not isinstance(row, list) or len(row) < 6:
+                if strict:
+                    raise ValueError(f"Tencent K-line row {index} is malformed")
                 continue
             try:
-                ts = datetime.strptime(str(r[0]), "%Y-%m-%d")
+                timestamp = datetime.strptime(str(row[0]), "%Y-%m-%d")
+                open_price = number(row[1], "open", positive=True)
+                close = number(row[2], "close", positive=True)
+                high = number(row[3], "high", positive=True)
+                low = number(row[4], "low", positive=True)
+                raw_volume = number(row[5], "volume")
+                if raw_volume < 0:
+                    raise ValueError("Tencent K-line volume cannot be negative")
+                amount = 0.0
+                if len(row) > 6 and row[6] not in ("", None):
+                    amount = number(row[6], "amount")
+                    if amount < 0:
+                        raise ValueError("Tencent K-line amount cannot be negative")
+                if low > min(open_price, close, high) or high < max(
+                    open_price,
+                    close,
+                    low,
+                ):
+                    raise ValueError("Tencent K-line OHLC values are inconsistent")
+                if timestamp in seen or (previous is not None and timestamp <= previous):
+                    raise ValueError(
+                        "Tencent K-line rows must be strictly chronological and unique"
+                    )
                 bar = T.Bar(
-                    symbol=symbol, market=market, timestamp=ts, interval=interval,
-                    open=float(r[1]), high=float(r[3]), low=float(r[4]), close=float(r[2]),
-                    volume=int(round(float(r[5]) * scale)),
-                    amount=(float(r[6]) if len(r) > 6 and r[6] not in ("", None) else 0.0),
+                    symbol=symbol,
+                    market=market,
+                    timestamp=timestamp,
+                    interval=interval,
+                    open=open_price,
+                    high=high,
+                    low=low,
+                    close=close,
+                    volume=round(raw_volume * scale),
+                    amount=amount,
                     turnover=0.0,
-                    source="tencent", adjustment_factor=1.0,
+                    source=self.name,
+                    adjustment_factor=1.0,
                 )
-                bars.append(bar)
-            except (ValueError, TypeError):
+            except (TypeError, ValueError):
+                if strict:
+                    raise ValueError(f"Tencent K-line row {index} is invalid") from None
                 continue
+            bars.append(bar)
+            seen.add(timestamp)
+            previous = timestamp
         return bars
+
+    def parse_bars(
+        self,
+        raw: bytes,
+        symbol: str,
+        market: T.Market,
+        interval: str = "1d",
+    ) -> list[T.Bar]:
+        """Operational parser: deterministic but tolerant of isolated bad rows."""
+
+        return self._parse_bars(raw, symbol, market, interval, strict=False)
+
+    def parse_bars_strict(
+        self,
+        raw: bytes,
+        symbol: str,
+        market: T.Market,
+        interval: str = "1d",
+    ) -> list[T.Bar]:
+        """Research parser: one malformed row rejects the complete raw capture."""
+
+        return self._parse_bars(raw, symbol, market, interval, strict=True)
+
+    def fetch_bars(
+        self,
+        symbol: str,
+        market: T.Market,
+        interval: str = "1d",
+        start: datetime | None = None,
+        end: datetime | None = None,
+        adjust: str = "qfq",
+    ) -> list[T.Bar]:
+        """Fetch and tolerantly parse Tencent fallback K-line data for Runtime use."""
+
+        raw = self.fetch_bars_raw(symbol, market, interval, start, end, adjust)
+        return self.parse_bars(raw, symbol, market, interval)
 
     @staticmethod
     def _kline_symbol(symbol: str, market: T.Market) -> str:
-        """腾讯 K 线查询码：A 用 sh/sz 前缀；港股 hk；美股 us+CODE.OQ（交易所后缀）。"""
+        """腾讯 K 线查询码：A 用 sh/sz；港股 hk；美股 us+CODE.OQ。"""
+
         code = symbol.split(".", 1)[0]
         if market == T.Market.HK:
             return ("r_hk" if T.is_index_symbol(symbol) else "hk") + code

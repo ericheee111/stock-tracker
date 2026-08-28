@@ -28,19 +28,19 @@ def _kline_payload(prov_sym, rows):
 
 
 class _Patched:
-    """临时替换实例方法 ``_request`` 为返回固定字节。"""
+    """临时替换 exact-raw research request 为固定字节。"""
 
     def __init__(self, provider, payload: bytes):
         self.provider = provider
         self.payload = payload
-        self._orig = provider._request
+        self._orig = provider._request_research
 
     def __enter__(self):
-        self.provider._request = lambda url, headers=None: self.payload
+        self.provider._request_research = lambda url: self.payload
         return self.provider
 
     def __exit__(self, *exc):
-        self.provider._request = self._orig
+        self.provider._request_research = self._orig
 
 
 class TestTencentFetchBars(unittest.TestCase):

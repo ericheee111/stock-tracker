@@ -393,7 +393,7 @@ Authoritative Provider
 实施状态与推荐顺序：
 
 1. **Wave 2B.1a 已实现**：Eastmoney Provider 的 exact raw fetch / deterministic parse 分离；内容寻址 Raw Artifact；descriptor 绑定端点、复权模式、请求起止范围和 parser version；Trust Tier；重放与篡改检测；独立捕获 CLI。当前默认等级仍是 `BEST_EFFORT`；
-2. **Wave 2B.1b 待完成**：为 A/HK/US 建立版本化 golden raw payload、跨源 reconciliation 和抓取覆盖率/缺口报告；
+2. **Wave 2B.1b / Stage 2G 工程合同已完成**：已建立 A/HK/US 三市场 vendor-shaped synthetic Golden Raw、Eastmoney/Tencent exact-raw 安全捕获、严格 Parser Binding、字段级跨源 reconciliation 和 Calendar Session 覆盖缺口报告；当前证据仍为 `SYNTHETIC_VALIDATED / LICENSE_PENDING / T3_NOT_REACHED`，真实双源 capture、来源独立性、单位/币种、复权和许可审计仍待完成；
 3. **Wave 2B.2 待完成**：接入交易日历、停牌状态、历史 Universe 和公司行为，并组装真正的 `RESEARCH_GRADE` Snapshot；
 4. 建立 A/HK/US 市场规则与公司行为 Golden Cases；
 5. 运行真实 Logistic 基线与负面对照；

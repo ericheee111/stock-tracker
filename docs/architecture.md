@@ -140,6 +140,24 @@ Phase 1 必须可运行的能力：
 
 ---
 
+## 2.1 Stage 2G 研究数据旁路（2026-08-28）
+
+Stage 2G 不改变 Phase 1 Runtime Router，而增加严格隔离的研究旁路：
+
+```text
+Eastmoney / Tencent HTTPS
+  → secure exact-raw request（system CA / no proxy / no redirect）
+  → content-addressed RawDataArtifact
+  → strict parser + immutable MarketBarPoint
+  → A/HK/US Golden Pack / Parser Binding
+  → field-level reconciliation + Calendar coverage
+  → JSON/Markdown report
+```
+
+该旁路不写 `data/stock_tracker.db`，不进入 HOT/WARM/COLD、Signal、Today 或模型训练。Committed Golden Pack 是 synthetic vendor-shaped fixture；真实来源独立性、字段单位/币种、QFQ 等价、许可和权威 Calendar 未通过时，报告必须保留 `LICENSE_PENDING / T3_NOT_REACHED`。
+
+规范：`docs/STAGE2G-MARKET-BAR-GOLDEN-RECONCILIATION-CONTRACT.md`。
+
 ## 3. 数据契约（dataclass + 枚举）
 
 > 实现方式：`core/types.py` 用 `@dataclass(slots=True)` 定义；枚举用 `enum.Enum`/`StrEnum`。

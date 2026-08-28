@@ -14,6 +14,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from threading import Lock
 from typing import Any
+from urllib import error as urllib_error
 from urllib import request as urllib_request
 from urllib.parse import urlparse, urlunparse
 
@@ -49,11 +50,16 @@ class RateLimiter:
 
 
 def _ssl_ctx() -> ssl.SSLContext:
-    """禁用证书校验的 SSL 上下文（公开行情接口常见自签/过期证书，避免握手失败）。"""
+    """禁用证书校验的旧 Runtime 上下文；研究 exact-raw 通道禁止使用。"""
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     return ctx
+
+
+class _NoRedirectHandler(urllib_request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 class MarketDataProvider(ABC):
@@ -137,6 +143,86 @@ class MarketDataProvider(ABC):
         子类（eastmoney）覆盖为真实 HTTP 实现。
         """
         raise NotImplementedError(f"{self.name} 不支持历史 K 线采集")
+
+    def _request_research(
+        self,
+        url: str,
+        headers: dict[str, str] | None = None,
+        *,
+        max_response_bytes: int = 16 * 1024 * 1024,
+    ) -> bytes:
+        """Fetch exact research bytes with system CA, no proxy and no redirects."""
+
+        if self.host_override:
+            raise ValueError("research exact-raw requests forbid host override")
+        if type(max_response_bytes) is not int or max_response_bytes <= 0:
+            raise ValueError("max_response_bytes must be a positive integer")
+        parsed = urlparse(url)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname is None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.fragment
+        ):
+            raise ValueError("research exact-raw URL must be credential-free HTTPS")
+        if parsed.port not in (None, 443):
+            raise ValueError("research exact-raw URL must use the default HTTPS port")
+        hdrs = {
+            "Accept": "application/json,text/plain;q=0.9",
+            "User-Agent": "stock-tracker/exact-raw-research-v1",
+        }
+        if headers:
+            hdrs.update(headers)
+        opener = urllib_request.build_opener(
+            urllib_request.ProxyHandler({}),
+            urllib_request.HTTPSHandler(context=ssl.create_default_context()),
+            _NoRedirectHandler(),
+        )
+        request = urllib_request.Request(url, headers=hdrs, method="GET")
+        try:
+            response = opener.open(request, timeout=self.timeout)
+        except urllib_error.HTTPError as exc:
+            if 300 <= exc.code < 400:
+                raise ValueError("research exact-raw redirects are forbidden") from exc
+            raise
+        with response:
+            if response.status != 200:
+                raise ValueError(
+                    f"research exact-raw request returned HTTP {response.status}"
+                )
+            if response.geturl() != url:
+                raise ValueError("research exact-raw response URL changed")
+            content_type = response.headers.get("Content-Type", "").lower()
+            if "html" in content_type:
+                raise ValueError("research exact-raw endpoint returned HTML")
+            if not content_type or not any(
+                token in content_type for token in ("json", "text/plain")
+            ):
+                raise ValueError("research exact-raw content type is unsupported")
+            content_length = response.headers.get("Content-Length")
+            declared_length: int | None = None
+            if content_length is not None:
+                try:
+                    declared_length = int(content_length)
+                except ValueError as exc:
+                    raise ValueError(
+                        "research exact-raw Content-Length is invalid"
+                    ) from exc
+                if declared_length < 0 or declared_length > max_response_bytes:
+                    raise ValueError(
+                        "research exact-raw response exceeds the size limit"
+                    )
+            raw = response.read(max_response_bytes + 1)
+        if len(raw) > max_response_bytes:
+            raise ValueError("research exact-raw response exceeds the size limit")
+        if declared_length is not None and len(raw) != declared_length:
+            raise ValueError(
+                "research exact-raw response length differs from Content-Length"
+            )
+        if not raw:
+            raise ValueError("research exact-raw response is empty")
+        return raw
 
     def _request(self, url: str, headers: dict | None = None) -> bytes:
         """发起 HTTP GET，返回原始字节；失败/超时直接抛异常。"""

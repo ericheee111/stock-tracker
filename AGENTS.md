@@ -136,6 +136,15 @@ qa/                       前端/可视化 QA 工具
 
 正式回测、校准和模型晋级必须使用达到相应用途合同的数据快照。
 
+### 5.4 Stage 2G Golden Raw / Reconciliation 边界
+
+- `fetch_bars_raw()` 的正式研究抓取必须使用系统 CA、hostname 校验、无 Proxy、无 Redirect、禁止 Host Override 的研究请求通道；不得复用旧 Runtime Quote 的跳过证书校验 `_request()`；
+- Tencent 当前只可声明 `qfq`；严格 Parser 缺少 `qfqday` 时必须失败关闭，不得回退未复权 `day`；
+- committed A/HK/US Golden Payload 是 vendor-shaped synthetic fixture，只证明 Parser、Artifact、Reconciliation 和 Coverage 合同；
+- `STRUCTURALLY_CONSTRUCTIBLE` 只表示没有 HARD_BLOCK，不等于 verified、complete、T2、T3 或 research grade；
+- 来源名称不同不等于独立来源已证明；字段单位、币种、复权等价、许可和权威 Calendar 均必须由外部证据关闭 blocker；
+- Stage 2G 输出不得自动进入训练、回测、校准、模型晋级或正式决策。
+
 ## 6. 数据可信等级
 
 统一使用：
@@ -594,7 +603,7 @@ python -m stock_tracker --once
 5. Stage 1.5 / Hybrid H1：前端 Runtime Config、Allowed API Origin/Engine ID、统一 URL Builder 与 Origin-scoped Token（已完成并通过本地双 Origin 浏览器验收）；
 6. Stage 1.5 / Hybrid H2：精确 CORS、`OPTIONS`、Runtime Health、版本握手、非法 Health hard block 与离线状态（已完成并通过同源回归）；
 7. Stage 1.5 / Hybrid H3–H5：API Target、恢复计划、静态构建和公开入口失败关闭门禁（仓库侧工程已完成；真实 Tailscale/Windows/Pages operational 证据待补）；
-8. Stage 2：A 股真实 Calendar/Status/Universe/Corporate Action、跨源 reconciliation、覆盖缺口和 T3 Snapshot（当前主线）；
+8. Stage 2：Stage 2G 三市场 synthetic Golden Raw/Bar Reconciliation 工程合同已完成；当前主线转为真实双源 capture、许可/单位/复权审计、权威 Calendar/Status/Universe/Corporate Action 和 T3 Snapshot blocker closure；
 9. Stage 3C：free-stockdb 与 HiThink 等可选数据 Sidecar/捕获源继续默认关闭，在真实许可、覆盖与对账通过后再晋级；
 10. Stage 3D–5C：XTP read-only Sidecar、Market Event Store、Signal Monitor、Monitor Workspace 和 synthetic Shadow（工程已完成；真实 Login/Subscribe、Level 1/2、Live Shadow、吞吐与保存权待 operational 验收）；
 11. Stage 3A/3B：Event Intelligence + Big Trend v1；

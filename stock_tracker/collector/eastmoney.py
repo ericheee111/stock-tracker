@@ -9,15 +9,45 @@
 单票与快照两种字段布局。
 """
 
+# Runtime provider timestamps intentionally remain market-local naive datetimes
+# until the existing Quote/Bar contract is migrated as one unit.
+# ruff: noqa: DTZ005, DTZ007
+
 from __future__ import annotations
 
 import json
-import time
+import math
 from datetime import datetime
 from urllib.parse import quote_plus
 
 from ..core import types as T
 from .provider import MarketDataProvider
+
+
+def _strict_json_loads(raw: bytes) -> object:
+    """Decode Eastmoney research JSON without duplicate/non-finite values."""
+
+    def pairs_hook(pairs):
+        output = {}
+        for key, value in pairs:
+            if key in output:
+                raise ValueError("Eastmoney K-line response contains duplicate JSON keys")
+            output[key] = value
+        return output
+
+    def reject_constant(value: str):
+        raise ValueError(f"Eastmoney K-line response contains non-finite token: {value}")
+
+    try:
+        return json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=pairs_hook,
+            parse_constant=reject_constant,
+        )
+    except UnicodeDecodeError as exc:
+        raise ValueError("Eastmoney K-line response must use UTF-8") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError("Eastmoney K-line response is invalid JSON") from exc
 
 
 class EastmoneyProvider(MarketDataProvider):
@@ -49,8 +79,8 @@ class EastmoneyProvider(MarketDataProvider):
         self,
         symbol: str,
         interval: str = "1d",
-        start: "datetime | None" = None,
-        end: "datetime | None" = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
         adjust: str = "qfq",
     ) -> str:
         if interval != "1d":
@@ -73,15 +103,17 @@ class EastmoneyProvider(MarketDataProvider):
         symbol: str,
         market: T.Market,
         interval: str = "1d",
-        start: "datetime | None" = None,
-        end: "datetime | None" = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
         adjust: str = "qfq",
     ) -> bytes:
         """Fetch exact provider bytes; parsing is deliberately separate."""
         if not self.applies_to(market):
             raise ValueError(f"{self.name} is not configured for market {market.value}")
         self._rl.acquire()
-        return self._request(self._bars_url(symbol, interval, start, end, adjust))
+        return self._request_research(
+            self._bars_url(symbol, interval, start, end, adjust)
+        )
 
     def _parse_bars(
         self,
@@ -91,21 +123,25 @@ class EastmoneyProvider(MarketDataProvider):
         interval: str,
         *,
         strict: bool,
-    ) -> "list[T.Bar]":
+    ) -> list[T.Bar]:
         if type(strict) is not bool:
             raise TypeError("strict must be a boolean")
         if not isinstance(raw, bytes) or not raw:
             raise ValueError("raw K-line response must be non-empty bytes")
-        payload = json.loads(raw.decode("utf-8"))
+        payload = (
+            _strict_json_loads(raw)
+            if strict
+            else json.loads(raw.decode("utf-8", "ignore"))
+        )
         if not isinstance(payload, dict):
-            raise ValueError("Eastmoney K-line response must be a JSON object")
+            raise TypeError("Eastmoney K-line response must be a JSON object")
         rc = payload.get("rc", 0)
         data = payload.get("data")
         if rc != 0 or not isinstance(data, dict) or not data.get("klines"):
             return []
         klines = data["klines"]
         if not isinstance(klines, list):
-            raise ValueError("Eastmoney data.klines must be a JSON array")
+            raise TypeError("Eastmoney data.klines must be a JSON array")
 
         scale = 100 if market == T.Market.A else 1
         bars: list[T.Bar] = []
@@ -121,19 +157,49 @@ class EastmoneyProvider(MarketDataProvider):
                 continue
             date_s, o, c, h, l, vol, amt, turnover = parts[:8]
             try:
+                open_price = float(o)
+                close = float(c)
+                high = float(h)
+                low = float(l)
+                raw_volume = float(vol)
+                amount = float(amt) if amt else 0.0
+                turnover_value = float(turnover) if turnover else 0.0
+                numeric = (
+                    open_price,
+                    close,
+                    high,
+                    low,
+                    raw_volume,
+                    amount,
+                    turnover_value,
+                )
+                if any(not math.isfinite(value) for value in numeric):
+                    raise ValueError("Eastmoney K-line row contains non-finite values")
+                if min(open_price, close, high, low) <= 0:
+                    raise ValueError("Eastmoney K-line prices must be positive")
+                if low > min(open_price, close, high) or high < max(
+                    open_price,
+                    close,
+                    low,
+                ):
+                    raise ValueError("Eastmoney K-line OHLC values are inconsistent")
+                if raw_volume < 0 or amount < 0 or turnover_value < 0:
+                    raise ValueError(
+                        "Eastmoney K-line volume/amount/turnover cannot be negative"
+                    )
                 bars.append(
                     T.Bar(
                         symbol=symbol,
                         market=market,
                         timestamp=datetime.strptime(date_s, "%Y-%m-%d"),
                         interval=interval,
-                        open=float(o),
-                        high=float(h),
-                        low=float(l),
-                        close=float(c),
-                        volume=int(round(float(vol) * scale)),
-                        amount=float(amt) if amt else 0.0,
-                        turnover=float(turnover) if turnover else 0.0,
+                        open=open_price,
+                        high=high,
+                        low=low,
+                        close=close,
+                        volume=round(raw_volume * scale),
+                        amount=amount,
+                        turnover=turnover_value,
                         source=self.name,
                         adjustment_factor=1.0,
                     )
@@ -149,7 +215,7 @@ class EastmoneyProvider(MarketDataProvider):
         symbol: str,
         market: T.Market,
         interval: str = "1d",
-    ) -> "list[T.Bar]":
+    ) -> list[T.Bar]:
         """Operational parser: deterministic, but tolerant of isolated bad rows."""
         return self._parse_bars(raw, symbol, market, interval, strict=False)
 
@@ -159,7 +225,7 @@ class EastmoneyProvider(MarketDataProvider):
         symbol: str,
         market: T.Market,
         interval: str = "1d",
-    ) -> "list[T.Bar]":
+    ) -> list[T.Bar]:
         """Research parser: reject the complete capture if any row is malformed."""
         return self._parse_bars(raw, symbol, market, interval, strict=True)
 
@@ -169,10 +235,10 @@ class EastmoneyProvider(MarketDataProvider):
         symbol: str,
         market: T.Market,
         interval: str = "1d",
-        start: "datetime | None" = None,
-        end: "datetime | None" = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
         adjust: str = "qfq",
-    ) -> "list[T.Bar]":
+    ) -> list[T.Bar]:
         raw = self.fetch_bars_raw(symbol, market, interval, start, end, adjust)
         return self.parse_bars(raw, symbol, market, interval)
 

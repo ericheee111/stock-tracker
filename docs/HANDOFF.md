@@ -36,6 +36,8 @@ stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + �
 - 新增 `RawDataArtifact + Trust Tier + request_parameters + normalized_dataset_id + capture_id` 的内容寻址捕获与重放合同；descriptor 绑定端点、复权模式、请求起止范围和 parser version；
 - 新增 `scripts/capture_quant_bars.py`，默认只生成 `BEST_EFFORT` Artifact，不修改生产 SQLite，也不能自我升级为 `RESEARCH_GRADE`；
 - 新增默认关闭的 `HithinkFinanceProvider` 与 `scripts/capture_hithink_bars.py`：只通过同花顺官方 HTTPS REST 捕获 A 股 `1d` exact raw JSON，凭据仅来自进程环境；它不参加 Runtime Quote/Snapshot/BAR 路由，不用于训练或公开再分发；
+- 2026-08-28 Stage 2G 已完成 A/HK/US 三市场 synthetic Golden Raw 与 Market-Bar Reconciliation 工程合同：Eastmoney/Tencent exact-raw 使用系统 CA、无 Proxy/Redirect/Host Override；Tencent QFQ 不回退未复权节点；Golden Pack 绑定 Raw/Parser/Schema/Source/Case/Pack ID；字段冲突与 Calendar Session 缺口失败关闭；来源独立性、字段单位、复权、许可、权威 Calendar 和 T3 仍保持 blocker；
+- Stage 2G 最终门禁：focused `80 + 32 subtests`、Runtime `517/1`、Quant checkout `594 + 277 subtests`、source-distribution/no-bytecode `3 + 63 subtests`、Index export Quant `592/2 + 214 subtests`、H0 `12/12`、H1/H2 `28/28 + 11/11`、H4 `18/18`、Monitor `49/49`、Mock/real Today `17/17`、Portfolio `13/13`、compileall/targeted Ruff/pip check/smoke/benchmark/cached-diff/Index scan 全部通过；Review 为 `ENGINEERING_READY_FOR_MERGE / REAL_SOURCE_RECONCILIATION_PENDING / T3_NOT_REACHED`；
 - 2026-08-28 Stage 3D–5C 已完成 XTP/Monitor 工程链：独立 Python 3.9 Quote Sidecar、严格 loopback IPC、Simulator、官方 Quote 模块探针、独立 Market Event Store、Hash Chain/Manifest、分钟聚合、Monitor Rule/Inbox/API/SSE、Notification Worker、Monitor Workspace 与 64 标的 synthetic Shadow；
 - 用户已注册股票类型和算法类型 XTP 测试账户，但当前实现只允许未来使用股票 Quote 能力；算法账户、Trader/Order/Algo API、账户同步和自动交易均未接入；
 - XTP 真实凭据只允许通过 `STOCK_TRACKER_XTP_QUOTE_USER`、`STOCK_TRACKER_XTP_QUOTE_PASSWORD`、`STOCK_TRACKER_XTP_QUOTE_SERVER`、`STOCK_TRACKER_XTP_QUOTE_PORT`、`STOCK_TRACKER_XTP_QUOTE_PROTOCOL=TCP`、`STOCK_TRACKER_XTP_CLIENT_ID` 与 `STOCK_TRACKER_XTP_SIDECAR_ACCESS` 注入本机 Sidecar 环境；
@@ -44,7 +46,7 @@ stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + �
 - 真实 XTP Login/Subscribe、Level 1/2 权限、50–100 标的 Live Shadow、持续吞吐与数据存储/训练/再分发权仍为 `PENDING`；`allow_live_decision=false`、`allow_model_training=false`、`auto_trade=false`；
 - Scheduler 的重复 BAR 方法定义已收敛为一套；BAR Universe 覆盖 radar、自选、持仓和活跃信号；
 - 日线有效数据标记为 `DELAYED` 而不是 `LIVE`，避免把 EOD 数据伪装成盘中实时；
-- 下一阶段：A/HK/US golden raw payload、跨源 reconciliation、覆盖缺口报告，然后组装带 Calendar/Status/Universe/Corporate Action 的 T3 Snapshot。
+- 下一阶段：用真实小窗口 A/HK/US 双源 exact-raw 数据运行 Stage 2G 对账，完成来源独立性、字段单位/币种、复权和许可审计，并绑定权威 Calendar/Status/Universe/Corporate Action；只有全部 blocker 有独立证据关闭后才评估 T3 Snapshot。
 
 ---
 

@@ -114,5 +114,5 @@
 
 1. 运行态规则评分 / 页面展示可消费精确 symbol 的指标与 `bars` 缓存；缺数据时返回空，不做 SH/SZ 等跨证券身份猜测。
 2. 正式标签、回测、校准和模型晋级必须通过 `scripts/capture_quant_bars.py` 的 exact raw Artifact 入口，并继续绑定 Calendar/Status/Universe/Corporate Action 后才能形成 T3 Snapshot；不得把 SQLite 运行缓存直接回流为训练集。
-3. 下一阶段建立 A/HK/US 版本化 golden raw payload、跨源 reconciliation 与覆盖缺口报告。
+3. Stage 2G 已建立 A/HK/US 三市场 synthetic Golden Raw、Eastmoney/Tencent exact-raw 安全抓取、字段级 reconciliation 与 Calendar Session 覆盖缺口报告；下一步必须用真实双源 capture、来源独立性、单位/币种、复权和许可证据复验，不能把 fixture 直接晋级为 T3。
 4. 港/美信号需要在对应市场**交易时段**才有 `LIVE` 报价支撑；验收时按交易时段复核。

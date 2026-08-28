@@ -32,21 +32,21 @@ def _kline_payload(klines, rc=0):
 
 
 class _Patched:
-    """临时替换实例方法 _request 为返回固定字节。"""
+    """临时替换 exact-raw research request 为固定字节。"""
 
     def __init__(self, provider, payload: bytes):
         self.provider = provider
         self.payload = payload
-        self._orig = provider._request
+        self._orig = provider._request_research
 
     def __enter__(self):
-        def fake(url, headers=None):
+        def fake(url, headers=None, *, max_response_bytes=16 * 1024 * 1024):
             return self.payload
-        self.provider._request = fake
+        self.provider._request_research = fake
         return self.provider
 
     def __exit__(self, *exc):
-        self.provider._request = self._orig
+        self.provider._request_research = self._orig
 
 
 class TestEastmoneyFetchBars(unittest.TestCase):

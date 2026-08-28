@@ -1,0 +1,177 @@
+{
+  "cases": [
+    {
+      "adjustment": "qfq",
+      "calendar_snapshot_id": "2f6a27315a772166f28350845acdc2b7a15b129de2c11a5b187d85c87842d6bc",
+      "case_id": "20699231ae720314ef9ce79e0b5966e903ad5035ae295f6837f075e066ef6572",
+      "case_name": "US_AAPL",
+      "expected_open_sessions": [
+        "2024-01-02",
+        "2024-01-03",
+        "2024-01-04"
+      ],
+      "interval": "1d",
+      "market": "US",
+      "sources": [
+        {
+          "comparable_fields": [
+            "CLOSE",
+            "HIGH",
+            "LOW",
+            "OPEN",
+            "VOLUME"
+          ],
+          "endpoint": "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
+          "license_status": "PENDING",
+          "parser_version": "tencent-bars-v2-raw-split",
+          "provider_version": "synthetic-envelope-v1",
+          "raw_file": "us/AAPL_tencent.json",
+          "raw_sha256": "2221cc1cf54042b32bad678ec62282cceb3518459d7967cecff570cda3dce030",
+          "schema_version": "tencent-fqkline-qfqday-v1",
+          "source": "tencent",
+          "source_dataset": "synthetic-tencent-fqkline-golden-v1",
+          "source_family": "tencent",
+          "source_id": "45afab8948fdabe32521da259264b6d5ab1e6b252c8a1317ff564dc320175a58"
+        },
+        {
+          "comparable_fields": [
+            "CLOSE",
+            "HIGH",
+            "LOW",
+            "OPEN",
+            "VOLUME"
+          ],
+          "endpoint": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+          "license_status": "PENDING",
+          "parser_version": "eastmoney-bars-v2-raw-split",
+          "provider_version": "synthetic-envelope-v1",
+          "raw_file": "us/AAPL_eastmoney.json",
+          "raw_sha256": "57464eed0bf2abf6ff5b79ef9612073bcc7ec23aa194aa8b85199ae9fc2173c7",
+          "schema_version": "eastmoney-kline-f51-f58-v1",
+          "source": "eastmoney",
+          "source_dataset": "synthetic-push2his-kline-golden-v1",
+          "source_family": "eastmoney",
+          "source_id": "be8fcd3afe39a564ed562dcf5ba088eb52db7e91fb9f2787b35ae2633433216b"
+        }
+      ],
+      "symbol": "AAPL.US"
+    },
+    {
+      "adjustment": "qfq",
+      "calendar_snapshot_id": "856e84115af149d8dffbf6e5d1088307e3c4466a1a486ea8797d23a70da9ac96",
+      "case_id": "addbf18e274d36e6037b47a107caebad43df085e9c41a12746aaba8c49a22f52",
+      "case_name": "A_600519",
+      "expected_open_sessions": [
+        "2024-01-02",
+        "2024-01-03",
+        "2024-01-04"
+      ],
+      "interval": "1d",
+      "market": "A",
+      "sources": [
+        {
+          "comparable_fields": [
+            "CLOSE",
+            "HIGH",
+            "LOW",
+            "OPEN",
+            "VOLUME"
+          ],
+          "endpoint": "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
+          "license_status": "PENDING",
+          "parser_version": "tencent-bars-v2-raw-split",
+          "provider_version": "synthetic-envelope-v1",
+          "raw_file": "a/600519_tencent.json",
+          "raw_sha256": "67a84e1f6859ca7b760ec21a5aceabe8c60b212c4f270139f32bc43a20f1651e",
+          "schema_version": "tencent-fqkline-qfqday-v1",
+          "source": "tencent",
+          "source_dataset": "synthetic-tencent-fqkline-golden-v1",
+          "source_family": "tencent",
+          "source_id": "7fd00eb30d3ae99c1bcec1212fa722715627f01c33d9708a4bf407d1cc00956c"
+        },
+        {
+          "comparable_fields": [
+            "CLOSE",
+            "HIGH",
+            "LOW",
+            "OPEN",
+            "VOLUME"
+          ],
+          "endpoint": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+          "license_status": "PENDING",
+          "parser_version": "eastmoney-bars-v2-raw-split",
+          "provider_version": "synthetic-envelope-v1",
+          "raw_file": "a/600519_eastmoney.json",
+          "raw_sha256": "e68b6ed9c6dfe71dce1fa9bc2c4c3c32be18e4d07981e603dcdb75fecc0fd2b6",
+          "schema_version": "eastmoney-kline-f51-f58-v1",
+          "source": "eastmoney",
+          "source_dataset": "synthetic-push2his-kline-golden-v1",
+          "source_family": "eastmoney",
+          "source_id": "b50b25244e5a1779667b1ccfca6e6426266d31b895f5c1c737bc5972f73343f9"
+        }
+      ],
+      "symbol": "600519.SH"
+    },
+    {
+      "adjustment": "qfq",
+      "calendar_snapshot_id": "4047afdde92dc796e72ca2f5dae95cc5cf6f0e5e7bf43881aa97da8a5e3d4e85",
+      "case_id": "f89500dfb3c66e03a66019bec5a8fdf14da5c7e51b8523b84ea26e7d2d457fb0",
+      "case_name": "HK_00700",
+      "expected_open_sessions": [
+        "2024-01-02",
+        "2024-01-03",
+        "2024-01-04"
+      ],
+      "interval": "1d",
+      "market": "HK",
+      "sources": [
+        {
+          "comparable_fields": [
+            "CLOSE",
+            "HIGH",
+            "LOW",
+            "OPEN",
+            "VOLUME"
+          ],
+          "endpoint": "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+          "license_status": "PENDING",
+          "parser_version": "eastmoney-bars-v2-raw-split",
+          "provider_version": "synthetic-envelope-v1",
+          "raw_file": "hk/00700_eastmoney.json",
+          "raw_sha256": "276fff6f23dcf6843a2f40b1283d7b36317e8f7e007d125571f7795d754e48a3",
+          "schema_version": "eastmoney-kline-f51-f58-v1",
+          "source": "eastmoney",
+          "source_dataset": "synthetic-push2his-kline-golden-v1",
+          "source_family": "eastmoney",
+          "source_id": "095cf68f52586b6b7221894abbf6c7eaf03ee8cea843aa5cc30677b880fbd212"
+        },
+        {
+          "comparable_fields": [
+            "CLOSE",
+            "HIGH",
+            "LOW",
+            "OPEN",
+            "VOLUME"
+          ],
+          "endpoint": "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
+          "license_status": "PENDING",
+          "parser_version": "tencent-bars-v2-raw-split",
+          "provider_version": "synthetic-envelope-v1",
+          "raw_file": "hk/00700_tencent.json",
+          "raw_sha256": "e5f336d651aeed51005eba2d78393df6c468502320caa138000873c21c471b3a",
+          "schema_version": "tencent-fqkline-qfqday-v1",
+          "source": "tencent",
+          "source_dataset": "synthetic-tencent-fqkline-golden-v1",
+          "source_family": "tencent",
+          "source_id": "3e577bd8b11e349c351207b0418f987b2c50c9170a70bb3f81cf2c3c12eece53"
+        }
+      ],
+      "symbol": "00700.HK"
+    }
+  ],
+  "pack_id": "569886a2e486c159422b207242bfb07c4648b7ec26e8568e1e2866a7dba82480",
+  "pack_version": "v1",
+  "retrieved_at": "2025-01-05T00:00:00Z",
+  "schema": "stage2g-market-bar-golden-pack-v1",
+  "synthetic_fixture": true
+}

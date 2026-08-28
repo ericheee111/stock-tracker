@@ -350,3 +350,21 @@ Status: `COMPLETED`
 - Production migration remained dry-run only and the production database SHA-256 remained `1cde40aa66846630d89b10d080a8837d204266c5ce32001a45d3b0c0c06197b1`.
 - After the implementation push, local `HEAD`, local `origin/main`, and GitHub `refs/heads/main` were verified equal at `4a1accfffd8c5e8b9aaffdb2fd4d872f78cbe39b` before this handoff-only completion commit.
 - Real CPython 3.9 plus the official XTP binary, Quote Login/Subscribe, Level 1/2 permission proof, sustained throughput, 50–100-symbol Live Shadow and data storage/training/redistribution rights remain explicit operational gates. The algorithm account remains unused and no Trader/Order/Algo or automatic-trading surface was shipped.
+
+## 25. Task S — Stage 2G Golden Raw and market-bar reconciliation
+
+Status: `COMPLETED / REAL_SOURCE_RECONCILIATION_PENDING`
+
+- Added an exact-raw research HTTP boundary with system CA/hostname verification, no inherited proxy, no redirect, no Host override, exact final URL, strict content type, declared/actual length and bounded-body checks. The legacy Runtime Quote request path was not relabelled as secure.
+- Split Tencent QFQ raw fetch/strict parse and prohibited fallback from `qfqday` to unadjusted `day`; hardened Eastmoney/Tencent strict JSON/OHLC/date parsing.
+- Added in-memory `CapturedBarArtifact` identity revalidation, immutable `MarketBarPoint`, A/HK/US synthetic Golden Pack v1, exact Parser/Schema binding, cross-source field comparison, Calendar Session coverage, content-addressed reports and fail-closed Trust/License/T3 blockers.
+- Extended `capture_quant_bars.py` to explicit Eastmoney or Tencent exact-raw capture while retaining the `BEST_EFFORT` ceiling; added offline `report_stage2g_market_bars.py` for committed synthetic cases.
+- Final gates: Git checkout focused Stage/Provider `80 passed + 32 subtests`, runtime `517 passed, 1 skipped`, Quant `594 passed + 277 subtests`, source-distribution/no-bytecode `3 passed + 63 subtests`; exact Git Index export passed focused `80 + 32`, runtime `517/1`, Quant `592/2 + 214`; H0 `12/12`, H1/H2 `28/28 + 11/11`, H4 `18/18`, Monitor `49/49`, Mock/real Today `17/17`, Portfolio `13/13`, compileall, targeted Ruff, pip check, Quant smoke/benchmark, cached-diff and Index secret/generated scan.
+- The committed fixtures are synthetic vendor-shaped envelopes. Every case remains `STRUCTURALLY_CONSTRUCTIBLE` only, with `LICENSE_PENDING / T3_NOT_REACHED` and source/calendar/unit/adjustment/policy blockers open.
+- Two existing Engines on ports 8080/8090 predated this task and continuously write the production DB/WAL. Stage 2G has no production write path, but global task-window hash stability is not provable; migration validation used a read-only consistent backup snapshot and reported `database_modified=false`.
+
+## 26. Task T — Stage 2G GitHub delivery
+
+Status: `READY_FOR_GIT_DELIVERY`
+
+- Exact staging, source-distribution, Git Index export, staged-tree Runtime/Quant/QA and generated/secret scan passed. Implementation commit, push, handoff completion commit and local/remote SHA equality remain to be recorded.

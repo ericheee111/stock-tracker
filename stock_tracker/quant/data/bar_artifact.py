@@ -81,6 +81,38 @@ def _expect_str(value: object, name: str) -> str:
     return value
 
 
+def _strict_json_object(raw: bytes, name: str) -> dict[str, Any]:
+    if not isinstance(raw, bytes) or not raw:
+        raise ManifestContractError(f"{name} must be non-empty UTF-8 JSON")
+
+    def pairs_hook(pairs):
+        output: dict[str, Any] = {}
+        for key, value in pairs:
+            if not isinstance(key, str):
+                raise ManifestContractError(f"{name} keys must be strings")
+            if key in output:
+                raise ManifestContractError(f"{name} contains duplicate JSON keys")
+            output[key] = value
+        return output
+
+    def reject_constant(value: str):
+        raise ManifestContractError(f"{name} contains non-finite token: {value}")
+
+    try:
+        value = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=pairs_hook,
+            parse_constant=reject_constant,
+        )
+    except UnicodeDecodeError as exc:
+        raise ManifestContractError(f"{name} must use UTF-8") from exc
+    except json.JSONDecodeError as exc:
+        raise ManifestContractError(f"{name} is invalid JSON") from exc
+    if not isinstance(value, dict):
+        raise ManifestContractError(f"{name} must be a JSON object")
+    return cast(dict[str, Any], value)
+
+
 def _normalize_request_parameters(value: object) -> dict[str, Any]:
     if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
         raise ManifestContractError(
@@ -412,16 +444,99 @@ def capture_market_bars(
     payload["capture_id"] = capture_id
     descriptor_path = safe_artifact_path(root_path, descriptor_key)
     _atomic_write_json(descriptor_path, payload)
-    return CapturedBarArtifact(
+    return validate_captured_market_bars(
+        CapturedBarArtifact(
+            artifact=artifact,
+            bars=bars,
+            trust_tier=trust_tier,
+            parser_version=parser_version,
+            request_parameters=dict(normalized_request_parameters),
+            normalized_dataset_id=normalized_dataset_id,
+            descriptor_key=descriptor_key,
+            capture_id=capture_id,
+        )
+    )
+
+
+def validate_captured_market_bars(
+    captured: CapturedBarArtifact,
+) -> CapturedBarArtifact:
+    """Recompute every normalized/capture identity from an in-memory capture.
+
+    Downstream reconciliation must not trust a caller-created
+    ``CapturedBarArtifact`` merely because the dataclass is frozen: callers can
+    still use ``dataclasses.replace`` or mutate the nested request dictionary.
+    """
+
+    if not isinstance(captured, CapturedBarArtifact):
+        raise ManifestContractError("captured must be CapturedBarArtifact")
+    if not captured.bars:
+        raise ManifestContractError("captured market bars cannot be empty")
+    first = captured.bars[0]
+    symbol = first.symbol
+    market = first.market
+    interval = first.interval
+    artifact = captured.artifact
+    if artifact.kind is not DataKind.MARKET_BARS:
+        raise ManifestContractError("captured artifact kind must be MARKET_BARS")
+    if artifact.market is not market:
+        raise ManifestContractError("captured artifact market differs from rows")
+    if artifact.adapter_version != captured.parser_version:
+        raise ManifestContractError("captured parser version differs from artifact")
+    _validate_capture_tier(
+        captured.trust_tier,
+        verified=artifact.verified,
+        calendar_snapshot_id=artifact.calendar_snapshot_id,
+    )
+    normalized_request_parameters = _normalize_request_parameters(
+        captured.request_parameters
+    )
+    rows = _normalized_rows(
+        captured.bars,
+        symbol=symbol,
+        market=market,
+        interval=interval,
+        source=artifact.source,
+    )
+    content_start, content_end = _content_bounds(captured.bars, market)
+    if artifact.row_count != len(rows):
+        raise ManifestContractError("captured artifact row_count differs from rows")
+    if artifact.content_start != content_start or artifact.content_end != content_end:
+        raise ManifestContractError("captured artifact content bounds differ from rows")
+    normalized_dataset_id = fingerprint(
+        {
+            "schema": "normalized-market-bars-v1",
+            "artifact_id": artifact.artifact_id,
+            "parser_version": captured.parser_version,
+            "rows": rows,
+        }
+    )
+    if captured.normalized_dataset_id != normalized_dataset_id:
+        raise ManifestContractError("captured normalized dataset identity mismatch")
+    descriptor_key = _descriptor_key(
+        artifact_id=artifact.artifact_id,
+        symbol=symbol,
+        market=market,
+        interval=interval,
+        parser_version=captured.parser_version,
+        request_parameters=normalized_request_parameters,
+    )
+    if captured.descriptor_key != descriptor_key:
+        raise ManifestContractError("captured descriptor identity mismatch")
+    payload = _capture_payload(
         artifact=artifact,
-        bars=bars,
-        trust_tier=trust_tier,
-        parser_version=parser_version,
-        request_parameters=dict(normalized_request_parameters),
+        symbol=symbol,
+        market=market,
+        interval=interval,
+        trust_tier=captured.trust_tier,
+        parser_version=captured.parser_version,
+        request_parameters=normalized_request_parameters,
         normalized_dataset_id=normalized_dataset_id,
         descriptor_key=descriptor_key,
-        capture_id=capture_id,
     )
+    if captured.capture_id != fingerprint(payload):
+        raise ManifestContractError("captured capture identity mismatch")
+    return captured
 
 
 def load_captured_market_bars(
@@ -434,10 +549,10 @@ def load_captured_market_bars(
 
     root_path = Path(root)
     descriptor_path = safe_artifact_path(root_path, descriptor_key)
-    value = json.loads(descriptor_path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
-        raise ManifestContractError("capture descriptor must be a JSON object")
-    payload = cast(dict[str, Any], value)
+    payload = _strict_json_object(
+        descriptor_path.read_bytes(),
+        "capture descriptor",
+    )
     allowed = {
         "schema",
         "artifact",
@@ -529,13 +644,15 @@ def load_captured_market_bars(
     )
     if normalized_dataset_id != expected_dataset_id:
         raise ManifestContractError("normalized dataset identity changed")
-    return CapturedBarArtifact(
-        artifact=artifact,
-        bars=bars,
-        trust_tier=trust_tier,
-        parser_version=parser_version,
-        request_parameters=dict(request_parameters),
-        normalized_dataset_id=normalized_dataset_id,
-        descriptor_key=descriptor_key,
-        capture_id=expected_capture_id,
+    return validate_captured_market_bars(
+        CapturedBarArtifact(
+            artifact=artifact,
+            bars=bars,
+            trust_tier=trust_tier,
+            parser_version=parser_version,
+            request_parameters=dict(request_parameters),
+            normalized_dataset_id=normalized_dataset_id,
+            descriptor_key=descriptor_key,
+            capture_id=expected_capture_id,
+        )
     )

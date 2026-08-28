@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from scripts import capture_quant_bars as cli
 from stock_tracker.collector.eastmoney import EastmoneyProvider
+from stock_tracker.collector.tencent import TencentProvider
 from stock_tracker.core.config import ProviderConfig
 
 
@@ -78,6 +79,100 @@ class TestCaptureQuantBarsCli(unittest.TestCase):
                 value["request_parameters"],
             )
             self.assertFalse((Path(directory) / "stock_tracker.db").exists())
+
+    def test_cli_captures_tencent_qfq_exact_raw_bytes(self) -> None:
+        raw = json.dumps(
+            {
+                "code": 0,
+                "msg": "",
+                "data": {
+                    "sh600519": {
+                        "qfqday": [
+                            [
+                                "2024-01-02",
+                                "100",
+                                "105",
+                                "110",
+                                "95",
+                                "12000",
+                                "1500000000",
+                            ]
+                        ]
+                    }
+                },
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+        provider = TencentProvider(
+            ProviderConfig(
+                name="tencent",
+                cls="TencentProvider",
+                markets=["a", "hk", "us"],
+                max_rps=100,
+            )
+        )
+        provider.fetch_bars_raw = lambda *args, **kwargs: raw  # type: ignore[method-assign]
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = io.StringIO()
+            with patch.object(cli, "_provider", return_value=provider), redirect_stdout(output):
+                result = cli.main(
+                    [
+                        "--provider",
+                        "tencent",
+                        "--symbol",
+                        "600519.SH",
+                        "--market",
+                        "A",
+                        "--start",
+                        "2024-01-01",
+                        "--end",
+                        "2024-12-31",
+                        "--adjust",
+                        "qfq",
+                        "--output-root",
+                        directory,
+                    ]
+                )
+            value = json.loads(output.getvalue())
+            self.assertEqual(result, 0)
+            self.assertEqual(value["schema"], "capture-quant-bars-cli-v2")
+            self.assertEqual(value["provider"], "tencent")
+            self.assertEqual(value["trust_tier"], "BEST_EFFORT")
+            self.assertFalse(value["research_grade"])
+            self.assertFalse(value["production_database_modified"])
+            self.assertEqual(value["request_parameters"]["adjustment"], "qfq")
+            self.assertFalse(value["request_parameters"]["synthetic_fixture"])
+            self.assertTrue((Path(directory) / value["storage_key"]).is_file())
+
+    def test_cli_rejects_tencent_adjustment_it_cannot_supply(self) -> None:
+        provider = TencentProvider(
+            ProviderConfig(
+                name="tencent",
+                cls="TencentProvider",
+                markets=["a", "hk", "us"],
+                max_rps=100,
+            )
+        )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(cli, "_provider", return_value=provider),
+            self.assertRaisesRegex(RuntimeError, "cannot honestly provide"),
+        ):
+            cli.main(
+                [
+                    "--provider",
+                    "tencent",
+                    "--symbol",
+                    "600519.SH",
+                    "--market",
+                    "A",
+                    "--adjust",
+                    "raw",
+                    "--output-root",
+                    directory,
+                ]
+            )
 
 
 if __name__ == "__main__":

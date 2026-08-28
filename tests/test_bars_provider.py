@@ -45,7 +45,7 @@ def _em_cfg(markets=("a", "hk", "us")):
 
 class TestEastmoneyFetchBars(unittest.TestCase):
     def _patch(self, provider, payload):
-        provider._request = lambda url: json.dumps(payload).encode("utf-8")
+        provider._request_research = lambda url: json.dumps(payload).encode("utf-8")
         return provider
 
     def test_parse_klines_ashare_volume_x100(self):
@@ -84,7 +84,7 @@ class TestEastmoneyFetchBars(unittest.TestCase):
 
     def test_bad_line_skipped(self):
         p = EastmoneyProvider(_em_cfg())
-        payload = {"rc": 0, "data": {"klines": ["short,line", "2024-01-01,1,2,3,4,5,6,7"]}}
+        payload = {"rc": 0, "data": {"klines": ["short,line", "2024-01-01,1,2,3,0.5,5,6,7"]}}
         self._patch(p, payload)
         bars = p.fetch_bars("X.SH", T.Market.A)
         self.assertEqual(len(bars), 1)
