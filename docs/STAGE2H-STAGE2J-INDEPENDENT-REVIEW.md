@@ -263,14 +263,15 @@ RemoteDisconnected
 
 环境没有 `HITHINK_FINANCE_API_KEY`，未执行真实请求。Offline Parser Binding 不访问网络，也不表示 HiThink 数据已获得 License 或 T2/T3 资格。
 
-## 5. Checkout 门禁
+## 5. Checkout 与精确 Git Index 门禁
 
-已通过：
+真实 Git Checkout 已通过：
 
 ```text
 Focused Stage/Provider       77 passed + 52 subtests
 Runtime                      522 passed, 1 skipped
-Quant functional             626 passed + 222 subtests
+Quant                        628 passed + 297 subtests
+Source distribution/bytecode 3 passed + 75 subtests
 Targeted Ruff                PASSED
 compileall                   PASSED
 pip check                    PASSED
@@ -286,7 +287,34 @@ Hybrid H4                    18/18
 Migration backup dry-run     database_modified=false / pending=4
 ```
 
-Pre-stage 完整 Quant 唯一失败原因：5 个新关键文件尚未被 Git 跟踪，source-distribution 门禁按设计失败。此项必须在最终定向暂存后重新验证。
+最终定向暂存生成的精确 Git Index：
+
+```text
+tree                         751925dbe0cc7e4b6ad9ab0c1d720f59790ef12a
+staged files                 25
+forbidden/generated paths    0
+secret findings              0
+git diff --cached --check    PASSED
+```
+
+该 tree 的隔离 Git archive 复验：
+
+```text
+Focused Stage/Provider       77 passed + 52 subtests
+Runtime                      522 passed, 1 skipped
+Quant                        626 passed, 2 expected no-.git skips + 222 subtests
+Hybrid H0                    12/12
+Hybrid H1/H2                 28/28 + 11/11
+Hybrid H4                    18/18
+Monitor                      49/49
+Mock Today                   17/17
+Real Today                   17/17
+Portfolio                    13/13
+Targeted Ruff                PASSED
+compileall                   PASSED
+```
+
+两个 Index Quant skip 只因为 Git archive 没有 `.git`。对应 source-distribution/no-tracked-bytecode 门禁已在真实 Checkout 通过。
 
 ## 6. 数据库归因
 
@@ -333,7 +361,7 @@ research_grade = false
 t3_reached = false
 ```
 
-## 8. Current Verdict
+## 8. Final Verdict 与 GitHub 交付
 
 ```text
 ENGINEERING_IMPLEMENTATION = COMPLETE
@@ -341,12 +369,13 @@ NETWORK_BOUNDARY_REVIEW = PASSED
 PARSER_AND_IDENTITY_REVIEW = PASSED
 PIT_AND_FINANCIAL_CORRECTNESS_REVIEW = PASSED
 SQLITE_ISOLATION_REVIEW = PASSED
-CHECKOUT_REGRESSION = PASSED_EXCEPT_EXPECTED_PRE_STAGE_SOURCE_DISTRIBUTION
+CHECKOUT_REGRESSION = PASSED
 UI_READ_ONLY_REVIEW = PASSED_NO_BLOCKING_FINDING
 
-FINAL_GIT_INDEX_REVIEW = PENDING
-ENGINEERING_READY_FOR_MERGE = PENDING_FINAL_INDEX_REVIEW
-GITHUB_DELIVERY = PENDING
+FINAL_GIT_INDEX_REVIEW = PASSED
+INDEX_GENERATED_AND_SECRET_SCAN = PASSED
+ENGINEERING_READY_FOR_MERGE = TRUE
+IMPLEMENTATION_GITHUB_DELIVERY = PASSED
 
 REAL_DUAL_SOURCE_ACCEPTANCE = PENDING
 LICENSE_CLEARANCE = PENDING
@@ -354,4 +383,17 @@ T3_RESEARCH_GRADE = NOT_REACHED
 INVESTMENT_PERFORMANCE_CLAIM = FALSE
 ```
 
-定向暂存后，需要从精确 Git Index 导出独立树并重复 Runtime、Quant、Focused、Hybrid/Web、generated/secret scan 和 cached-diff。只有该树全部通过，才允许提交和推送。
+实现提交：
+
+```text
+commit:
+ae9036286ee4f40a315891d44e86ab13e4347c41
+
+message:
+feat: add Stage 2H-2J market bar acceptance
+
+verified tree:
+751925dbe0cc7e4b6ad9ab0c1d720f59790ef12a
+```
+
+实现提交推送后，local `HEAD`、local `origin/main` 与 GitHub `refs/heads/main` 已验证三方一致。并行 UI 工作保持未暂存，没有进入该提交。

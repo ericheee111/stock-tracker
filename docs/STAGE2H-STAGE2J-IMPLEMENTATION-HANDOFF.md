@@ -8,9 +8,9 @@
 STAGE_2H_EXACT_RAW_ACCEPTANCE = IMPLEMENTED
 STAGE_2I_ASSURANCE_DECLARATIONS = IMPLEMENTED_UNTRUSTED_INPUT_ONLY
 STAGE_2J_T3_PREFLIGHT = IMPLEMENTED_FAIL_CLOSED
-CHECKOUT_REGRESSION = PASSED_EXCEPT_PRE_STAGE_SOURCE_DISTRIBUTION
-FINAL_GIT_INDEX_REVIEW = PENDING
-GITHUB_DELIVERY = PENDING
+CHECKOUT_REGRESSION = PASSED
+FINAL_GIT_INDEX_REVIEW = PASSED
+IMPLEMENTATION_GITHUB_DELIVERY = PASSED
 
 REAL_DUAL_SOURCE_ACCEPTANCE = PENDING
 TRUSTED_ASSURANCE_AUTHORITY = NOT_IMPLEMENTED
@@ -226,25 +226,34 @@ http.client.RemoteDisconnected
 
 ## 6. Checkout 验证证据
 
-当前工作区代码在最终定向暂存前已经通过：
+最终 Checkout 与精确 Git Index 门禁：
 
 ```text
-Stage 2H–2J / Provider focused:
+Git checkout focused:
 77 passed + 52 subtests
 
-Runtime full unittest:
+Git checkout Runtime:
 522 passed, 1 expected live-probe skip
 
-Quant functional suite excluding pre-stage source-distribution:
-626 passed + 222 subtests
+Git checkout Quant:
+628 passed + 297 subtests
 
-Targeted Ruff:
-PASSED
+Source distribution / no tracked bytecode:
+3 passed + 75 subtests
 
-compileall:
-PASSED
+Exact Git Index tree:
+751925dbe0cc7e4b6ad9ab0c1d720f59790ef12a
 
-pip check:
+Index export focused:
+77 passed + 52 subtests
+
+Index export Runtime:
+522 passed, 1 skipped
+
+Index export Quant:
+626 passed, 2 expected no-.git skips + 222 subtests
+
+Targeted Ruff / compileall / pip check:
 PASSED
 
 Quant contract smoke:
@@ -253,9 +262,15 @@ PASSED / synthetic_fixture_only=true
 Quant synthetic benchmark:
 PASSED / investment_performance_claim=false
 Challenger not promoted: ECE_REGRESSED, TIME_INSTABILITY
+
+git diff --cached --check:
+PASSED
+
+Index generated/secret scan:
+25 staged files / 0 findings
 ```
 
-完整 Quant 在暂存前唯一红灯为新 Stage 2H 文件尚未被 Git 跟踪，因此 source-distribution 精确报告 5 个未跟踪关键文件。该门禁必须在定向 `git add` 和精确 Git Index 导出后重跑，不得提前写成通过。
+两个 Index Quant skip 只因为 Git archive 没有 `.git`；相同 source-distribution/no-bytecode 门禁已经在真实 checkout 中通过。
 
 ## 7. 产品与 Hybrid 回归
 
@@ -300,19 +315,31 @@ qa/responsive-verification-report-2026-08-28.md
 
 当前 UI Review 未发现阻断项。旧截图删除、新响应式截图与三个 Web 文件改动必须由 UI 工作流单独 Review/提交。
 
-## 10. 最终交付前剩余动作
+## 10. GitHub 交付
+
+实现与独立 Review 提交：
 
 ```text
-1. 完成独立对抗式 Review 文档
-2. 更新 CHATGPT_HANDOFF / overview / 主 Handoff
-3. 仅暂存 Stage 2H–2J 非 UI 文件
-4. 重跑完整 Quant/source-distribution/no-bytecode
-5. 从精确 Git Index 导出独立树
-6. 在导出树重跑 focused/Runtime/Quant/Hybrid/Web 门禁
-7. generated/secret scan + git diff --cached --check
-8. 创建实现提交并 push
-9. 写入提交/tree/远端 SHA，创建交接提交并再次 push
+commit:
+ae9036286ee4f40a315891d44e86ab13e4347c41
+
+message:
+feat: add Stage 2H-2J market bar acceptance
+
+verified tree:
+751925dbe0cc7e4b6ad9ab0c1d720f59790ef12a
 ```
+
+该提交对应的 tree 就是本文件记录的精确 Git Index 验收树。实现提交推送后已验证：
+
+```text
+local HEAD
+= local origin/main
+= GitHub refs/heads/main
+= ae9036286ee4f40a315891d44e86ab13e4347c41
+```
+
+本次实现提交包含 25 个 Stage 2H–2J 文件，没有纳入 `web/**`、`qa/**`、运行数据库、真实 Raw Artifact、缓存、归档或凭据。当前文档交接将作为独立的 handoff-only 提交推送，最终远端 SHA 在推送后再次验证。
 
 ## 11. 仍然保持 PENDING
 

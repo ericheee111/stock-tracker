@@ -386,20 +386,21 @@ Status: `COMPLETED / REAL_SOURCE_RECONCILIATION_PENDING`
 
 ## 28. Task V — Stage 2H–2J market-bar acceptance and T3 preflight
 
-Status: `ENGINEERING_READY / FINAL_INDEX_REVIEW_PENDING`
+Status: `COMPLETED / REAL_DUAL_SOURCE_ACCEPTANCE_PENDING`
 
 - Added A-share-only `1d + qfq` exact-raw Acceptance Manifest, immutable Case/Report identities, pinned parser/schema replay, Stage 2G field/session reconciliation reuse, and explicit `HARD_BLOCKED / SYNTHETIC_CONTRACT_ONLY / NON_SYNTHETIC_DECLARED_STRUCTURALLY_CONSTRUCTIBLE` states.
 - Added an untrusted Assurance Declaration registry with PIT time bounds, safe source scope, synthetic exclusion, multi-source coverage rules, future/orphan rejection, and no Trusted Authority closure path.
 - Added fail-closed T3 preflight. Auxiliary report SHA references never close independent-binding blockers; every output fixes `research_grade=false`, `t3_reached=false`, `license_clearance_complete=false`, and `trusted_assurance_authority_configured=false`.
 - Hardened capture and acceptance CLIs against direct-script import failure, market/adjustment overclaim, invalid ranges, production-DB targets, non-directory outputs, symlink/junction ancestry, overlapping roots, unsafe declaration paths, and SQLite dependency.
 - Tencent A-share `600519.SH` QFQ exact-raw capture for 2026-08-18 through 2026-08-20 succeeded with 3 rows and remained `BEST_EFFORT`; Eastmoney failed before HTTP response with `RemoteDisconnected` even with ordinary User-Agent/Accept headers. No TLS/proxy/redirect boundary was weakened. HiThink live capture remains pending because the key is not configured in this process.
-- Checkout gates: focused `77 passed + 52 subtests`, Runtime `522 passed, 1 skipped`, Quant functional `626 passed + 222 subtests`, targeted Ruff, compileall, pip check, Quant smoke/benchmark, SQLite-forbidden CLI, read-only backup migration dry-run, Today `17/17 + 17/17`, Portfolio `13/13`, Monitor `49/49`, H0 `12/12`, H1/H2 `28/28 + 11/11`, and H4 `18/18` passed.
-- The only pre-stage full-Quant failure is intentional source-distribution enforcement for five new untracked critical files. Exact staging, full Quant/source-distribution, Git Index export, staged-tree review, commit/push, and remote SHA equality remain pending.
-- Concurrent WorkBuddy UI changes under `web/**`, tracked screenshot deletions, new responsive screenshots and UI reports were review-only and must remain outside this data-stage commit. Current UI read-only regression has no blocking finding.
+- Checkout gates passed: focused `77 + 52 subtests`, Runtime `522/1`, Quant `628 + 297 subtests`, source-distribution/no-bytecode `3 + 75 subtests`, targeted Ruff, compileall, pip check, Quant smoke/benchmark, SQLite-forbidden CLI, read-only backup migration dry-run, Today `17/17 + 17/17`, Portfolio `13/13`, Monitor `49/49`, H0 `12/12`, H1/H2 `28/28 + 11/11`, and H4 `18/18`.
+- Exact Git Index tree `751925dbe0cc7e4b6ad9ab0c1d720f59790ef12a` independently passed focused `77 + 52`, Runtime `522/1`, Quant `626/2 + 222`, H0/H1-H2/H4, Monitor, Today, Portfolio, Ruff, compileall, cached-diff, and a 25-file generated/secret scan with 0 findings. The two Quant skips were expected because the archive contains no `.git`.
+- Concurrent WorkBuddy UI changes under `web/**`, tracked screenshot deletions, new responsive screenshots and UI reports were review-only and remained outside the data-stage commit. Current UI read-only regression has no blocking finding.
 
 ## 29. Task W — Stage 2H–2J GitHub delivery
 
-Status: `PENDING`
+Status: `COMPLETED`
 
-- Implementation commit/tree, delivery-handoff commit, and final local/origin/GitHub SHA equality must be recorded only after the exact Git Index passes all gates.
+- Implementation/review commit `ae9036286ee4f40a315891d44e86ab13e4347c41` (`feat: add Stage 2H-2J market bar acceptance`) has verified tree `751925dbe0cc7e4b6ad9ab0c1d720f59790ef12a` and was pushed to `origin/main`.
+- After the implementation push, local `HEAD`, local `origin/main`, and GitHub `refs/heads/main` were verified equal at `ae9036286ee4f40a315891d44e86ab13e4347c41` before this handoff-only completion commit.
 - Real dual-source acceptance, source independence, field-unit/currency proof, QFQ equivalence, license clearance, authoritative Calendar/Status/Universe/Corporate Action binding, Trusted Assurance Authority, and T3 remain explicit pending gates.
