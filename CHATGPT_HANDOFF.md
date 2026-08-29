@@ -407,7 +407,7 @@ Status: `COMPLETED`
 
 ## 30. Task X — Stage 4F append-only Outcome Evidence Ledger
 
-Status: `ENGINEERING_COMPLETE / TRUSTED_OUTCOME_ADMISSION_PENDING / GIT_DELIVERY_IN_PROGRESS`
+Status: `COMPLETED / TRUSTED_OUTCOME_ADMISSION_PENDING`
 
 - Added strict canonical JSON round-trip/reconstruction for terminal `SignalOutcome`, immutable content-addressed Outcome Record files, an independent SQLite Catalog, contiguous append order and global SHA-256 hash chain, idempotent `outcome_id`, unique `signal_id`, integrity audit and exact-cohort Scoreboard Snapshot/reporting CLIs.
 - Stage 4F never opens or modifies production `data/stock_tracker.db`; default evidence storage is the separate `data/outcome-ledger.db` plus `data/outcome-ledger-records/`, both local-only/generated and excluded from Git delivery.
@@ -420,3 +420,14 @@ Status: `ENGINEERING_COMPLETE / TRUSTED_OUTCOME_ADMISSION_PENDING / GIT_DELIVERY
 - `docs/STAGE4F-OUTCOME-EVIDENCE-LEDGER-INDEPENDENT-REVIEW.md` records the final financial-correctness verdict: `ENGINEERING_READY_FOR_MERGE / APPEND_ONLY_INTEGRITY_PASSED / TRUSTED_OUTCOME_ADMISSION_PENDING / REAL_PERFORMANCE_CLAIM_BLOCKED`.
 - Next Outcome work is Runtime Outcome Collection/Finalization followed by a separately governed Trusted Outcome Admission Authority. Until both exist and independent real samples reach policy thresholds, the Strategy Scoreboard must remain `INSUFFICIENT_REAL_EVIDENCE`.
 - Concurrent `web/**`, tracked screenshot deletions, new responsive screenshots and UI QA reports remain outside the Stage 4F lane and must not be swept into its commit.
+
+## 31. Task Y — Stage 4F GitHub delivery
+
+Status: `COMPLETED`
+
+- Implementation/review commit `d0c2dc2ad63f65188162d454ffb0b92f020ff67d` (`feat: add Stage 4F outcome evidence ledger`) has exact tree `2e721cc499c4725b8b76126adf95909bd824ccfc` and was pushed to `origin/main`.
+- The exact 17-file Git Index contained only Stage 4F implementation, tests, design/review and required PRD/Gap Matrix/Overview/AGENTS/Handoff synchronization. Its generated/binary/secret scan found no database, WAL/SHM, bytecode, image, archive, environment file, private-key marker or credential assignment.
+- The exact Index export passed Stage 4F `36 passed + 11 subtests`, Quant `662 passed, 2 expected skips + 233 subtests`, Runtime `521 passed, 1 skipped + 350 subtests`, targeted Ruff, compileall, Quant contract smoke and synthetic fixture benchmark. The two Quant skips were expected because a source export has no `.git` directory.
+- After the implementation push, local `HEAD`, local `origin/main`, and GitHub `refs/heads/main` were verified equal at `d0c2dc2ad63f65188162d454ffb0b92f020ff67d` before this handoff-only completion commit.
+- The remaining dirty worktree consists only of preserved concurrent UI source changes, tracked screenshot deletions, new responsive screenshots and UI QA reports; none was committed or reset by Stage 4F.
+- Trusted Outcome Admission, automatic Runtime Outcome Collection/Finalization, real independent sample accumulation, real Strategy Scoreboard API/UI and any investment-performance claim remain explicitly pending.
