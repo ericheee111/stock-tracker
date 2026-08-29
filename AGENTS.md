@@ -619,7 +619,7 @@ python -m stock_tracker --once
 9. Stage 3C：free-stockdb 与 HiThink 等可选数据 Sidecar/捕获源继续默认关闭，在真实许可、覆盖与对账通过后再晋级；
 10. Stage 3D–5C：XTP read-only Sidecar、Market Event Store、Signal Monitor、Monitor Workspace 和 synthetic Shadow（工程已完成；真实 Login/Subscribe、Level 1/2、Live Shadow、吞吐与保存权待 operational 验收）；
 11. Stage 3A/3B：Event Intelligence + Big Trend v1；
-12. Stage 4：Strategy Scoreboard + 正式 PIT Replay；
+12. Stage 4：Stage 4F append-only Outcome Evidence Ledger 工程实现与独立审查已完成；下一步为 Runtime Outcome Collection/Finalization、独立 Trusted Outcome Admission Authority、真实 Strategy Scoreboard 与正式 PIT Replay；
 13. Stage 5：真实数据上的模型准确率迭代；
 14. Stage 6：港股通与美股独立扩展；
 15. Stage 7：可选券商只读能力；任何执行/报单能力必须另立安全规格并取得用户单独授权。

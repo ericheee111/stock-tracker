@@ -2271,7 +2271,7 @@ docs/STAGE2H-STAGE2J-MARKET-BAR-ACCEPTANCE-DESIGN.md
 
 ## Stage 4：真实策略战绩与 Replay
 
-> **工程状态（2026-08-20）**：Stage 4A Outcome/Scoreboard、Stage 4B PIT Replay 后端合同以及 Stage 4C 失败归因/同 cohort 版本比较已实现并进入测试与审查。Replay UI、用户解释页和真实 Outcome 持久化仍待产品实现；在真实独立样本不足时，Scoreboard 必须保持 `INSUFFICIENT_REAL_EVIDENCE`，正式 Replay 在 T3 快照链不完整时必须保持 `BLOCKED`。
+> **工程状态（2026-08-30）**：Stage 4A Outcome/Scoreboard、Stage 4B PIT Replay、Stage 4C 失败归因/同 cohort 版本比较，以及 Stage 4F append-only Outcome Evidence Ledger 已完成工程实现与独立审查。Stage 4F 只保存 immutable terminal Outcome 候选证据：synthetic/paper 进入 `DIAGNOSTIC_ONLY`，所有 live observation 进入 `LIVE_CANDIDATE`；调用方自报 `verified=true` 不构成可信真实战绩准入。可信 Outcome Admission Authority、真实样本采集服务、Replay UI 和用户解释页仍待后续实现；在可信准入与真实独立样本不足时，真实 Scoreboard 必须保持 `INSUFFICIENT_REAL_EVIDENCE` / `TRUSTED_OUTCOME_ADMISSION_NOT_CONFIGURED`，正式 Replay 在 T3 快照链不完整时必须保持 `BLOCKED`。
 
 1. 信号 Outcome；
 2. Strategy Scoreboard；

@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from stock_tracker.quant.data import DataSnapshotManifest, RawDataArtifact
+from stock_tracker.quant.storage import OutcomeLedger
 
 
 class TestSourceDistribution(unittest.TestCase):
@@ -13,6 +14,7 @@ class TestSourceDistribution(unittest.TestCase):
     def test_quant_data_contract_imports(self) -> None:
         self.assertTrue(callable(RawDataArtifact))
         self.assertTrue(callable(DataSnapshotManifest))
+        self.assertTrue(callable(OutcomeLedger))
 
     def test_critical_quant_data_files_are_tracked(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -30,6 +32,8 @@ class TestSourceDistribution(unittest.TestCase):
             "scripts/report_stage2g_market_bars.py",
             "scripts/build_stage2h_market_bar_acceptance.py",
             "scripts/report_stage2h_market_bar_acceptance.py",
+            "scripts/ingest_outcome_ledger.py",
+            "scripts/report_outcome_ledger.py",
             "scripts/verify_free_stockdb_sidecar.py",
             "stock_tracker/collector/free_stockdb.py",
             "stock_tracker/collector/hithink_finance.py",
@@ -56,6 +60,8 @@ class TestSourceDistribution(unittest.TestCase):
             "stock_tracker/quant/evaluation/decision_quality.py",
             "stock_tracker/quant/evaluation/shadow_lifecycle.py",
             "stock_tracker/quant/research/replay.py",
+            "stock_tracker/quant/storage/__init__.py",
+            "stock_tracker/quant/storage/outcome_ledger.py",
             "stock_tracker/quant/storage/migrations/0004_corporate_action_identity.sql",
             "tests_quant/test_adjusted_market_data.py",
             "tests_quant/test_attribution.py",
@@ -74,6 +80,10 @@ class TestSourceDistribution(unittest.TestCase):
             "tests_quant/test_market_bar_acceptance.py",
             "tests_quant/test_market_bar_reconciliation.py",
             "tests_quant/test_outcomes.py",
+            "tests_quant/test_outcome_ledger_cli.py",
+            "tests_quant/test_outcome_ledger_codec.py",
+            "tests_quant/test_outcome_ledger_scoreboard.py",
+            "tests_quant/test_outcome_ledger_store.py",
             "tests_quant/test_replay.py",
             "tests_quant/test_shadow_lifecycle.py",
             "tests_quant/test_stage2g_market_bar_cli.py",

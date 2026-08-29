@@ -2,7 +2,7 @@
 
 > 主理人：齐活林（Delivery Director）｜团队：许清楚(PM) / 高见远(Architect) / 寇豆码(Engineer) / 严过关(QA)
 > 对应 PRD：`docs/PRD-股票辅助判断与交易参考网站.md`（v1.1；A 股优先的个人交易决策驾驶舱）
-> 最新对齐日期：2026-08-28
+> 最新对齐日期：2026-08-30
 > 用途：供其他 Agent / 开发者按 v1.1 产品优先级、Hybrid H0–H5 与后续 Stage 路线接续工作。
 
 ---
@@ -47,9 +47,13 @@ stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + �
 - Stage 3D–5C 最新门禁：专项 83 项通过/1 项跳过及 19 subtests、Runtime 512 项通过/1 项跳过及 316 subtests、Quant 563 项及 248 subtests、Monitor Workspace 49/49、H0 12/12、H1/H2 28/28 + 11/11、H4 18/18、Today 17/17、Portfolio 13/13、targeted Ruff、JS syntax、CPython 3.9 grammar、compileall、pip check、source distribution/no tracked bytecode、Quant smoke/benchmark 与 migration dry-run 通过；
 - Review 修复了 Event/分钟派生半提交、嵌套 Payload 可变与身份漂移、A 股交易日时区、Sidecar Session 快照/精确 URL、生产 SQLite 路径隔离、Monitor 并发首次 Trigger、规则版本快照、缺失事实 `NE` 假阳性、同步 EventBus 到有界异步 Worker 隔离、Notification Outbox 租约/Worker、SSE 背压、全库 Integrity 扫描、SQLite `IN` 参数上限、Replay GET 副作用/窗口、Query 数量、UTF-8 静态资源和 UI 事实选项等问题；
 - 真实 XTP Login/Subscribe、Level 1/2 权限、50–100 标的 Live Shadow、持续吞吐与数据存储/训练/再分发权仍为 `PENDING`；`allow_live_decision=false`、`allow_model_training=false`、`auto_trade=false`；
+- 2026-08-30 Stage 4F 已完成 append-only Outcome Evidence Ledger 工程实现与独立审查：terminal `SignalOutcome` 严格 canonical JSON、不可变 Record、独立 SQLite Catalog、全局 hash chain、完整性 audit、exact-cohort Snapshot 与 CLI 均落地；写入时间在取得 SQLite writer lock 后观测并强制按 append order 单调，时钟回拨/损坏 ledger 均在新文件发布前失败关闭；Catalog/Record/报告采用并发安全的不覆盖原子发布，Audit 与 Append 串行取得一致文件/Catalog 快照，SQLite 提交结果不确定时先回读确认再决定补偿，禁止误删已提交证据；
+- Stage 4F 只有 `DIAGNOSTIC_ONLY` / `LIVE_CANDIDATE` 两条物理 Lane。即使 `SignalOutcome.real_scoreboard_eligible=true`，调用方自报的 `verified=true` 或 verification SHA 也不能升级为可信真实战绩；`TRUSTED_OUTCOME_AUTHORITY_CONFIGURED=false`，真实 `scoreboard_records` 固定为空，保持 `TRUSTED_OUTCOME_ADMISSION_NOT_CONFIGURED / INSUFFICIENT_REAL_EVIDENCE`；
+- Stage 4F 最新门禁：focused `36/36 + 11 subtests`、source distribution `2/2`（83 个关键路径 subtests）、Quant `664/664 + 316 subtests`、Runtime `521 passed, 1 skipped + 350 subtests`、Today Mock `17/17`、真实 Today API/Web `17/17`、Portfolio CRUD `13/13`；targeted Ruff、compileall、pip check、Quant contract smoke、synthetic fixture benchmark 与 production migration dry-run 均通过。`data/stock_tracker.db` 在本轮验证前后 SHA-256 均为 `6d2f1fdc5b48180c1cb32d15e8619770dc1b5edb56d13cea0072bffe964f20f2`；Review 为 `ENGINEERING_READY_FOR_MERGE / APPEND_ONLY_INTEGRITY_PASSED / TRUSTED_OUTCOME_ADMISSION_PENDING / REAL_PERFORMANCE_CLAIM_BLOCKED`；
+- Stage 4F 干净 Git Index 首轮发现“源码包没有运行数据库时，生产路径守卫先泄漏 `FileNotFoundError`”的分发缺陷；现已将精确生产路径拒绝前移、其余缺失路径统一为 `OutcomeLedgerError` 并补 absent-production regression。修复后的 Index 通过 Stage 4F `36 + 11 subtests`、Quant `662 passed, 2 expected skips + 233 subtests`、Runtime `521 passed, 1 skipped + 350 subtests`、Ruff、compileall、Quant smoke 与 synthetic benchmark；
 - Scheduler 的重复 BAR 方法定义已收敛为一套；BAR Universe 覆盖 radar、自选、持仓和活跃信号；
 - 日线有效数据标记为 `DELAYED` 而不是 `LIVE`，避免把 EOD 数据伪装成盘中实时；
-- 下一阶段：恢复 Eastmoney 或配置另一个获准来源，完成 A 股真实双源 Stage 2H Acceptance；随后由仓库外独立主体提供可审计、可撤销的 Source Independence、字段单位/币种、复权、许可与辅助事实证据。只有 Trusted Authority Registry 能验证并关闭全部 blocker 后，才另立 T3 Snapshot Assembler。
+- 下一阶段并行推进两条受阻主线：数据侧恢复 Eastmoney 或配置另一个获准来源，完成 A 股真实双源 Stage 2H Acceptance，再由仓库外独立主体提供可审计、可撤销的 Source Independence、字段单位/币种、复权、许可与辅助事实证据；Outcome 侧实现 Runtime Outcome Collection/Finalization Service，随后另立 Trusted Outcome Admission Authority。两类 Trusted Authority 均不能由调用方自报字段替代；真实样本不足时不得生成真实战绩或模型晋级结论。
 
 ---
 

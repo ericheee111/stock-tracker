@@ -264,7 +264,7 @@ stock_tracker/signals/crowding.py
 | Top-K 多样性 | `NOT_IMPLEMENTED` | 无板块/主题配额 | 需要确定性去重和多样性算法 |
 | 3—5 个首页结果 | `PARTIAL` | 函数有 limit 参数 | 默认 API 仍返回 12；无用户配置 |
 | 完整正反证据 | `PARTIAL` | positive/negative reasons、reason、next_trigger | 缺 hard_blockers、soft_blockers、证据 ID 和版本 |
-| Core Outcome | `NOT_IMPLEMENTED` | 有 signal history，但不是交易结果 | 缺 entry/exit、MFE/MAE、realized R 和成本结果 |
+| Core Outcome | `LEDGER_ENGINEERING_COMPLETE / RUNTIME_COLLECTION_PENDING` | 已有严格 `SignalOutcome` 合同与 Stage 4F append-only immutable candidate ledger，可保存 entry/exit、MFE/MAE、realized R 和成本结果 | 尚无 Runtime Outcome Collection/Finalization Service、Trusted Admission Authority 和独立真实样本；不能声明真实战绩 |
 
 ---
 
@@ -378,13 +378,13 @@ v1.1 需要新增独立账户 Profile，而不是把账户字段塞进每条 Pos
 |---|---|---|---|
 | 策略 ID | `IMPLEMENTED` | Signal 有 strategy_id | 缺完整 strategy version |
 | Signal History | `IMPLEMENTED` | SQLite `signal_history` | 记录迁移，不是交易结果 |
-| Outcome | `NOT_IMPLEMENTED` | 无 runtime signal_outcome | 无 entry/exit/MFE/MAE/realized R/cost |
+| Outcome | `LEDGER_ENGINEERING_COMPLETE / RUNTIME_COLLECTION_PENDING` | `SignalOutcome` 合同与 Stage 4F append-only immutable candidate ledger 已实现，CLI 可导入终态 Outcome 并审计 exact cohort | 尚无 Runtime 自动采集/终态生成、Trusted Admission Authority 与真实独立样本 |
 | 回测指标函数 | `CONTRACT_ONLY` | Quant evaluation metrics | 尚未绑定真实 T3 数据和产品策略 |
-| 样本数/胜率/平均 R | `NOT_IMPLEMENTED` | synthetic benchmark 不能当真实战绩 | Stage 4 |
+| 样本数/胜率/平均 R | `FAIL_CLOSED / REAL_EVIDENCE_PENDING` | Stage 4F 会记录候选与合同层 eligible ID，但可信 admitted set 固定为空；synthetic benchmark 不计入真实战绩 | 依赖独立 Trusted Admission、真实样本门槛和审计后聚合 |
 | Net Expectancy/Profit Factor/MaxDD | `CONTRACT_ONLY` | Quant 层具备部分能力 | 缺真实产品结果和 API |
 | Brier/LogLoss/ECE | `CONTRACT_ONLY + SYNTHETIC_VALIDATED` | Calibration/metrics 代码存在 | 无真实校准模型 |
 | ACTIVE/WATCH/DOWNWEIGHTED/BLOCKED | `CONTRACT_ONLY` | Registry/Promotion 基础存在 | 未接运行策略权重和 UI |
-| Scoreboard API/UI | `NOT_IMPLEMENTED` | 无标准端点 | Stage 4 |
+| Scoreboard API/UI | `REPORT_CLI_ONLY` | Stage 4F 可生成内容寻址 JSON/Markdown fail-closed Snapshot，固定无真实指标与自动动作 | 尚无产品 REST/UI、可信准入和真实样本解释页 |
 
 ---
 

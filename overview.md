@@ -108,6 +108,7 @@ Stock Tracker 不把“指标很多”或“模型分数很高”当成最终答
 - Big Trend v1 多证据状态机与 Trend Runner 研究合同；
 - `free-stockdb` T1 Sidecar 的 loopback/read-only/RAW-only 隔离、发行包审计与差异比较治理合同；
 - Signal Outcome、成本后 Strategy Scoreboard 与 `INSUFFICIENT_REAL_EVIDENCE` 门禁；
+- Stage 4F 独立 append-only Outcome Evidence Ledger：严格 canonical JSON、immutable Record、独立 SQLite Catalog、全局 Hash Chain、并发安全 Audit/Append、exact-cohort candidate Snapshot 与内容寻址报告；live 记录最多进入 `LIVE_CANDIDATE`，未配置可信准入时真实 Scoreboard 始终为空；
 - 正式/诊断 PIT Replay 的输入快照清单与 fail-closed 计划合同；
 - 失败归因和同 cohort 策略版本比较合同；
 - 统一 Decision Quality / Model Promotion Gate；
@@ -183,7 +184,8 @@ Stage 1 只实际启用已经有确定性证据支持的动作；部分止盈和
 当前明确**没有**声称完成：
 
 - 真实校准成功概率；
-- 真实 Strategy Scoreboard；
+- 自动从 Runtime/行情路径/成交事实生成真实终态 Outcome 的采集与 Finalization Service；
+- Trusted Outcome Admission Authority 与真实 Strategy Scoreboard；
 - Big Trend / 主升浪正式产品接线、真实数据校准和真实捕获率；
 - 官方公告、财报、政策和新闻的真实 Event 数据接入；
 - 真实 free-stockdb 发行包、同步网络和数据许可审计；
@@ -205,6 +207,8 @@ Synthetic benchmark != 真实投资战绩
 Stage 2G Synthetic Golden != 真实跨源行情证据
 Stage 2H non-synthetic-declared != 独立真实来源证明或 T3
 Assurance Declaration != Trusted Authority Approval
+Stage 4F LIVE_CANDIDATE != Trusted Outcome Admission
+SignalOutcome verified=true != 独立真实战绩证明
 运行 SQLite Bar != 自动成为训练数据
 free-stockdb 本地可达 != T2/T3 或可训练
 free-stockdb 当前板块映射 != 历史 PIT 成分
@@ -265,9 +269,11 @@ python scripts/run_stage1_today_integration.py
 10. `docs/STAGE2D-STAGE4-EXECUTION-ROADMAP.md`
 11. `docs/STAGE3C-FREE-STOCKDB-SIDECAR-CONTRACT.md`
 12. `docs/STAGE4C-STAGE6A-EXECUTION-ROADMAP.md`
-13. `docs/STAGE5A-DECISION-QUALITY-GATE.md`
-14. `docs/STAGE5B-SHADOW-LIFECYCLE-CONTRACT.md`
-15. `docs/STAGE6A-MARKET-ISOLATION-CONTRACT.md`
+13. `docs/STAGE4F-OUTCOME-EVIDENCE-LEDGER-DESIGN.md`
+14. `docs/STAGE4F-OUTCOME-EVIDENCE-LEDGER-INDEPENDENT-REVIEW.md`
+15. `docs/STAGE5A-DECISION-QUALITY-GATE.md`
+16. `docs/STAGE5B-SHADOW-LIFECYCLE-CONTRACT.md`
+17. `docs/STAGE6A-MARKET-ISOLATION-CONTRACT.md`
 
 ---
 
@@ -283,7 +289,7 @@ Stage 2B—6A 的后端工程合同已经形成。Hybrid H0—H5 的仓库侧工
 6. **Stage 3C.2：固定真实 free-stockdb Release，审计二进制、首次运行网络、同步源、manifest 和数据许可；**
 7. **HiThink Financial-API：使用真实账户凭据做小窗口 exact-raw 日线捕获与许可审查；保持默认关闭和 T1，不进入 Runtime、训练或再分发；**
 8. **Stage 2H operational：恢复 Eastmoney 可达性或配置另一个获准来源，与已成功的 Tencent A 股 QFQ Capture 形成真实双源 Acceptance；再由仓库外独立主体提供 Source Independence、字段单位/币种、复权、许可、Calendar/Status/Universe/Corporate Action 证据。Stage 2I Declaration 只登记输入，不能替代 Trusted Authority；**
-9. **建设真实 Outcome 的追加式持久化与独立样本收集，达到门槛前 Strategy Scoreboard 保持 `INSUFFICIENT_REAL_EVIDENCE`；**
+9. **Stage 4F 追加式 Outcome Evidence Ledger 已完成并通过独立审查；下一步建设 Runtime Outcome Collection/Finalization Service 与独立 Trusted Outcome Admission Authority。可信准入和真实独立样本达到门槛前，Strategy Scoreboard 必须保持 `INSUFFICIENT_REAL_EVIDENCE`；**
 10. **闭环 T3 A 股 Snapshot、正式 PIT Replay、Replay UI、真实新样本 Shadow 与受控模型部署；**
 11. **依次进入 Stage 6B—6F 的港股通、美股独立数据、校准、Scoreboard、Shadow 与真实证据审查。**
 
