@@ -1,6 +1,6 @@
 # Stage 4G-R0 — Manual Outcome Collection Core Reconciliation Report
 
-状态：`ENGINEERING_REVIEW_PASSED / GIT_DELIVERY_PENDING`
+状态：`ENGINEERING_REVIEW_PASSED / GIT_DELIVERED`
 
 日期：2026-08-31
 
@@ -170,4 +170,12 @@ lane = LIVE_CANDIDATE
 
 本轮提交只允许纳入 Stage 4G-R0 的核心实现、测试、设计、独立 Review、项目状态同步与后续 Stage 4G.1/4H 设计。并行 `web/**`、`qa/**`、截图、运行数据、数据库、缓存、临时文件和凭据不得进入 Git Index。
 
-最终 exact staged paths、tree SHA、commit SHA 与 GitHub push 状态在完成 Git 交付后写入 Handoff。
+实现与独立 Review 提交：
+
+```text
+commit = e5aed357e6127345f3e3de0bab993dc5f895906c
+tree = 20fad49d582dbc5401b2cc05aec01a67b22a4339
+message = fix: close Stage 4G R0 review gaps
+```
+
+该实现 tree 即最终通过 Ruff、专项、完整 Quant/Runtime 与 compileall 的精确 staged tree。GitHub 三方 SHA 验证记录写入 `CHATGPT_HANDOFF.md` 与最终交付回复。

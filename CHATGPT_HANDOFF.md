@@ -431,3 +431,26 @@ Status: `COMPLETED`
 - After the implementation push, local `HEAD`, local `origin/main`, and GitHub `refs/heads/main` were verified equal at `d0c2dc2ad63f65188162d454ffb0b92f020ff67d` before this handoff-only completion commit.
 - The remaining dirty worktree consists only of preserved concurrent UI source changes, tracked screenshot deletions, new responsive screenshots and UI QA reports; none was committed or reset by Stage 4F.
 - Trusted Outcome Admission, automatic Runtime Outcome Collection/Finalization, real independent sample accumulation, real Strategy Scoreboard API/UI and any investment-performance claim remain explicitly pending.
+
+## 32. Task Z — Stage 4G-R0 reconciliation and adversarial closure
+
+Status: `COMPLETED / MANUAL_CORE_ONLY / AUTOMATIC_RUNTIME_ADAPTER_PENDING`
+
+- Corrected the earlier overstatement: Stage 4G is a manually driven Collection/Finalization Core, not an automatic Runtime Service. SignalManager/EventBus/Scheduler integration, Runtime Decision Artifact, transactional outbox, Market Path/Execution workers, Broker capture, Trusted Admission and real Scoreboard remain pending.
+- Collection semantics were explicitly upgraded to v3. Exit Request/Decision/Path Prefix v3 freezes the maximum request-time-known PATH prefix as `point_id + PATH event fact_id + observed_at`; v1/v2 evidence is rejected without rewrite or reinterpretation.
+- TARGET/STOP/TIMEOUT now use chronological first-touch within the configured horizon. A terminal reason must match the first observable barrier; TIMEOUT rejects any earlier barrier; a single coarse path point touching both target and stop fails closed.
+- `minimum_exit_session_offset` is independent of strategy horizon, preserving delayed fills and extra holding sessions. Runtime Signal/ScoreSet exact types, timezone-aware request/state times, full quantities, contiguous observable sessions, attainable fill/reference prices, atomic Collection DB publication, exact SQLite schema, Ledger filesystem identity and concurrent finalization were hardened.
+- Outcome/Scoreboard arithmetic now uses a module-owned high-precision `ROUND_HALF_EVEN` Decimal context, so hostile process-global Decimal settings cannot change immutable metrics or IDs.
+- Checkout gates: Stage 4G focused `60 + 11 subtests`; Outcome/Stage 4F adjacent `116 + 114 subtests`; full Quant `725 + 327 subtests`; full Runtime `521 passed, 1 expected skip + 350 subtests`; source distribution/no tracked bytecode `3 + 83 subtests`; Today Mock `17/17`; real temporary API/Web Today `17/17`; Portfolio CRUD `13/13`; targeted Ruff, compileall, pip check, Quant smoke, synthetic benchmark and production migration dry-run passed.
+- Production `data/stock_tracker.db` remained byte-identical at SHA-256 `ce4156bf641e061d86ce944167ad2b1347f2437c130a7cf6eee26892fb78cbb7`; migration remained `DRY_RUN / database_modified=false`.
+- Exact implementation tree `20fad49d582dbc5401b2cc05aec01a67b22a4339` passed targeted Ruff, focused `114 + 31 subtests`, Quant `723 passed, 2 expected source-export skips + 244 subtests`, Runtime `521 passed, 1 expected skip + 350 subtests`, and compileall.
+- Explicit next-stage blockers remain: automatic artifact/outbox, `ENTRY_EXPIRED / USER_CANCELLED`, suspended/no-trade/missing-data session evidence, observation windows, partial/multi-leg execution, Broker-confirmed read-only evidence, cryptographic/PIT Authority and sufficient admitted samples.
+
+## 33. Task AA — Stage 4G-R0 GitHub delivery
+
+Status: `COMPLETED`
+
+- Implementation/review commit `e5aed357e6127345f3e3de0bab993dc5f895906c` (`fix: close Stage 4G R0 review gaps`) has exact verified tree `20fad49d582dbc5401b2cc05aec01a67b22a4339`.
+- The implementation commit contains exactly 14 Stage 4G-R0 files: core Outcome/Collection code, focused tests, R0/design/review documents and required AGENTS/PRD/Gap Matrix/Overview/Handoff synchronization.
+- Concurrent `web/**`, `qa/**`, tracked screenshot deletions, responsive screenshots, UI reports, runtime databases, caches and temporary files were neither staged nor reset.
+- This handoff-only delivery record is pushed together with the implementation commit; final local `HEAD`, local `origin/main` and GitHub `refs/heads/main` equality is verified after push and reported to the user.
