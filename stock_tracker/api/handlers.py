@@ -56,6 +56,7 @@ class AppContext:
     scheduler: Any = None
     monitor_service: Any = None
     monitor_subscription: Any = None
+    runtime_artifact_service: Any = None
 
 
 class APIError(ValueError):

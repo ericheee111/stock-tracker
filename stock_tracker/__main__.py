@@ -40,8 +40,15 @@ from .data_quality.gate import DataQualityGate
 from .deployment.power_guard import TradingPowerGuard
 from .features.engine import FeatureEngine
 from .monitor.service import MonitorService
+from .runtime_evidence.store import RuntimeArtifactStore, RuntimeArtifactStoreError
+from .runtime_evidence.worker import RuntimeArtifactWorker, RuntimeArtifactWorkerService
 from .signals.manager import SignalManager
+from .storage.db import get_connection
 from .storage.repository import Repository
+from .storage.runtime_migrations import (
+    RuntimeMigrationError,
+    runtime_evidence_schema_ready,
+)
 
 _PROVIDER_REGISTRY = {
     "EastmoneyProvider": EastmoneyProvider,
@@ -84,6 +91,33 @@ def _build_api_target_server(ctx: AppContext, logger) -> APIServer | None:
         api_only=True,
         audit_logger=ctx.audit_logger,
     )
+
+
+def _build_runtime_artifact_service(
+    repository: Repository, db_path: str, root_dir: str, logger
+) -> RuntimeArtifactWorkerService | None:
+    if db_path == ":memory:":
+        return None
+    try:
+        if not runtime_evidence_schema_ready(get_connection(db_path)):
+            logger.warning(
+                "Stage 4G.1 Runtime migration 未应用，Outcome evidence lane 保持关闭"
+            )
+            return None
+        data_root = Path(root_dir).resolve() / "data"
+        artifact_store = RuntimeArtifactStore(
+            data_root / "runtime-decision-artifacts",
+            data_root / "runtime-decision-artifacts.db",
+            production_database=db_path,
+        )
+        return RuntimeArtifactWorkerService(
+            RuntimeArtifactWorker(repository, artifact_store), logger
+        )
+    except (OSError, RuntimeArtifactStoreError, RuntimeMigrationError):
+        logger.exception(
+            "Stage 4G.1 Runtime Artifact Store 不可用，正常交易建议继续服务"
+        )
+        return None
 
 
 def _build_providers(bundle, logger):
@@ -165,6 +199,9 @@ def build_context(args) -> tuple:
     feature_engine = FeatureEngine(bundle)
     signal_manager = SignalManager(bundle, store, repo, router, feature_engine, gate)
     signal_manager.recover()
+    runtime_artifact_service = _build_runtime_artifact_service(
+        repo, db_path, root_dir, logger
+    )
 
     bus = get_bus()
     sse_hub = SSEHub(bus)
@@ -181,6 +218,7 @@ def build_context(args) -> tuple:
         sse_hub=sse_hub,
         web_root=web_root,
         monitor_service=monitor_service,
+        runtime_artifact_service=runtime_artifact_service,
     )
     ctx.audit_logger = audit_logger
 
@@ -310,15 +348,20 @@ def main(argv: list[str] | None = None) -> int:
     api_serve_entered = False
     runtime_event_worker_started = False
     notification_worker_started = False
+    runtime_artifact_worker_started = False
 
     if args.once:
         runtime_event_worker_started = ctx.monitor_service.start_runtime_event_worker()
+        if ctx.runtime_artifact_service is not None:
+            runtime_artifact_worker_started = ctx.runtime_artifact_service.start()
         try:
             return _self_check(ctx, scheduler, logger)
         finally:
             _unsubscribe_monitor(ctx)
             if runtime_event_worker_started:
                 ctx.monitor_service.stop_runtime_event_worker()
+            if runtime_artifact_worker_started:
+                ctx.runtime_artifact_service.stop()
             if target_server is not None:
                 target_server.server_close()
             api_server.server_close()
@@ -326,6 +369,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         runtime_event_worker_started = ctx.monitor_service.start_runtime_event_worker()
         notification_worker_started = ctx.monitor_service.start_notification_worker()
+        if ctx.runtime_artifact_service is not None:
+            runtime_artifact_worker_started = ctx.runtime_artifact_service.start()
         if target_server is not None:
             target_thread = threading.Thread(
                 target=target_server.serve_forever,
@@ -356,6 +401,8 @@ def main(argv: list[str] | None = None) -> int:
             ctx.monitor_service.stop_runtime_event_worker()
         if notification_worker_started:
             ctx.monitor_service.stop_notification_worker()
+        if runtime_artifact_worker_started:
+            ctx.runtime_artifact_service.stop()
         if power_guard is not None:
             power_guard.stop()
         try:

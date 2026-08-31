@@ -6,18 +6,29 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
+import secrets
 import sqlite3
 import uuid
 from dataclasses import dataclass, fields, is_dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Optional, get_args, get_origin, get_type_hints
+from typing import Any, get_args, get_origin, get_type_hints
 
-from .db import get_connection
 from ..core import types as T
 from ..decision.types import RiskMode, UserPortfolioProfile
+from ..runtime_evidence.contracts import (
+    RuntimeDecisionArtifact,
+    require_utc_clock_value,
+)
+from ..runtime_evidence.store import (
+    RuntimeArtifactAppendResult,
+    RuntimeArtifactAuditReport,
+)
+from .db import get_connection
+from .runtime_migrations import audit_runtime_evidence_schema
 
 
 class RepositoryConflictError(ValueError):
@@ -26,6 +37,82 @@ class RepositoryConflictError(ValueError):
 
 class RepositoryValidationError(ValueError):
     pass
+
+
+class RuntimeOutboxError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeSignalPersistence:
+    evidence_status: str
+    artifact_id: str | None
+    outbox_append_order: int | None
+    quarantine_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeOutboxLease:
+    append_order: int
+    artifact_id: str
+    runtime_signal_id: str
+    transition_event_id: str
+    payload_json: str
+    payload_sha256: str
+    retry_count: int
+    lease_owner: str
+    lease_expires_at: datetime
+
+
+def _runtime_utc_text(value: object, name: str) -> str:
+    return (
+        require_utc_clock_value(value, name)
+        .isoformat(timespec="microseconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def _runtime_utc_from_text(value: object, name: str) -> datetime:
+    if type(value) is not str or not value.endswith("Z") or len(value) > 64:
+        raise RuntimeOutboxError(f"{name} must be canonical UTC")
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError as exc:
+        raise RuntimeOutboxError(f"{name} must be ISO-8601") from exc
+    if _runtime_utc_text(parsed, name) != value:
+        raise RuntimeOutboxError(f"{name} must be canonical UTC")
+    return parsed
+
+
+def _runtime_canonical_json(value: dict[str, Any]) -> str:
+    if any(type(key) is not str for key in value):
+        raise RuntimeOutboxError("runtime metadata keys must be strings")
+    try:
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise RuntimeOutboxError("runtime metadata is not canonical JSON") from exc
+
+
+def _runtime_sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _require_runtime_id(value: object, name: str, *, sha256: bool = False) -> str:
+    if type(value) is not str or value != value.strip() or not value or len(value) > 256:
+        raise RuntimeOutboxError(f"{name} must be a safe string")
+    if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        raise RuntimeOutboxError(f"{name} contains control characters")
+    if sha256 and (
+        len(value) != 64 or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise RuntimeOutboxError(f"{name} must be lowercase SHA-256")
+    return value
 
 
 def _validate_position_values(
@@ -145,14 +232,14 @@ class Repository:
         conn.execute(
             "REPLACE INTO quotes_cache(symbol, market, data, updated_at) VALUES (?,?,?,?)",
             (quote.symbol, quote.market.value, json.dumps(to_jsonable(quote), ensure_ascii=False),
-             datetime.now().isoformat()),
+             datetime.now(timezone.utc).isoformat()),
         )
         conn.commit()
 
     def save_quotes(self, quotes: list[T.Quote]) -> None:
         conn = get_connection(self.db_path)
         rows = [
-            (q.symbol, q.market.value, json.dumps(to_jsonable(q), ensure_ascii=False), datetime.now().isoformat())
+            (q.symbol, q.market.value, json.dumps(to_jsonable(q), ensure_ascii=False), datetime.now(timezone.utc).isoformat())
             for q in quotes
         ]
         conn.executemany("REPLACE INTO quotes_cache(symbol, market, data, updated_at) VALUES (?,?,?,?)", rows)
@@ -176,7 +263,7 @@ class Repository:
             (
                 symbol, meta.get("market", ""), meta.get("name"), meta.get("sector"),
                 meta.get("exchange"), meta.get("currency"), meta.get("listing_date"),
-                int(bool(meta.get("is_active", 1))), datetime.now().isoformat(),
+                int(bool(meta.get("is_active", 1))), datetime.now(timezone.utc).isoformat(),
             ),
         )
         conn.commit()
@@ -263,7 +350,7 @@ class Repository:
         return [
             T.WatchlistItem(
                 symbol=r["symbol"], market=T.Market(r["market"]),
-                added_at=datetime.fromisoformat(r["added_at"]) if r["added_at"] else datetime.now(),
+                added_at=datetime.fromisoformat(r["added_at"]) if r["added_at"] else datetime.now(timezone.utc),
                 note=r["note"],
             )
             for r in conn.execute("SELECT * FROM watchlist")
@@ -287,12 +374,12 @@ class Repository:
             out.append(T.Position(
                 id=r["id"], symbol=r["symbol"], market=T.Market(r["market"]),
                 shares=r["shares"], cost=r["cost"],
-                added_at=datetime.fromisoformat(r["added_at"]) if r["added_at"] else datetime.now(),
+                added_at=datetime.fromisoformat(r["added_at"]) if r["added_at"] else datetime.now(timezone.utc),
                 closed_at=datetime.fromisoformat(r["closed_at"]) if r["closed_at"] else None,
             ))
         return out
 
-    def get_position(self, position_id: str) -> Optional[T.Position]:
+    def get_position(self, position_id: str) -> T.Position | None:
         conn = get_connection(self.db_path)
         row = conn.execute("SELECT * FROM positions WHERE id=?", (position_id,)).fetchone()
         return self._row_to_position(row) if row is not None else None
@@ -305,7 +392,7 @@ class Repository:
         shares: int,
         average_cost: float,
         added_at: datetime,
-        position_id: Optional[str] = None,
+        position_id: str | None = None,
     ) -> T.Position:
         symbol, market, shares, average_cost, added_at = _validate_position_values(
             symbol=symbol,
@@ -355,9 +442,9 @@ class Repository:
         self,
         position_id: str,
         *,
-        shares: Optional[int] = None,
-        average_cost: Optional[float] = None,
-    ) -> Optional[T.Position]:
+        shares: int | None = None,
+        average_cost: float | None = None,
+    ) -> T.Position | None:
         if type(position_id) is not str or not position_id.strip():
             raise RepositoryValidationError("position_id must be a non-empty string")
         if shares is not None and (type(shares) is not int or shares <= 0):
@@ -413,11 +500,11 @@ class Repository:
             market=T.Market(row["market"]),
             shares=row["shares"],
             cost=row["cost"],
-            added_at=datetime.fromisoformat(row["added_at"]) if row["added_at"] else datetime.now(),
+            added_at=datetime.fromisoformat(row["added_at"]) if row["added_at"] else datetime.now(timezone.utc),
             closed_at=datetime.fromisoformat(row["closed_at"]) if row["closed_at"] else None,
         )
 
-    def load_portfolio_profile(self) -> Optional[UserPortfolioProfile]:
+    def load_portfolio_profile(self) -> UserPortfolioProfile | None:
         conn = get_connection(self.db_path)
         row = conn.execute("SELECT * FROM portfolio_profile WHERE id=1").fetchone()
         if row is None:
@@ -464,8 +551,10 @@ class Repository:
         return profile
 
     # ---- Signals ----
-    def upsert_signal(self, sig: T.Signal) -> None:
-        conn = get_connection(self.db_path)
+    @staticmethod
+    def _upsert_signal_connection(
+        conn: sqlite3.Connection, sig: T.Signal, updated_at: datetime
+    ) -> None:
         conn.execute(
             "REPLACE INTO signals("
             "signal_id, symbol, market, strategy_id, state, state_changed_at, previous_state, reason,"
@@ -479,12 +568,363 @@ class Repository:
                 sig.target_1, sig.target_2, sig.reward_risk, sig.freshness, sig.market_regime,
                 sig.sector_stage, sig.next_trigger, json.dumps(sig.what_changed, ensure_ascii=False),
                 sig.data_status.value, json.dumps(to_jsonable(sig.scores), ensure_ascii=False) if sig.scores else None,
-                datetime.now().isoformat(),
+                updated_at.isoformat(),
             ),
         )
+
+    @staticmethod
+    def _append_signal_history_connection(
+        conn: sqlite3.Connection,
+        signal_id: str,
+        from_state: str | None,
+        to_state: str,
+        at: datetime,
+        reason: str,
+        what_changed: list[str],
+    ) -> None:
+        conn.execute(
+            "INSERT INTO signal_history(signal_id, from_state, to_state, at, reason, what_changed)"
+            " VALUES (?,?,?,?,?,?)",
+            (
+                signal_id,
+                from_state,
+                to_state,
+                at.isoformat(),
+                reason,
+                json.dumps(what_changed, ensure_ascii=False),
+            ),
+        )
+
+    def upsert_signal(self, sig: T.Signal) -> None:
+        conn = get_connection(self.db_path)
+        self._upsert_signal_connection(conn, sig, datetime.now(timezone.utc))
         conn.commit()
 
-    def load_signals(self, states: Optional[list[T.SignalState]] = None) -> dict[str, T.Signal]:
+    @staticmethod
+    def _next_runtime_quarantine_order(conn: sqlite3.Connection) -> int:
+        row = conn.execute(
+            "SELECT COALESCE(MAX(quarantine_order),0)+1 FROM runtime_outbox_quarantine"
+        ).fetchone()
+        return int(row[0])
+
+    @staticmethod
+    def _audit_runtime_outbox_state_connection(conn: sqlite3.Connection) -> None:
+        outbox = conn.execute(
+            "SELECT append_order,artifact_id,runtime_signal_id,transition_event_id,"
+            "payload_json,payload_sha256,created_at "
+            "FROM runtime_transition_outbox ORDER BY append_order"
+        ).fetchall()
+        for expected_order, row in enumerate(outbox, start=1):
+            if int(row["append_order"]) != expected_order:
+                raise RuntimeOutboxError("runtime outbox append order is not contiguous")
+            _require_runtime_id(row["artifact_id"], "artifact_id", sha256=True)
+            _require_runtime_id(row["runtime_signal_id"], "runtime_signal_id")
+            _require_runtime_id(row["transition_event_id"], "transition_event_id", sha256=True)
+            payload = str(row["payload_json"])
+            if _runtime_sha256_text(payload) != row["payload_sha256"]:
+                raise RuntimeOutboxError("runtime outbox payload SHA mismatch")
+            _runtime_utc_from_text(row["created_at"], "outbox created_at")
+        missing_delivery = conn.execute(
+            "SELECT COUNT(*) FROM runtime_transition_outbox o "
+            "LEFT JOIN runtime_outbox_delivery d ON d.artifact_id=o.artifact_id "
+            "WHERE d.artifact_id IS NULL"
+        ).fetchone()[0]
+        orphan_delivery = conn.execute(
+            "SELECT COUNT(*) FROM runtime_outbox_delivery d "
+            "LEFT JOIN runtime_transition_outbox o ON o.artifact_id=d.artifact_id "
+            "WHERE o.artifact_id IS NULL"
+        ).fetchone()[0]
+        if missing_delivery or orphan_delivery:
+            raise RuntimeOutboxError("runtime outbox delivery relation is incomplete")
+        delivery_rows = conn.execute(
+            "SELECT * FROM runtime_outbox_delivery ORDER BY artifact_id"
+        ).fetchall()
+        status_by_artifact: dict[str, str] = {}
+        for row in delivery_rows:
+            artifact_id = _require_runtime_id(
+                row["artifact_id"], "delivery artifact_id", sha256=True
+            )
+            status = str(row["status"])
+            status_by_artifact[artifact_id] = status
+            retry_count = row["retry_count"]
+            if type(retry_count) is not int or retry_count < 0:
+                raise RuntimeOutboxError("runtime retry_count is invalid")
+            lease_owner = row["lease_owner"]
+            lease_expiry = row["lease_expires_at"]
+            next_retry = row["next_retry_at"]
+            last_error = row["last_error_code"]
+            record_hash = row["delivered_record_hash"]
+            audit_id = row["delivered_audit_id"]
+            delivered_at = row["delivered_at"]
+            if lease_owner is not None:
+                _require_runtime_id(lease_owner, "lease_owner")
+            if lease_expiry is not None:
+                _runtime_utc_from_text(lease_expiry, "lease_expires_at")
+            if next_retry is not None:
+                _runtime_utc_from_text(next_retry, "next_retry_at")
+            if last_error is not None:
+                _require_runtime_id(last_error, "last_error_code")
+            if record_hash is not None:
+                _require_runtime_id(record_hash, "delivered_record_hash", sha256=True)
+            if audit_id is not None:
+                _require_runtime_id(audit_id, "delivered_audit_id", sha256=True)
+            if delivered_at is not None:
+                _runtime_utc_from_text(delivered_at, "delivered_at")
+            if status == "PENDING":
+                valid = (
+                    lease_owner is None
+                    and lease_expiry is None
+                    and record_hash is None
+                    and audit_id is None
+                    and delivered_at is None
+                )
+            elif status == "LEASED":
+                valid = (
+                    lease_owner is not None
+                    and lease_expiry is not None
+                    and next_retry is None
+                    and last_error is None
+                    and record_hash is None
+                    and audit_id is None
+                    and delivered_at is None
+                )
+            elif status == "DELIVERED":
+                valid = (
+                    lease_owner is None
+                    and lease_expiry is None
+                    and next_retry is None
+                    and last_error is None
+                    and record_hash is not None
+                    and audit_id is not None
+                    and delivered_at is not None
+                )
+            elif status == "QUARANTINED":
+                valid = (
+                    lease_owner is None
+                    and lease_expiry is None
+                    and next_retry is None
+                    and last_error is not None
+                    and record_hash is None
+                    and audit_id is None
+                    and delivered_at is None
+                )
+            else:
+                valid = False
+            if not valid:
+                raise RuntimeOutboxError("runtime delivery state is inconsistent")
+        maximum_order = len(outbox)
+        for row in conn.execute(
+            "SELECT worker_id,last_contiguous_order,updated_at FROM runtime_outbox_cursor"
+        ).fetchall():
+            _require_runtime_id(row["worker_id"], "cursor worker_id")
+            last_order = row["last_contiguous_order"]
+            if type(last_order) is not int or not 0 <= last_order <= maximum_order:
+                raise RuntimeOutboxError("runtime cursor is outside outbox bounds")
+            _runtime_utc_from_text(row["updated_at"], "cursor updated_at")
+            terminal_count = sum(
+                status_by_artifact[str(item["artifact_id"])]
+                in {"DELIVERED", "QUARANTINED"}
+                for item in outbox[:last_order]
+            )
+            if terminal_count != last_order:
+                raise RuntimeOutboxError("runtime cursor skipped non-terminal delivery")
+        quarantine = conn.execute(
+            "SELECT * FROM runtime_outbox_quarantine ORDER BY quarantine_order"
+        ).fetchall()
+        for expected_order, row in enumerate(quarantine, start=1):
+            if int(row["quarantine_order"]) != expected_order:
+                raise RuntimeOutboxError("runtime quarantine order is not contiguous")
+            _require_runtime_id(row["quarantine_id"], "quarantine_id", sha256=True)
+            _require_runtime_id(row["runtime_signal_id"], "runtime_signal_id")
+            _require_runtime_id(row["reason_code"], "reason_code")
+            _runtime_utc_from_text(row["quarantined_at"], "quarantined_at")
+            metadata_json = str(row["metadata_json"])
+            if _runtime_sha256_text(metadata_json) != row["metadata_sha256"]:
+                raise RuntimeOutboxError("runtime quarantine metadata SHA mismatch")
+            try:
+                metadata = json.loads(metadata_json)
+            except (json.JSONDecodeError, RecursionError) as exc:
+                raise RuntimeOutboxError("runtime quarantine metadata is invalid") from exc
+            if not isinstance(metadata, dict) or _runtime_canonical_json(metadata) != metadata_json:
+                raise RuntimeOutboxError("runtime quarantine metadata is not canonical")
+            artifact_id = row["artifact_id"]
+            append_order = row["outbox_append_order"]
+            if (artifact_id is None) != (append_order is None):
+                raise RuntimeOutboxError("runtime quarantine outbox reference is incomplete")
+            if artifact_id is not None:
+                linked = conn.execute(
+                    "SELECT 1 FROM runtime_transition_outbox WHERE artifact_id=? "
+                    "AND append_order=? AND runtime_signal_id=?",
+                    (artifact_id, append_order, row["runtime_signal_id"]),
+                ).fetchone()
+                if linked is None:
+                    raise RuntimeOutboxError("runtime quarantine outbox reference is invalid")
+
+    @classmethod
+    def _append_runtime_quarantine_connection(
+        cls,
+        conn: sqlite3.Connection,
+        *,
+        runtime_signal_id: str,
+        reason_code: str,
+        quarantined_at: datetime,
+        metadata: dict[str, Any],
+        artifact_id: str | None = None,
+        outbox_append_order: int | None = None,
+    ) -> str:
+        signal_id = _require_runtime_id(runtime_signal_id, "runtime_signal_id")
+        reason = _require_runtime_id(reason_code, "reason_code")
+        artifact = (
+            None
+            if artifact_id is None
+            else _require_runtime_id(artifact_id, "artifact_id", sha256=True)
+        )
+        if outbox_append_order is not None and (
+            type(outbox_append_order) is not int or outbox_append_order < 1
+        ):
+            raise RuntimeOutboxError("outbox_append_order must be a positive integer")
+        at_text = _runtime_utc_text(quarantined_at, "quarantined_at")
+        metadata_json = _runtime_canonical_json(metadata)
+        metadata_sha = _runtime_sha256_text(metadata_json)
+        identity = _runtime_canonical_json(
+            {
+                "artifact_id": artifact,
+                "metadata_sha256": metadata_sha,
+                "nonce": secrets.token_hex(32),
+                "outbox_append_order": outbox_append_order,
+                "quarantined_at": at_text,
+                "reason_code": reason,
+                "runtime_signal_id": signal_id,
+            }
+        )
+        quarantine_id = _runtime_sha256_text(identity)
+        conn.execute(
+            "INSERT INTO runtime_outbox_quarantine("
+            "quarantine_order,quarantine_id,artifact_id,outbox_append_order,"
+            "runtime_signal_id,reason_code,quarantined_at,metadata_json,metadata_sha256)"
+            " VALUES(?,?,?,?,?,?,?,?,?)",
+            (
+                cls._next_runtime_quarantine_order(conn),
+                quarantine_id,
+                artifact,
+                outbox_append_order,
+                signal_id,
+                reason,
+                at_text,
+                metadata_json,
+                metadata_sha,
+            ),
+        )
+        return quarantine_id
+
+    def persist_signal_decision(
+        self,
+        sig: T.Signal,
+        *,
+        changed: bool,
+        observed_at: datetime,
+        artifact: RuntimeDecisionArtifact | None = None,
+        quarantine_reason: str | None = None,
+    ) -> RuntimeSignalPersistence:
+        if type(sig) is not T.Signal:
+            raise RuntimeOutboxError("sig must be the exact Signal type")
+        if type(changed) is not bool:
+            raise RuntimeOutboxError("changed must be boolean")
+        observed = require_utc_clock_value(observed_at, "observed_at")
+        if artifact is not None and type(artifact) is not RuntimeDecisionArtifact:
+            raise RuntimeOutboxError("artifact must be RuntimeDecisionArtifact")
+        if artifact is not None and quarantine_reason is not None:
+            raise RuntimeOutboxError("artifact and quarantine_reason are mutually exclusive")
+        if artifact is not None:
+            artifact = RuntimeDecisionArtifact.from_json_bytes(artifact.to_json_bytes())
+            identity = artifact.identity_dict()
+            if identity["runtime_signal_id"] != sig.signal_id:
+                raise RuntimeOutboxError("artifact runtime signal identity mismatch")
+        conn = get_connection(self.db_path)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            self._upsert_signal_connection(conn, sig, observed)
+            if changed:
+                self._append_signal_history_connection(
+                    conn,
+                    sig.signal_id,
+                    sig.previous_state.value if sig.previous_state else None,
+                    sig.state.value,
+                    sig.state_changed_at,
+                    sig.reason,
+                    sig.what_changed,
+                )
+            if artifact is not None:
+                audit_runtime_evidence_schema(conn)
+                self._audit_runtime_outbox_state_connection(conn)
+                payload_json = artifact.to_json_bytes().decode("utf-8")
+                payload_sha = _runtime_sha256_text(payload_json)
+                existing = conn.execute(
+                    "SELECT append_order,payload_json,payload_sha256 "
+                    "FROM runtime_transition_outbox WHERE artifact_id=?",
+                    (artifact.artifact_id,),
+                ).fetchone()
+                if existing is not None:
+                    if (
+                        str(existing["payload_json"]) != payload_json
+                        or str(existing["payload_sha256"]) != payload_sha
+                    ):
+                        raise RuntimeOutboxError("runtime artifact identity conflict")
+                    append_order = int(existing["append_order"])
+                else:
+                    row = conn.execute(
+                        "SELECT COALESCE(MAX(append_order),0)+1 FROM runtime_transition_outbox"
+                    ).fetchone()
+                    append_order = int(row[0])
+                    identity = artifact.identity_dict()
+                    conn.execute(
+                        "INSERT INTO runtime_transition_outbox("
+                        "append_order,artifact_id,runtime_signal_id,transition_event_id,"
+                        "payload_json,payload_sha256,created_at) VALUES(?,?,?,?,?,?,?)",
+                        (
+                            append_order,
+                            artifact.artifact_id,
+                            sig.signal_id,
+                            identity["transition_event_id"],
+                            payload_json,
+                            payload_sha,
+                            _runtime_utc_text(observed, "created_at"),
+                        ),
+                    )
+                    conn.execute(
+                        "INSERT INTO runtime_outbox_delivery(artifact_id,status,retry_count) "
+                        "VALUES(?,'PENDING',0)",
+                        (artifact.artifact_id,),
+                    )
+                self._audit_runtime_outbox_state_connection(conn)
+                conn.commit()
+                return RuntimeSignalPersistence(
+                    "OUTBOX_PENDING", artifact.artifact_id, append_order, None
+                )
+            quarantine_id: str | None = None
+            if quarantine_reason is not None:
+                audit_runtime_evidence_schema(conn)
+                self._audit_runtime_outbox_state_connection(conn)
+                quarantine_id = self._append_runtime_quarantine_connection(
+                    conn,
+                    runtime_signal_id=sig.signal_id,
+                    reason_code=quarantine_reason,
+                    quarantined_at=observed,
+                    metadata={"stage": "ARTIFACT_BUILD"},
+                )
+                self._audit_runtime_outbox_state_connection(conn)
+            conn.commit()
+            return RuntimeSignalPersistence(
+                "QUARANTINED" if quarantine_id is not None else "NOT_REQUESTED",
+                None,
+                None,
+                quarantine_id,
+            )
+        except Exception:
+            conn.rollback()
+            raise
+
+    def load_signals(self, states: list[T.SignalState] | None = None) -> dict[str, T.Signal]:
         conn = get_connection(self.db_path)
         sql = "SELECT * FROM signals"
         params: list[Any] = []
@@ -497,7 +937,7 @@ class Repository:
             out[r["signal_id"]] = self._row_to_signal(r)
         return out
 
-    def _row_to_signal(self, r) -> Optional[T.Signal]:
+    def _row_to_signal(self, r) -> T.Signal | None:
         scores = from_jsonable(T.ScoreSet, json.loads(r["scores"])) if r["scores"] else None
         try:
             prev = T.SignalState(r["previous_state"]) if r["previous_state"] else None
@@ -506,7 +946,7 @@ class Repository:
         return T.Signal(
             signal_id=r["signal_id"], symbol=r["symbol"], market=T.Market(r["market"]),
             strategy_id=r["strategy_id"], state=T.SignalState(r["state"]),
-            state_changed_at=datetime.fromisoformat(r["state_changed_at"]) if r["state_changed_at"] else datetime.now(),
+            state_changed_at=datetime.fromisoformat(r["state_changed_at"]) if r["state_changed_at"] else datetime.now(timezone.utc),
             previous_state=prev, reason=r["reason"] or "",
             entry_low=r["entry_low"] or 0.0, entry_high=r["entry_high"] or 0.0,
             trigger_price=r["trigger_price"] or 0.0, invalidation_price=r["invalidation_price"] or 0.0,
@@ -519,14 +959,11 @@ class Repository:
             scores=scores,
         )
 
-    def append_signal_history(self, signal_id: str, from_state: Optional[str], to_state: str,
+    def append_signal_history(self, signal_id: str, from_state: str | None, to_state: str,
                               at: datetime, reason: str, what_changed: list[str]) -> None:
         conn = get_connection(self.db_path)
-        conn.execute(
-            "INSERT INTO signal_history(signal_id, from_state, to_state, at, reason, what_changed)"
-            " VALUES (?,?,?,?,?,?)",
-            (signal_id, from_state, to_state, at.isoformat(), reason,
-             json.dumps(what_changed, ensure_ascii=False)),
+        self._append_signal_history_connection(
+            conn, signal_id, from_state, to_state, at, reason, what_changed
         )
         conn.commit()
 
@@ -535,8 +972,249 @@ class Repository:
         return [dict(r) for r in conn.execute(
             "SELECT * FROM signal_history WHERE signal_id=? ORDER BY id ASC", (signal_id,))]
 
+    @staticmethod
+    def _advance_runtime_cursor_connection(
+        conn: sqlite3.Connection, worker_id: str, updated_at: datetime
+    ) -> int:
+        worker = _require_runtime_id(worker_id, "worker_id")
+        row = conn.execute(
+            "SELECT last_contiguous_order FROM runtime_outbox_cursor WHERE worker_id=?",
+            (worker,),
+        ).fetchone()
+        current = 0 if row is None else int(row[0])
+        rows = conn.execute(
+            "SELECT o.append_order,d.status FROM runtime_transition_outbox o "
+            "JOIN runtime_outbox_delivery d ON d.artifact_id=o.artifact_id "
+            "WHERE o.append_order>? ORDER BY o.append_order",
+            (current,),
+        ).fetchall()
+        for item in rows:
+            append_order = int(item["append_order"])
+            if append_order != current + 1:
+                raise RuntimeOutboxError("runtime outbox append order has a gap")
+            if str(item["status"]) not in {"DELIVERED", "QUARANTINED"}:
+                break
+            current = append_order
+        conn.execute(
+            "INSERT INTO runtime_outbox_cursor(worker_id,last_contiguous_order,updated_at) "
+            "VALUES(?,?,?) ON CONFLICT(worker_id) DO UPDATE SET "
+            "last_contiguous_order=excluded.last_contiguous_order,"
+            "updated_at=excluded.updated_at",
+            (worker, current, _runtime_utc_text(updated_at, "cursor_updated_at")),
+        )
+        return current
+
+    def claim_runtime_outbox(
+        self,
+        *,
+        worker_id: str,
+        now: datetime,
+        lease_seconds: int,
+    ) -> RuntimeOutboxLease | None:
+        worker = _require_runtime_id(worker_id, "worker_id")
+        observed = require_utc_clock_value(now, "lease_time")
+        if type(lease_seconds) is not int or lease_seconds < 1 or lease_seconds > 3600:
+            raise RuntimeOutboxError("lease_seconds must be an integer in [1, 3600]")
+        now_text = _runtime_utc_text(observed, "lease_time")
+        expires = observed + timedelta(seconds=lease_seconds)
+        expires_text = _runtime_utc_text(expires, "lease_expires_at")
+        conn = get_connection(self.db_path)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            audit_runtime_evidence_schema(conn)
+            self._audit_runtime_outbox_state_connection(conn)
+            row = conn.execute(
+                "SELECT o.append_order,o.artifact_id,o.runtime_signal_id,"
+                "o.transition_event_id,o.payload_json,o.payload_sha256,d.retry_count "
+                "FROM runtime_transition_outbox o JOIN runtime_outbox_delivery d "
+                "ON d.artifact_id=o.artifact_id WHERE "
+                "(d.status='PENDING' AND (d.next_retry_at IS NULL OR d.next_retry_at<=?)) "
+                "OR (d.status='LEASED' AND d.lease_expires_at<=?) "
+                "ORDER BY o.append_order LIMIT 1",
+                (now_text, now_text),
+            ).fetchone()
+            if row is None:
+                conn.commit()
+                return None
+            result = conn.execute(
+                "UPDATE runtime_outbox_delivery SET status='LEASED',lease_owner=?,"
+                "lease_expires_at=?,next_retry_at=NULL,last_error_code=NULL "
+                "WHERE artifact_id=? AND ((status='PENDING' AND "
+                "(next_retry_at IS NULL OR next_retry_at<=?)) OR "
+                "(status='LEASED' AND lease_expires_at<=?))",
+                (worker, expires_text, row["artifact_id"], now_text, now_text),
+            )
+            if result.rowcount != 1:
+                raise RuntimeOutboxError("runtime outbox lease race")
+            self._audit_runtime_outbox_state_connection(conn)
+            conn.commit()
+            return RuntimeOutboxLease(
+                append_order=int(row["append_order"]),
+                artifact_id=str(row["artifact_id"]),
+                runtime_signal_id=str(row["runtime_signal_id"]),
+                transition_event_id=str(row["transition_event_id"]),
+                payload_json=str(row["payload_json"]),
+                payload_sha256=str(row["payload_sha256"]),
+                retry_count=int(row["retry_count"]),
+                lease_owner=worker,
+                lease_expires_at=expires,
+            )
+        except Exception:
+            conn.rollback()
+            raise
+
+    def mark_runtime_outbox_delivered(
+        self,
+        lease: RuntimeOutboxLease,
+        *,
+        append_result: RuntimeArtifactAppendResult,
+        audit_report: RuntimeArtifactAuditReport,
+        delivered_at: datetime,
+    ) -> int:
+        if type(lease) is not RuntimeOutboxLease:
+            raise RuntimeOutboxError("lease must be RuntimeOutboxLease")
+        if type(append_result) is not RuntimeArtifactAppendResult:
+            raise RuntimeOutboxError("append_result must be RuntimeArtifactAppendResult")
+        if type(audit_report) is not RuntimeArtifactAuditReport:
+            raise RuntimeOutboxError("audit_report must be RuntimeArtifactAuditReport")
+        record = append_result.record
+        if record.artifact.artifact_id != lease.artifact_id:
+            raise RuntimeOutboxError("artifact append result does not match lease")
+        if audit_report.store_id != record.store_id:
+            raise RuntimeOutboxError("artifact audit store identity mismatch")
+        audited = dict(zip(audit_report.artifact_ids, audit_report.record_hashes, strict=True))
+        if audited.get(lease.artifact_id) != record.record_hash:
+            raise RuntimeOutboxError("artifact audit does not cover delivered record")
+        delivered = require_utc_clock_value(delivered_at, "delivered_at")
+        if audit_report.audited_at < record.stored_at or delivered < audit_report.audited_at:
+            raise RuntimeOutboxError("artifact delivery audit time is invalid")
+        conn = get_connection(self.db_path)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            audit_runtime_evidence_schema(conn)
+            self._audit_runtime_outbox_state_connection(conn)
+            result = conn.execute(
+                "UPDATE runtime_outbox_delivery SET status='DELIVERED',lease_owner=NULL,"
+                "lease_expires_at=NULL,next_retry_at=NULL,last_error_code=NULL,"
+                "delivered_record_hash=?,delivered_audit_id=?,delivered_at=? "
+                "WHERE artifact_id=? AND status='LEASED' AND lease_owner=?",
+                (
+                    _require_runtime_id(record.record_hash, "record_hash", sha256=True),
+                    _require_runtime_id(audit_report.audit_id, "audit_id", sha256=True),
+                    _runtime_utc_text(delivered, "delivered_at"),
+                    lease.artifact_id,
+                    lease.lease_owner,
+                ),
+            )
+            if result.rowcount != 1:
+                raise RuntimeOutboxError("runtime outbox delivery lease was lost")
+            cursor = self._advance_runtime_cursor_connection(
+                conn, lease.lease_owner, delivered
+            )
+            self._audit_runtime_outbox_state_connection(conn)
+            conn.commit()
+            return cursor
+        except Exception:
+            conn.rollback()
+            raise
+
+    def mark_runtime_outbox_retry(
+        self,
+        lease: RuntimeOutboxLease,
+        *,
+        error_code: str,
+        retry_at: datetime,
+        observed_at: datetime,
+    ) -> None:
+        if type(lease) is not RuntimeOutboxLease:
+            raise RuntimeOutboxError("lease must be RuntimeOutboxLease")
+        error = _require_runtime_id(error_code, "error_code")
+        retry = require_utc_clock_value(retry_at, "retry_at")
+        observed = require_utc_clock_value(observed_at, "observed_at")
+        if retry <= observed:
+            raise RuntimeOutboxError("retry_at must be after observed_at")
+        conn = get_connection(self.db_path)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            audit_runtime_evidence_schema(conn)
+            self._audit_runtime_outbox_state_connection(conn)
+            result = conn.execute(
+                "UPDATE runtime_outbox_delivery SET status='PENDING',lease_owner=NULL,"
+                "lease_expires_at=NULL,retry_count=retry_count+1,next_retry_at=?,"
+                "last_error_code=? WHERE artifact_id=? AND status='LEASED' AND lease_owner=?",
+                (
+                    _runtime_utc_text(retry, "retry_at"),
+                    error,
+                    lease.artifact_id,
+                    lease.lease_owner,
+                ),
+            )
+            if result.rowcount != 1:
+                raise RuntimeOutboxError("runtime outbox retry lease was lost")
+            self._audit_runtime_outbox_state_connection(conn)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    def mark_runtime_outbox_quarantined(
+        self,
+        lease: RuntimeOutboxLease,
+        *,
+        reason_code: str,
+        quarantined_at: datetime,
+        metadata: dict[str, Any],
+    ) -> tuple[str, int]:
+        if type(lease) is not RuntimeOutboxLease:
+            raise RuntimeOutboxError("lease must be RuntimeOutboxLease")
+        observed = require_utc_clock_value(quarantined_at, "quarantined_at")
+        conn = get_connection(self.db_path)
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            audit_runtime_evidence_schema(conn)
+            self._audit_runtime_outbox_state_connection(conn)
+            quarantine_id = self._append_runtime_quarantine_connection(
+                conn,
+                runtime_signal_id=lease.runtime_signal_id,
+                reason_code=reason_code,
+                quarantined_at=observed,
+                metadata=metadata,
+                artifact_id=lease.artifact_id,
+                outbox_append_order=lease.append_order,
+            )
+            result = conn.execute(
+                "UPDATE runtime_outbox_delivery SET status='QUARANTINED',"
+                "lease_owner=NULL,lease_expires_at=NULL,next_retry_at=NULL,"
+                "last_error_code=?,delivered_record_hash=NULL,"
+                "delivered_audit_id=NULL,delivered_at=NULL "
+                "WHERE artifact_id=? AND status='LEASED' AND lease_owner=?",
+                (reason_code, lease.artifact_id, lease.lease_owner),
+            )
+            if result.rowcount != 1:
+                raise RuntimeOutboxError("runtime outbox quarantine lease was lost")
+            cursor = self._advance_runtime_cursor_connection(
+                conn, lease.lease_owner, observed
+            )
+            self._audit_runtime_outbox_state_connection(conn)
+            conn.commit()
+            return quarantine_id, cursor
+        except Exception:
+            conn.rollback()
+            raise
+
+    def runtime_outbox_cursor(self, worker_id: str) -> int:
+        worker = _require_runtime_id(worker_id, "worker_id")
+        conn = get_connection(self.db_path)
+        audit_runtime_evidence_schema(conn)
+        self._audit_runtime_outbox_state_connection(conn)
+        row = conn.execute(
+            "SELECT last_contiguous_order FROM runtime_outbox_cursor WHERE worker_id=?",
+            (worker,),
+        ).fetchone()
+        return 0 if row is None else int(row[0])
+
     # ---- Provider state ----
-    def save_provider_state(self, provider: str, circuit_state: str, last_success_at: Optional[str],
+    def save_provider_state(self, provider: str, circuit_state: str, last_success_at: str | None,
                             extra: dict) -> None:
         conn = get_connection(self.db_path)
         conn.execute(
@@ -571,11 +1249,11 @@ class Repository:
             (event.get("symbol"), event.get("market"), event.get("event_type"), event.get("direction"),
              event.get("published_at"), event.get("usable_from"), int(bool(event.get("confirmed", False))),
              event.get("weight", 0.0), json.dumps(event.get("payload", {}), ensure_ascii=False),
-             datetime.now().isoformat()),
+             datetime.now(timezone.utc).isoformat()),
         )
         conn.commit()
 
-    def load_events(self, symbol: Optional[str] = None, limit: int = 50) -> list[dict]:
+    def load_events(self, symbol: str | None = None, limit: int = 50) -> list[dict]:
         conn = get_connection(self.db_path)
         if symbol:
             rows = conn.execute("SELECT * FROM events WHERE symbol=? ORDER BY id DESC LIMIT ?",

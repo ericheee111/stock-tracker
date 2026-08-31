@@ -1,13 +1,13 @@
 # ChatGPT Handoff
 
-> Updated: 2026-08-28
-> Workspace: `D:\Projects\stock-tracker`
-> Branch: `main` tracking `origin/main`
+> Updated: 2026-09-01
+> Workspace: `D:\Projects\stock-tracker-wt\codex-stage4g1`
+> Branch: `agent/codex-stage4g1` at local Checkpoint A; not pushed
 > Purpose: preserve the exact continuation state for ChatGPT-led repository work.
 
 ## 1. Active user request
 
-Reassess `docs/PRD-股票辅助判断与交易参考网站.md` under the constraint that a full cloud backend may be difficult or unnecessarily expensive. The accepted direction is to keep collection, computation, SQLite, research, portfolio facts and private APIs local while deploying only the web frontend to low-cost cloud static hosting. Oracle Cloud registration is unavailable and must not remain a dependency.
+Implement Stage 4G.1 Operational Runtime Evidence Adapter in four independently reviewed checkpoints. Checkpoint A is locally implemented and must pause for the same WorkBuddy session's independent review before Checkpoint B begins.
 
 The user also requires this file to be updated after every completed logical task.
 
@@ -454,3 +454,17 @@ Status: `COMPLETED`
 - The implementation commit contains exactly 14 Stage 4G-R0 files: core Outcome/Collection code, focused tests, R0/design/review documents and required AGENTS/PRD/Gap Matrix/Overview/Handoff synchronization.
 - Concurrent `web/**`, `qa/**`, tracked screenshot deletions, responsive screenshots, UI reports, runtime databases, caches and temporary files were neither staged nor reset.
 - This handoff-only delivery record is pushed together with the implementation commit; final local `HEAD`, local `origin/main` and GitHub `refs/heads/main` equality is verified after push and reported to the user.
+
+## 34. Task AB — Stage 4G.1 Checkpoint A Runtime Artifact / Outbox
+
+Status: `CODEX_CHECKPOINT_READY / WORKBUDDY_CHECKPOINT_PASS_PENDING`
+
+- Added an injectable UTC clock and strict canonical `RuntimeDecisionArtifact`. The runtime creates both `artifact_id` and `runtime_episode_fact_id`; caller-supplied promotion fields, naive formal times, non-finite values and unknown fields fail closed. Runtime symbol identity remains explicitly unresolved rather than being promoted to a permanent instrument identity.
+- Added explicit checksum-verified Runtime migration history and `scripts/runtime_migrate.py`. The CLI is dry-run by default, and mutation requires both `--apply` and an explicit non-existing backup path.
+- `SignalManager` now asks `Repository.persist_signal_decision()` to commit current signal state, signal history and immutable outbox payload inside one `BEGIN IMMEDIATE`. Payload mutation/deletion is trigger-blocked; lease, retry, delivery, quarantine and cursor state remain separate. If the evidence lane fails, the transaction rolls back and the ordinary signal/page lane persists without Outcome evidence.
+- Added a separate append-only Artifact Store with stable store identity, no-overwrite atomic publication, contiguous append order, hash chain and exact schema/index/trigger/view/generated-column audit. The worker uses leases for at-least-once delivery, makes the store append idempotent for exactly-once observable publication, quarantines poison payloads and advances its cursor only after durable artifact publication plus a successful store audit.
+- Checkpoint A does not import or invoke Stage 4G Outcome Collection, so an incomplete artifact cannot open a Stage 4G case. Checkpoints B-D, Trusted Outcome Admission, real Strategy Scoreboard, broker/XTP write APIs and auto trading remain absent.
+- Fresh gates: focused Runtime Evidence `17/17`; full Runtime `539 passed, 1 expected live-service skip`; full Quant `724/724`; source distribution `2/2`; Today Mock `17/17`; real temporary Today API/Web `17/17`; Portfolio CRUD `13/13`; changed-file Ruff, compileall and pip check passed; Quant smoke passed with synthetic-only/no-performance-claim boundaries; synthetic benchmark passed without promotion; Runtime and Quant migrations remained dry-run.
+- Production `data/stock_tracker.db` remained byte-identical at SHA-256 `ce4156bf641e061d86ce944167ad2b1347f2437c130a7cf6eee26892fb78cbb7`. No real Provider or production trading data was used.
+- A repository-wide Ruff probe reports 249 pre-existing findings outside the scoped Checkpoint A changes; every changed Python file passes targeted Ruff. No unrelated file was modified to hide those baseline findings.
+- This checkpoint is scoped to one local commit and stops at `CODEX_CHECKPOINT_READY:A`. It must not be pushed, and Checkpoint B must not start, until the same WorkBuddy session reports `WORKBUDDY_CHECKPOINT_PASS:A`.

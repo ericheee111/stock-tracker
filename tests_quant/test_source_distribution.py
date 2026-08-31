@@ -23,6 +23,7 @@ class TestSourceDistribution(unittest.TestCase):
 
         critical = (
             ".gitattributes",
+            "docs/STAGE4G1-CHECKPOINT-A-IMPLEMENTATION.md",
             "scripts/capture_quant_bars.py",
             "scripts/capture_hithink_bars.py",
             "scripts/capture_a_share_corporate_actions.py",
@@ -34,6 +35,7 @@ class TestSourceDistribution(unittest.TestCase):
             "scripts/report_stage2h_market_bar_acceptance.py",
             "scripts/ingest_outcome_ledger.py",
             "scripts/report_outcome_ledger.py",
+            "scripts/runtime_migrate.py",
             "scripts/verify_free_stockdb_sidecar.py",
             "stock_tracker/collector/free_stockdb.py",
             "stock_tracker/collector/hithink_finance.py",
@@ -62,6 +64,12 @@ class TestSourceDistribution(unittest.TestCase):
             "stock_tracker/quant/research/replay.py",
             "stock_tracker/quant/storage/__init__.py",
             "stock_tracker/quant/storage/outcome_ledger.py",
+            "stock_tracker/runtime_evidence/__init__.py",
+            "stock_tracker/runtime_evidence/contracts.py",
+            "stock_tracker/runtime_evidence/store.py",
+            "stock_tracker/runtime_evidence/worker.py",
+            "stock_tracker/storage/migrations_runtime/0001_runtime_evidence_outbox.sql",
+            "stock_tracker/storage/runtime_migrations.py",
             "stock_tracker/quant/storage/migrations/0004_corporate_action_identity.sql",
             "tests_quant/test_adjusted_market_data.py",
             "tests_quant/test_attribution.py",
@@ -105,6 +113,7 @@ class TestSourceDistribution(unittest.TestCase):
             "tests/test_free_stockdb_provider.py",
             "tests/test_hithink_finance_provider.py",
             "tests/test_provider_research_request.py",
+            "tests/test_runtime_evidence.py",
         )
         for relative_path in critical:
             with self.subTest(path=relative_path):

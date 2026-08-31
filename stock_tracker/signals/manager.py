@@ -8,6 +8,9 @@
 
 from __future__ import annotations
 
+import sqlite3
+from datetime import datetime, timezone
+
 from ..core import types as T
 from ..core.config import ConfigBundle
 from ..core.eventbus import get_bus
@@ -17,7 +20,15 @@ from ..decision.action_mapper import map_signal_to_action
 from ..decision.types import DecisionContractError
 from ..features.engine import FeatureEngine
 from ..features.feature_snapshot import build_indicators
-from ..storage.repository import Repository, to_jsonable
+from ..runtime_evidence.contracts import (
+    RuntimeEvidenceContractError,
+    SystemUtcClock,
+    UtcClock,
+    build_runtime_decision_artifact,
+    require_utc_clock_value,
+)
+from ..storage.repository import Repository, RuntimeOutboxError, to_jsonable
+from ..storage.runtime_migrations import RuntimeMigrationError
 from ..strategies.base import SignalCandidate, Strategy
 from ..strategies.s1_breakout import S1Breakout
 from ..strategies.s2_pullback import S2Pullback
@@ -37,17 +48,95 @@ class SignalManager:
     """信号编排器。"""
 
     def __init__(self, bundle: ConfigBundle, store: MarketStore, repository: Repository,
-                 router, feature_engine: FeatureEngine, gate: DataQualityGate) -> None:
+                 router, feature_engine: FeatureEngine, gate: DataQualityGate,
+                 *, clock: UtcClock | None = None) -> None:
         self.bundle = bundle
         self.store = store
         self.repo = repository
         self.router = router
         self.engine = feature_engine
         self.gate = gate
+        self.clock = clock or SystemUtcClock()
         self.risk_gate = RiskGate(bundle)
         self.sm = SignalStateMachine()
         self.strategies: list[Strategy] = self._build_strategies()
         self._bus = get_bus()
+
+    def _publish_runtime_evidence(
+        self,
+        *,
+        signal_id: str,
+        status: str,
+        artifact_id: str | None,
+        error_code: str | None,
+    ) -> None:
+        self._bus.publish(
+            "runtime_evidence",
+            {
+                "schema": "stage4g1-runtime-evidence-status-v1",
+                "runtime_signal_id": signal_id,
+                "status": status,
+                "artifact_id": artifact_id,
+                "error_code": error_code,
+                "auto_trade": False,
+                "stage4g_case_opened": False,
+            },
+        )
+
+    def _persist_signal_with_runtime_evidence(
+        self,
+        *,
+        signal: T.Signal,
+        changed: bool,
+        quote: T.Quote,
+        bars: list[T.Bar],
+        dq: T.DataQuality,
+        decision_requested_at: datetime,
+    ) -> None:
+        observed_at = require_utc_clock_value(self.clock.now(), "observed_at")
+        artifact = None
+        build_error: RuntimeEvidenceContractError | None = None
+        if changed:
+            try:
+                artifact = build_runtime_decision_artifact(
+                    signal=signal,
+                    quote=quote,
+                    bars=bars,
+                    data_quality=dq,
+                    bundle=self.bundle,
+                    decision_requested_at=decision_requested_at,
+                    observed_at=observed_at,
+                    instrument_metadata=self.store.get_instrument(signal.symbol),
+                )
+            except RuntimeEvidenceContractError as exc:
+                build_error = exc
+        try:
+            persisted = self.repo.persist_signal_decision(
+                signal,
+                changed=changed,
+                observed_at=observed_at,
+                artifact=artifact,
+                quarantine_reason=None if build_error is None else build_error.code,
+            )
+        except (RuntimeMigrationError, RuntimeOutboxError, sqlite3.Error) as exc:
+            self.repo.persist_signal_decision(
+                signal,
+                changed=changed,
+                observed_at=observed_at,
+            )
+            self._publish_runtime_evidence(
+                signal_id=signal.signal_id,
+                status="UNAVAILABLE",
+                artifact_id=None,
+                error_code=type(exc).__name__,
+            )
+            return
+        self._publish_runtime_evidence(
+            signal_id=signal.signal_id,
+            status=persisted.evidence_status,
+            artifact_id=persisted.artifact_id,
+            error_code=None if build_error is None else build_error.code,
+        )
 
     def _build_strategies(self) -> list[Strategy]:
         sc = self.bundle.strategies
@@ -246,19 +335,36 @@ class SignalManager:
         heat = self._portfolio_heat()
         produced: list[T.Signal] = []
         for cand in candidates:
+            decision_requested_at = require_utc_clock_value(
+                self.clock.now(), "decision_requested_at"
+            )
             scores = score_signal(ctx)
             decision = self.risk_gate.check(cand, scores, ctx, heat)
             existing = self._existing(symbol, cand.strategy_id)
-            sig = self.sm.decide(existing, cand, decision, scores, ctx)
+            state_machine_now = decision_requested_at
+            if (
+                existing is not None
+                and (
+                    existing.state_changed_at.tzinfo is None
+                    or existing.state_changed_at.utcoffset() is None
+                )
+            ):
+                state_machine_now = datetime.now(timezone.utc).astimezone().replace(tzinfo=None)
+            sig = self.sm.decide(
+                existing, cand, decision, scores, ctx, now=state_machine_now
+            )
             if sig is None:
                 continue
             changed = existing is None or existing.state != sig.state
+            self._persist_signal_with_runtime_evidence(
+                signal=sig,
+                changed=changed,
+                quote=quote,
+                bars=bars,
+                dq=dq,
+                decision_requested_at=decision_requested_at,
+            )
             self.store.upsert_signal(sig)
-            self.repo.upsert_signal(sig)
-            if changed:
-                self.repo.append_signal_history(
-                    sig.signal_id, sig.previous_state.value if sig.previous_state else None,
-                    sig.state.value, sig.state_changed_at, sig.reason, sig.what_changed)
             self._bus.publish("signal", to_jsonable(sig))
             self._publish_monitor_facts(
                 signal=sig,

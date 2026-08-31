@@ -167,6 +167,7 @@ qa/                       前端/可视化 QA 工具
 - Complete Outcome 必须完整满足 requested quantity，覆盖 entry 到 exit 的连续 observable sessions，reference/fill 位于对应 session 区间，holding 不得小于冻结的 `minimum_exit_session_offset`；该 offset 与策略 horizon 独立，实际延迟成交必须保留；TARGET/STOP 必须匹配请求前、horizon 内 first-touch，TIMEOUT 必须到达 horizon 且此前没有水平障碍，同一 PATH point 双触发失败关闭；具体 instrument 的 T+0/T+1 等规则由版本化 policy 提供，不得只按 `Market` 粗暴硬编码；
 - 普通未成交过期、用户撤单、停牌、无交易、休市与数据缺失尚未完成独立 Outcome/Path 合同；不得借用 `DATA_INVALID / ORDER_REJECTED` 或伪造 OHLC 关闭样本；
 - Stage 4G 的 `LIVE_MANUAL`、evidence IDs、hash chain 或 Broker callback 仍只是候选证据，不能替代独立 Authority、签名、权限、PIT、撤销和 source-independence 审查；
+- Stage 4G.1 Checkpoint A 只建立 aware Runtime Decision Artifact、显式 Runtime migration、事务 Outbox、独立 append-only Artifact Store 与 at-least-once Worker；migration 未显式 apply 时 Outcome lane 保持关闭，Artifact 固定 `OUTCOME_EVIDENCE_PENDING` 且不得打开 Stage 4G case。Evidence Vocabulary/Path、Paper/Manual 与完整 Shadow Harness 仍分别属于 Checkpoint B/C/D；
 - 下一执行顺序必须是 `Stage 4G.1 Operational Runtime Evidence Adapter → Stage 4H Trusted Outcome Admission Authority → admitted-sample shadow → Stage 4I Scoreboard API/UI`，不得直接跳过 episode/execution/path 证据来源层；
 - Stage 4H 必须使用独立 append-only Authority Store，不得修改 Stage 4G/4F evidence；Collector/Requester 不能作为唯一 Approver，private key 不得进入仓库/数据库/日志，标准库 SHA/HMAC/布尔字段不得伪装为非对称签名；
 - Admission、撤销、key rotation、policy 与 role 必须按 `known_at/effective_from/recorded_at/as_of` 进行 PIT 查询；在签名后端、独立权限和足够 admitted 样本完成前，Scoreboard 固定 `INSUFFICIENT_REAL_EVIDENCE`。

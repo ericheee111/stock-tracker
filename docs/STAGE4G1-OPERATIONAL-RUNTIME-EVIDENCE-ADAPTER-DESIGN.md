@@ -1,8 +1,12 @@
 # Stage 4G.1 — Operational Runtime Evidence Adapter
 
-状态：`DESIGNED / IMPLEMENTATION_PENDING`
+状态：`CHECKPOINT_A_IMPLEMENTED / WORKBUDDY_REVIEW_PENDING / B-D_PENDING`
 
-日期：2026-08-31
+日期：2026-09-01
+
+Checkpoint A 的实现边界、迁移方式和失败关闭声明见
+`docs/STAGE4G1-CHECKPOINT-A-IMPLEMENTATION.md`。该状态不表示 Stage 4G.1
+整体完成，也不表示真实 Outcome、Trusted Admission 或 Strategy Scoreboard 可用。
 
 ## 1. 目的
 
