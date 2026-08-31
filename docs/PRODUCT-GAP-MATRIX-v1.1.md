@@ -264,7 +264,7 @@ stock_tracker/signals/crowding.py
 | Top-K 多样性 | `NOT_IMPLEMENTED` | 无板块/主题配额 | 需要确定性去重和多样性算法 |
 | 3—5 个首页结果 | `PARTIAL` | 函数有 limit 参数 | 默认 API 仍返回 12；无用户配置 |
 | 完整正反证据 | `PARTIAL` | positive/negative reasons、reason、next_trigger | 缺 hard_blockers、soft_blockers、证据 ID 和版本 |
-| Core Outcome | `LEDGER_ENGINEERING_COMPLETE / RUNTIME_COLLECTION_PENDING` | 已有严格 `SignalOutcome` 合同与 Stage 4F append-only immutable candidate ledger，可保存 entry/exit、MFE/MAE、realized R 和成本结果 | 尚无 Runtime Outcome Collection/Finalization Service、Trusted Admission Authority 和独立真实样本；不能声明真实战绩 |
+| Core Outcome | `RUNTIME_COLLECTION_ENGINEERING_COMPLETE / TRUSTED_ADMISSION_PENDING` | 已有严格 `SignalOutcome`、Stage 4F append-only candidate ledger，以及 Stage 4G Runtime Outcome Collection/Finalization：冻结 runtime episode/decision identity、append-only entry/path/exit/no-entry facts、两阶段终态写入与恢复/幂等合同 | 尚无自动 Broker execution capture、Trusted Admission Authority 和独立真实样本；Live Manual 最多是 candidate，不能声明真实战绩 |
 
 ---
 

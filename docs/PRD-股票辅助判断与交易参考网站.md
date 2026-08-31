@@ -2271,7 +2271,7 @@ docs/STAGE2H-STAGE2J-MARKET-BAR-ACCEPTANCE-DESIGN.md
 
 ## Stage 4：真实策略战绩与 Replay
 
-> **工程状态（2026-08-30）**：Stage 4A Outcome/Scoreboard、Stage 4B PIT Replay、Stage 4C 失败归因/同 cohort 版本比较，以及 Stage 4F append-only Outcome Evidence Ledger 已完成工程实现与独立审查。Stage 4F 只保存 immutable terminal Outcome 候选证据：synthetic/paper 进入 `DIAGNOSTIC_ONLY`，所有 live observation 进入 `LIVE_CANDIDATE`；调用方自报 `verified=true` 不构成可信真实战绩准入。可信 Outcome Admission Authority、真实样本采集服务、Replay UI 和用户解释页仍待后续实现；在可信准入与真实独立样本不足时，真实 Scoreboard 必须保持 `INSUFFICIENT_REAL_EVIDENCE` / `TRUSTED_OUTCOME_ADMISSION_NOT_CONFIGURED`，正式 Replay 在 T3 快照链不完整时必须保持 `BLOCKED`。
+> **工程状态（2026-08-31）**：Stage 4A Outcome/Scoreboard、Stage 4B PIT Replay、Stage 4C 失败归因/同 cohort 版本比较、Stage 4F append-only Outcome Evidence Ledger，以及 Stage 4G Runtime Outcome Collection/Finalization 已完成工程实现。Stage 4G 将 actionable Runtime Signal 冻结为 immutable episode/decision snapshot，通过独立 append-only collection event chain 采集 entry/path/exit/no-entry 事实，并以两阶段 finalization 生成 deterministic `SignalOutcome` 后写入 Stage 4F；相同 runtime `signal_id` 的后续合法 episode 不再被历史 Outcome 永久阻断。Paper 永久进入 `DIAGNOSTIC_ONLY`，Live Manual 最多进入 `LIVE_CANDIDATE`；调用方自报 `verified=true` 仍不构成可信真实战绩准入。Trusted Outcome Admission Authority、自动 Broker execution capture、真实独立样本积累、Replay UI 和用户解释页仍待后续实现；在可信准入与真实独立样本不足时，真实 Scoreboard 必须保持 `INSUFFICIENT_REAL_EVIDENCE` / `TRUSTED_OUTCOME_ADMISSION_NOT_CONFIGURED`，正式 Replay 在 T3 快照链不完整时必须保持 `BLOCKED`。
 
 1. 信号 Outcome；
 2. Strategy Scoreboard；
