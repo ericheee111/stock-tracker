@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal, localcontext
 
 from stock_tracker.core.types import Market
 from stock_tracker.quant.backtest.market_rules import TradeSide
@@ -108,11 +108,13 @@ def _complete_outcome(
     evidence_tier: DataTrustTier | None = None,
     entry_cost: str = "10",
     exit_cost: str = "10",
+    quantity: int = 100,
 ) -> SignalOutcome:
     offset = timedelta(days=recorded_offset_days)
     entry_intent = _intent(
         TradeSide.BUY,
         requested_at=_BASE + offset,
+        quantity=quantity,
         snapshot_character="1",
     )
     entry_fill = _fill(
@@ -121,10 +123,12 @@ def _complete_outcome(
         session_index=10 + recorded_offset_days * 10,
         fill_price="10",
         explicit_cost=entry_cost,
+        quantity=quantity,
     )
     exit_intent = _intent(
         TradeSide.SELL,
         requested_at=_BASE + offset + timedelta(minutes=4),
+        quantity=quantity,
         snapshot_character="1",
     )
     exit_fill = _fill(
@@ -133,6 +137,7 @@ def _complete_outcome(
         session_index=12 + recorded_offset_days * 10,
         fill_price=exit_price,
         explicit_cost=exit_cost,
+        quantity=quantity,
     )
     exit_value = Decimal(exit_price)
     path = (
@@ -519,6 +524,62 @@ class TestStrategyScoreboard(unittest.TestCase):
             Decimal("-0.2"),
         )
         self.assertEqual(len(scoreboard.bucket_metrics), 2)
+
+    def test_process_decimal_context_cannot_change_outcome_or_scoreboard(self) -> None:
+        def build() -> tuple[SignalOutcome, SignalOutcome, StrategyScoreboard]:
+            winner = _complete_outcome(
+                exit_price="10.777777777777777777",
+                signal_suffix="context-winner",
+                entry_cost="1",
+                exit_cost="1",
+                quantity=3,
+            )
+            loser = _complete_outcome(
+                exit_price="9.333333333333333333",
+                signal_suffix="context-loser",
+                recorded_offset_days=1,
+                entry_cost="1",
+                exit_cost="1",
+                quantity=3,
+            )
+            scoreboard = StrategyScoreboard(
+                strategy_id="S1_BREAKOUT",
+                strategy_version="v1",
+                market=Market.A,
+                horizon_sessions=20,
+                model_id="model-v1",
+                evidence_tier=DataTrustTier.OPERATIONAL_VERIFIED,
+                window_start=_BASE,
+                window_end=_BASE + timedelta(days=9),
+                as_of=_BASE + timedelta(days=10),
+                policy=_policy(minimum=2),
+                outcomes=(loser, winner),
+            )
+            return winner, loser, scoreboard
+
+        baseline_winner, baseline_loser, baseline_scoreboard = build()
+        with localcontext() as context:
+            context.prec = 6
+            context.rounding = ROUND_DOWN
+            constrained_winner, constrained_loser, constrained_scoreboard = build()
+
+        self.assertEqual(constrained_winner.metrics, baseline_winner.metrics)
+        self.assertEqual(
+            constrained_winner.risk_per_share,
+            baseline_winner.risk_per_share,
+        )
+        self.assertEqual(constrained_winner.outcome_id, baseline_winner.outcome_id)
+        self.assertEqual(constrained_loser.metrics, baseline_loser.metrics)
+        self.assertEqual(constrained_loser.outcome_id, baseline_loser.outcome_id)
+        self.assertEqual(constrained_scoreboard.metrics, baseline_scoreboard.metrics)
+        self.assertEqual(
+            constrained_scoreboard.bucket_metrics,
+            baseline_scoreboard.bucket_metrics,
+        )
+        self.assertEqual(
+            constrained_scoreboard.scoreboard_id,
+            baseline_scoreboard.scoreboard_id,
+        )
 
     def test_all_winners_do_not_emit_infinite_profit_factor(self) -> None:
         first = _complete_outcome(signal_suffix="first")

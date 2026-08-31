@@ -264,7 +264,7 @@ stock_tracker/signals/crowding.py
 | Top-K 多样性 | `NOT_IMPLEMENTED` | 无板块/主题配额 | 需要确定性去重和多样性算法 |
 | 3—5 个首页结果 | `PARTIAL` | 函数有 limit 参数 | 默认 API 仍返回 12；无用户配置 |
 | 完整正反证据 | `PARTIAL` | positive/negative reasons、reason、next_trigger | 缺 hard_blockers、soft_blockers、证据 ID 和版本 |
-| Core Outcome | `RUNTIME_COLLECTION_ENGINEERING_COMPLETE / TRUSTED_ADMISSION_PENDING` | 已有严格 `SignalOutcome`、Stage 4F append-only candidate ledger，以及 Stage 4G Runtime Outcome Collection/Finalization：冻结 runtime episode/decision identity、append-only entry/path/exit/no-entry facts、两阶段终态写入与恢复/幂等合同 | 尚无自动 Broker execution capture、Trusted Admission Authority 和独立真实样本；Live Manual 最多是 candidate，不能声明真实战绩 |
+| Core Outcome | `MANUAL_COLLECTION_CORE_R0_CLOSED / AUTOMATIC_ADAPTER_PENDING / TRUSTED_ADMISSION_PENDING` | 已有严格 `SignalOutcome`、Stage 4F append-only candidate ledger，以及 Stage 4G Collection schema v3 手工驱动 Core：显式外部 episode fact、request/capture 分离、请求时 PATH point/fact/known-time 前缀、horizon 内 first-touch、双触发失败关闭、offset/horizon 分离、延迟成交保留、原子存储与两阶段并发恢复 | 尚无 transactional outbox、自动 Runtime Decision Artifact/worker、Market Event path collector、Broker execution adapter、普通 entry-expiry/user-cancel 与 no-trade/suspension 合同、Trusted Admission Authority 和独立真实样本；Live Manual 最多是 candidate，不能声明真实战绩 |
 
 ---
 

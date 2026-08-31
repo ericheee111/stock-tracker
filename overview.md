@@ -109,6 +109,7 @@ Stock Tracker 不把“指标很多”或“模型分数很高”当成最终答
 - `free-stockdb` T1 Sidecar 的 loopback/read-only/RAW-only 隔离、发行包审计与差异比较治理合同；
 - Signal Outcome、成本后 Strategy Scoreboard 与 `INSUFFICIENT_REAL_EVIDENCE` 门禁；
 - Stage 4F 独立 append-only Outcome Evidence Ledger：严格 canonical JSON、immutable Record、独立 SQLite Catalog、全局 Hash Chain、并发安全 Audit/Append、exact-cohort candidate Snapshot 与内容寻址报告；live 记录最多进入 `LIVE_CANDIDATE`，未配置可信准入时真实 Scoreboard 始终为空；
+- Stage 4G Collection schema v3 手工驱动 Outcome Collection/Finalization Core：外部 episode fact、request/capture 分离、请求时 PATH point/fact/known-time 前缀、horizon 内 first-touch、同点双触发失败关闭、instrument-level minimum exit offset、延迟成交保留、原子 Collection DB 与两阶段并发恢复；自动 Runtime Adapter、transactional outbox、Broker execution capture 与 Trusted Admission 尚未实现；
 - 正式/诊断 PIT Replay 的输入快照清单与 fail-closed 计划合同；
 - 失败归因和同 cohort 策略版本比较合同；
 - 统一 Decision Quality / Model Promotion Gate；
@@ -208,6 +209,9 @@ Stage 2G Synthetic Golden != 真实跨源行情证据
 Stage 2H non-synthetic-declared != 独立真实来源证明或 T3
 Assurance Declaration != Trusted Authority Approval
 Stage 4F LIVE_CANDIDATE != Trusted Outcome Admission
+Stage 4G LIVE_MANUAL / evidence ID / hash chain != 自动真实执行证明
+Stage 4G manual Core != 已接线的 Runtime Outcome Service
+runtime_episode_fact_id 格式合法 != episode 来源可信
 SignalOutcome verified=true != 独立真实战绩证明
 运行 SQLite Bar != 自动成为训练数据
 free-stockdb 本地可达 != T2/T3 或可训练
@@ -289,7 +293,7 @@ Stage 2B—6A 的后端工程合同已经形成。Hybrid H0—H5 的仓库侧工
 6. **Stage 3C.2：固定真实 free-stockdb Release，审计二进制、首次运行网络、同步源、manifest 和数据许可；**
 7. **HiThink Financial-API：使用真实账户凭据做小窗口 exact-raw 日线捕获与许可审查；保持默认关闭和 T1，不进入 Runtime、训练或再分发；**
 8. **Stage 2H operational：恢复 Eastmoney 可达性或配置另一个获准来源，与已成功的 Tencent A 股 QFQ Capture 形成真实双源 Acceptance；再由仓库外独立主体提供 Source Independence、字段单位/币种、复权、许可、Calendar/Status/Universe/Corporate Action 证据。Stage 2I Declaration 只登记输入，不能替代 Trusted Authority；**
-9. **Stage 4F 追加式 Outcome Evidence Ledger 已完成并通过独立审查；下一步建设 Runtime Outcome Collection/Finalization Service 与独立 Trusted Outcome Admission Authority。可信准入和真实独立样本达到门槛前，Strategy Scoreboard 必须保持 `INSUFFICIENT_REAL_EVIDENCE`；**
+9. **Stage 4F Outcome Ledger 已完成；Stage 4G Collection schema v3 manual Collection/Finalization Core 已完成 R0 收敛，first-touch、PATH fact/known-time 前缀、offset/horizon 分离和延迟成交语义已失败关闭，但自动 Runtime Service 仍未接线。下一步先建设 Stage 4G.1 aware Runtime Decision Artifact、transactional outbox、Market Path/Execution Adapter、worker/cursor/recovery，再进入 Stage 4H 独立签名/撤销/PIT Admission Authority，最后才是 admitted-sample shadow 与 Stage 4I Scoreboard API/UI。可信准入和真实独立样本达到门槛前，Strategy Scoreboard 必须保持 `INSUFFICIENT_REAL_EVIDENCE`；**
 10. **闭环 T3 A 股 Snapshot、正式 PIT Replay、Replay UI、真实新样本 Shadow 与受控模型部署；**
 11. **依次进入 Stage 6B—6F 的港股通、美股独立数据、校准、Scoreboard、Shadow 与真实证据审查。**
 

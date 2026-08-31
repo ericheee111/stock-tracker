@@ -11,12 +11,14 @@ submitted idempotently to Stage 4F.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
 import os
 import re
 import sqlite3
+import tempfile
 import threading
 import unicodedata
 from collections import Counter, defaultdict
@@ -26,6 +28,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +45,7 @@ from stock_tracker.quant.core.outcomes import (
     SignalOutcome,
     TradeIntentEvidence,
 )
-from stock_tracker.quant.core.time import ensure_aware, to_utc
+from stock_tracker.quant.core.time import TimeContractError, ensure_aware, to_utc
 from stock_tracker.quant.data.bar_artifact import DataTrustTier
 
 from .outcome_ledger import (
@@ -54,21 +57,23 @@ from .outcome_ledger import (
     signal_outcome_to_dict,
 )
 
-COLLECTION_SCHEMA = "stage4g-outcome-collection-v1"
+COLLECTION_SCHEMA = "stage4g-outcome-collection-v3"
 COLLECTION_EVENT_SCHEMA = "stage4g-outcome-collection-event-v1"
 RUNTIME_SCORE_SNAPSHOT_SCHEMA = "stage4g-runtime-score-snapshot-v1"
-RUNTIME_SIGNAL_SNAPSHOT_SCHEMA = "stage4g-runtime-signal-snapshot-v1"
-CASE_OPENED_SCHEMA = "stage4g-outcome-case-opened-v1"
+RUNTIME_SIGNAL_SNAPSHOT_SCHEMA = "stage4g-runtime-signal-snapshot-v2"
+CASE_OPENED_SCHEMA = "stage4g-outcome-case-opened-v2"
 ENTRY_FILL_SCHEMA = "stage4g-outcome-entry-fill-v1"
 PATH_POINT_SCHEMA = "stage4g-outcome-path-point-v1"
-EXIT_REQUEST_SCHEMA = "stage4g-outcome-exit-request-v1"
+EXIT_REQUEST_SCHEMA = "stage4g-outcome-exit-request-v3"
 EXIT_FILL_SCHEMA = "stage4g-outcome-exit-fill-v1"
 NO_ENTRY_SCHEMA = "stage4g-outcome-no-entry-v1"
 FINALIZATION_PREPARED_SCHEMA = "stage4g-outcome-finalization-prepared-v1"
 FINALIZED_SCHEMA = "stage4g-outcome-finalized-v1"
-COLLECTION_AUDIT_SCHEMA = "stage4g-outcome-collection-audit-v1"
+COLLECTION_AUDIT_SCHEMA = "stage4g-outcome-collection-audit-v3"
 DEFAULT_COLLECTION_DATABASE = Path("data/outcome-collection.db")
 _MAX_JSON_BYTES = 16 * 1024 * 1024
+_MAX_EVIDENCE_IDS = 1024
+_MAX_SCORE_REASONS = 256
 _ZERO_HASH = "0" * 64
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SAFE_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -77,28 +82,25 @@ _CANONICAL_DECIMAL = re.compile(
 )
 _SQLITE_HEADER = b"SQLite format 3\x00"
 _COLLECTION_META_COLUMNS = (
-    ("key", "TEXT", 0, 1),
-    ("value", "TEXT", 1, 0),
+    ("key", "TEXT", 0, 1, 0),
+    ("value", "TEXT", 1, 0, 0),
 )
 _COLLECTION_EVENT_COLUMNS = (
-    ("append_order", "INTEGER", 0, 1),
-    ("event_hash", "TEXT", 1, 0),
-    ("previous_event_hash", "TEXT", 1, 0),
-    ("case_id", "TEXT", 1, 0),
-    ("event_type", "TEXT", 1, 0),
-    ("fact_id", "TEXT", 1, 0),
-    ("observed_at", "TEXT", 1, 0),
-    ("recorded_by", "TEXT", 1, 0),
-    ("payload_json", "TEXT", 1, 0),
-    ("payload_sha256", "TEXT", 1, 0),
+    ("append_order", "INTEGER", 0, 1, 0),
+    ("event_hash", "TEXT", 1, 0, 0),
+    ("previous_event_hash", "TEXT", 1, 0, 0),
+    ("case_id", "TEXT", 1, 0, 0),
+    ("event_type", "TEXT", 1, 0, 0),
+    ("fact_id", "TEXT", 1, 0, 0),
+    ("observed_at", "TEXT", 1, 0, 0),
+    ("recorded_by", "TEXT", 1, 0, 0),
+    ("payload_json", "TEXT", 1, 0, 0),
+    ("payload_sha256", "TEXT", 1, 0, 0),
 )
 _ACTIONABLE_CAPTURE_STATES = {
     SignalState.TRIGGERED,
     SignalState.ACTIVE,
-    SignalState.OVEREXTENDED,
     SignalState.DATA_INVALID,
-    SignalState.INVALIDATED,
-    SignalState.EXPIRED,
 }
 _ENTRY_FILL_STATES = {SignalState.TRIGGERED, SignalState.ACTIVE}
 _COMPLETE_TERMINAL_REASONS = {
@@ -126,6 +128,15 @@ class OutcomeCollectionError(RuntimeError):
 
 class OutcomeCollectionConflict(OutcomeCollectionError):
     """Raised when immutable collection facts conflict."""
+
+
+def _aware_utc(value: object, name: str) -> datetime:
+    try:
+        return to_utc(ensure_aware(value, name))
+    except (TypeError, TimeContractError) as exc:
+        raise OutcomeCollectionError(
+            f"{name} must be a timezone-aware datetime"
+        ) from exc
 
 
 class OutcomeCollectionMode(StrEnum):
@@ -334,7 +345,7 @@ def _decimal_from_runtime_number(
 
 def _datetime_text(value: datetime) -> str:
     return (
-        to_utc(ensure_aware(value, "datetime"))
+        _aware_utc(value, "datetime")
         .isoformat(timespec="microseconds")
         .replace("+00:00", "Z")
     )
@@ -356,31 +367,49 @@ def _datetime_from_text(value: object, name: str) -> datetime:
 def _runtime_state_time_text(value: datetime) -> tuple[str, bool]:
     if not isinstance(value, datetime):
         raise OutcomeCollectionError("runtime signal state_changed_at must be datetime")
-    if value.tzinfo is not None and value.utcoffset() is not None:
-        return _datetime_text(value), True
-    return value.isoformat(timespec="microseconds"), False
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise OutcomeCollectionError(
+            "runtime signal state_changed_at must be timezone-aware"
+        )
+    return _datetime_text(value), True
 
 
 def _validate_runtime_state_time_text(value: object, aware: bool) -> str:
     text = _require_text(value, "runtime_state_changed_at", max_length=64)
-    if aware:
-        _datetime_from_text(text, "runtime_state_changed_at")
-        return text
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError as exc:
+    if not aware:
         raise OutcomeCollectionError(
-            "runtime_state_changed_at must be ISO-8601"
-        ) from exc
-    if parsed.tzinfo is not None or parsed.utcoffset() is not None:
-        raise OutcomeCollectionError(
-            "runtime_state_changed_at awareness declaration is inconsistent"
+            "runtime_state_changed_at must be timezone-aware"
         )
-    if parsed.isoformat(timespec="microseconds") != text:
-        raise OutcomeCollectionError(
-            "runtime_state_changed_at must use canonical microseconds"
-        )
+    _datetime_from_text(text, "runtime_state_changed_at")
     return text
+
+
+def _stable_runtime_signal_copy(
+    signal: RuntimeTypes.Signal,
+) -> RuntimeTypes.Signal:
+    if type(signal) is not RuntimeTypes.Signal:
+        raise OutcomeCollectionError("signal must be the exact runtime Signal type")
+    scores = signal.scores
+    if scores is not None and type(scores) is not RuntimeTypes.ScoreSet:
+        raise OutcomeCollectionError("runtime scores must be the exact ScoreSet type")
+    if type(scores) is RuntimeTypes.ScoreSet:
+        for reasons in (scores.positive_reasons, scores.negative_reasons):
+            if type(reasons) is list and len(reasons) > _MAX_SCORE_REASONS:
+                raise OutcomeCollectionError(
+                    f"runtime score reasons exceed the {_MAX_SCORE_REASONS}-item bound"
+                )
+    try:
+        first = copy.deepcopy(signal)
+        second = copy.deepcopy(signal)
+    except Exception as exc:
+        raise OutcomeCollectionError(
+            "runtime signal could not be snapshotted safely"
+        ) from exc
+    if first != second:
+        raise OutcomeCollectionError(
+            "runtime signal changed while snapshotting"
+        )
+    return first
 
 
 def _normalize_evidence_ids(
@@ -389,7 +418,27 @@ def _normalize_evidence_ids(
 ) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)):
         raise OutcomeCollectionError(f"{name} must be an iterable of SHA-256 IDs")
-    normalized = tuple(_require_sha256(item, name) for item in values)
+    try:
+        iterator = iter(values)
+    except TypeError as exc:
+        raise OutcomeCollectionError(
+            f"{name} must be an iterable of SHA-256 IDs"
+        ) from exc
+    except Exception as exc:
+        raise OutcomeCollectionError(f"{name} could not be read safely") from exc
+    normalized_items: list[str] = []
+    try:
+        for item in iterator:
+            if len(normalized_items) >= _MAX_EVIDENCE_IDS:
+                raise OutcomeCollectionError(
+                    f"{name} exceeds the {_MAX_EVIDENCE_IDS}-item bound"
+                )
+            normalized_items.append(_require_sha256(item, name))
+    except OutcomeCollectionError:
+        raise
+    except Exception as exc:
+        raise OutcomeCollectionError(f"{name} could not be read safely") from exc
+    normalized = tuple(normalized_items)
     if normalized != tuple(sorted(set(normalized))):
         raise OutcomeCollectionError(f"{name} must be sorted and unique")
     return normalized
@@ -469,6 +518,13 @@ def _path_identity(path: Path, name: str) -> tuple[int, int]:
     return int(status.st_dev), int(status.st_ino)
 
 
+def _connect_sqlite(path: Path, name: str) -> sqlite3.Connection:
+    try:
+        return sqlite3.connect(path, timeout=30.0)
+    except sqlite3.Error as exc:
+        raise OutcomeCollectionError(f"cannot open {name}") from exc
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeScoreSnapshot:
     opportunity: int
@@ -483,11 +539,26 @@ class RuntimeScoreSnapshot:
     def __post_init__(self) -> None:
         for name in ("opportunity", "timing", "risk", "confidence"):
             _require_int(getattr(self, name), name, maximum=100)
+        if type(self.positive_reasons) is not tuple or type(self.negative_reasons) is not tuple:
+            raise OutcomeCollectionError("runtime score reasons must be tuples")
+        if (
+            len(self.positive_reasons) > _MAX_SCORE_REASONS
+            or len(self.negative_reasons) > _MAX_SCORE_REASONS
+        ):
+            raise OutcomeCollectionError(
+                f"runtime score reasons exceed the {_MAX_SCORE_REASONS}-item bound"
+            )
         probability = self.success_probability
         if probability is not None:
-            _require_decimal(probability, "success_probability", nonnegative=True)
+            probability = _require_decimal(
+                probability,
+                "success_probability",
+                nonnegative=True,
+            )
             if probability > 1:
-                raise OutcomeCollectionError("success_probability cannot exceed one")
+                raise OutcomeCollectionError(
+                    "success_probability must be in [0, 1]"
+                )
         positive = tuple(
             _require_text(item, "positive_reason", max_length=1024)
             for item in self.positive_reasons
@@ -528,8 +599,19 @@ class RuntimeScoreSnapshot:
 
     @classmethod
     def from_runtime(cls, value: RuntimeTypes.ScoreSet) -> RuntimeScoreSnapshot:
-        if not isinstance(value, RuntimeTypes.ScoreSet):
-            raise OutcomeCollectionError("runtime signal must carry ScoreSet evidence")
+        if type(value) is not RuntimeTypes.ScoreSet:
+            raise OutcomeCollectionError(
+                "runtime signal must carry the exact ScoreSet type"
+            )
+        if type(value.positive_reasons) is not list or type(value.negative_reasons) is not list:
+            raise OutcomeCollectionError("runtime ScoreSet reasons must be lists")
+        if (
+            len(value.positive_reasons) > _MAX_SCORE_REASONS
+            or len(value.negative_reasons) > _MAX_SCORE_REASONS
+        ):
+            raise OutcomeCollectionError(
+                f"runtime score reasons exceed the {_MAX_SCORE_REASONS}-item bound"
+            )
         probability: Decimal | None = None
         if value.success_probability is not None:
             probability = _decimal_from_runtime_number(
@@ -573,6 +655,13 @@ class RuntimeScoreSnapshot:
         negative = document["negative_reasons"]
         if not isinstance(positive, list) or not isinstance(negative, list):
             raise OutcomeCollectionError("runtime score reasons must be arrays")
+        if (
+            len(positive) > _MAX_SCORE_REASONS
+            or len(negative) > _MAX_SCORE_REASONS
+        ):
+            raise OutcomeCollectionError(
+                f"runtime score reasons exceed the {_MAX_SCORE_REASONS}-item bound"
+            )
         probability_value = document["success_probability"]
         snapshot = cls(
             opportunity=_require_int(document["opportunity"], "opportunity", maximum=100),
@@ -604,6 +693,7 @@ class RuntimeScoreSnapshot:
 @dataclass(frozen=True, slots=True)
 class RuntimeSignalSnapshot:
     signal_id: str
+    runtime_episode_fact_id: str
     symbol: str
     market: Market
     strategy_id: str
@@ -621,9 +711,11 @@ class RuntimeSignalSnapshot:
     runtime_state_changed_at: str
     runtime_state_time_aware: bool
     runtime_data_status: DataStatus
+    entry_requested_at: datetime
     reason: str
     next_trigger: str
     requested_quantity: int
+    minimum_exit_session_offset: int
     entry_execution_policy_id: str
     entry_low: Decimal
     entry_high: Decimal
@@ -639,6 +731,10 @@ class RuntimeSignalSnapshot:
 
     def __post_init__(self) -> None:
         signal_id = _require_text(self.signal_id, "signal_id", max_length=256)
+        runtime_episode_fact_id = _require_sha256(
+            self.runtime_episode_fact_id,
+            "runtime_episode_fact_id",
+        )
         if not isinstance(self.market, Market):
             raise OutcomeCollectionError("market must be Market")
         symbol = _require_symbol(self.symbol, self.market)
@@ -686,8 +782,16 @@ class RuntimeSignalSnapshot:
             self.runtime_state_changed_at,
             aware,
         )
+        state_changed_at = _datetime_from_text(
+            state_time,
+            "runtime_state_changed_at",
+        )
         if not isinstance(self.runtime_data_status, DataStatus):
             raise OutcomeCollectionError("runtime_data_status must be DataStatus")
+        entry_requested_at = _aware_utc(
+            self.entry_requested_at,
+            "entry_requested_at",
+        )
         reason = _require_text(self.reason, "reason")
         next_trigger = _require_text(
             self.next_trigger,
@@ -698,6 +802,11 @@ class RuntimeSignalSnapshot:
             self.requested_quantity,
             "requested_quantity",
             minimum=1,
+        )
+        minimum_exit_session_offset = _require_int(
+            self.minimum_exit_session_offset,
+            "minimum_exit_session_offset",
+            maximum=100000,
         )
         execution_policy = _require_sha256(
             self.entry_execution_policy_id,
@@ -720,17 +829,30 @@ class RuntimeSignalSnapshot:
         )
         if entry_low > entry_high:
             raise OutcomeCollectionError("entry_low cannot exceed entry_high")
-        if invalidation >= min(entry_high, trigger):
+        if invalidation >= entry_low:
             raise OutcomeCollectionError(
-                "invalidation_price must be below the entry/trigger plan"
+                "invalidation_price must be below the planned entry range"
             )
-        if target_1 <= invalidation or target_2 < target_1:
+        if target_1 <= max(entry_high, trigger) or target_2 < target_1:
             raise OutcomeCollectionError("target plan is internally inconsistent")
         if not isinstance(self.scores, RuntimeScoreSnapshot):
             raise OutcomeCollectionError("scores must be RuntimeScoreSnapshot")
-        captured = to_utc(ensure_aware(self.captured_at, "captured_at"))
+        captured = _aware_utc(self.captured_at, "captured_at")
+        if state_changed_at > captured:
+            raise OutcomeCollectionError(
+                "runtime state change cannot be after collection capture"
+            )
+        if entry_requested_at > captured:
+            raise OutcomeCollectionError(
+                "entry request cannot be after collection capture"
+            )
 
         object.__setattr__(self, "signal_id", signal_id)
+        object.__setattr__(
+            self,
+            "runtime_episode_fact_id",
+            runtime_episode_fact_id,
+        )
         object.__setattr__(self, "symbol", symbol)
         object.__setattr__(self, "strategy_id", strategy_id)
         object.__setattr__(self, "strategy_version", strategy_version)
@@ -744,9 +866,15 @@ class RuntimeSignalSnapshot:
         object.__setattr__(self, "market_regime", market_regime)
         object.__setattr__(self, "sector_stage", sector_stage)
         object.__setattr__(self, "runtime_state_changed_at", state_time)
+        object.__setattr__(self, "entry_requested_at", entry_requested_at)
         object.__setattr__(self, "reason", reason)
         object.__setattr__(self, "next_trigger", next_trigger)
         object.__setattr__(self, "requested_quantity", quantity)
+        object.__setattr__(
+            self,
+            "minimum_exit_session_offset",
+            minimum_exit_session_offset,
+        )
         object.__setattr__(self, "entry_execution_policy_id", execution_policy)
         object.__setattr__(self, "entry_low", entry_low)
         object.__setattr__(self, "entry_high", entry_high)
@@ -759,7 +887,7 @@ class RuntimeSignalSnapshot:
         object.__setattr__(
             self,
             "runtime_episode_id",
-            fingerprint(self._episode_payload()),
+            fingerprint(self._episode_identity_payload()),
         )
         object.__setattr__(
             self,
@@ -767,9 +895,16 @@ class RuntimeSignalSnapshot:
             fingerprint(self._identity_payload()),
         )
 
+    def _episode_identity_payload(self) -> dict[str, Any]:
+        return {
+            "schema": "stage4g-runtime-signal-episode-identity-v1",
+            "runtime_episode_fact_id": self.runtime_episode_fact_id,
+        }
+
     def _episode_payload(self) -> dict[str, Any]:
         return {
-            "schema": "stage4g-runtime-signal-episode-v1",
+            "schema": "stage4g-runtime-signal-evidence-v2",
+            "runtime_episode_fact_id": self.runtime_episode_fact_id,
             "signal_id": self.signal_id,
             "symbol": self.symbol,
             "market": self.market.value,
@@ -788,9 +923,11 @@ class RuntimeSignalSnapshot:
             "runtime_state_changed_at": self.runtime_state_changed_at,
             "runtime_state_time_aware": self.runtime_state_time_aware,
             "runtime_data_status": self.runtime_data_status.value,
+            "entry_requested_at": _datetime_text(self.entry_requested_at),
             "reason": self.reason,
             "next_trigger": self.next_trigger,
             "requested_quantity": self.requested_quantity,
+            "minimum_exit_session_offset": self.minimum_exit_session_offset,
             "entry_execution_policy_id": self.entry_execution_policy_id,
             "entry_low": _decimal_text(self.entry_low),
             "entry_high": _decimal_text(self.entry_high),
@@ -823,7 +960,7 @@ class RuntimeSignalSnapshot:
                 symbol=self.symbol,
                 market=self.market,
                 side=TradeSide.BUY,
-                requested_at=self.captured_at,
+                requested_at=self.entry_requested_at,
                 requested_quantity=self.requested_quantity,
                 decision_snapshot_id=self.decision_snapshot_id,
                 execution_policy_id=self.entry_execution_policy_id,
@@ -838,6 +975,8 @@ class RuntimeSignalSnapshot:
         cls,
         signal: RuntimeTypes.Signal,
         *,
+        runtime_episode_fact_id: str,
+        entry_requested_at: datetime,
         strategy_version: str,
         horizon_sessions: int,
         model_id: str | None,
@@ -847,11 +986,11 @@ class RuntimeSignalSnapshot:
         policy_id: str,
         classification_id: str | None,
         requested_quantity: int,
+        minimum_exit_session_offset: int,
         entry_execution_policy_id: str,
         captured_at: datetime,
     ) -> RuntimeSignalSnapshot:
-        if not isinstance(signal, RuntimeTypes.Signal):
-            raise OutcomeCollectionError("signal must be a runtime Signal")
+        signal = _stable_runtime_signal_copy(signal)
         if signal.scores is None:
             raise OutcomeCollectionError("runtime signal has no score evidence")
         if not isinstance(signal.market, Market):
@@ -865,6 +1004,7 @@ class RuntimeSignalSnapshot:
         )
         return cls(
             signal_id=signal.signal_id,
+            runtime_episode_fact_id=runtime_episode_fact_id,
             symbol=signal.symbol,
             market=signal.market,
             strategy_id=signal.strategy_id,
@@ -882,9 +1022,11 @@ class RuntimeSignalSnapshot:
             runtime_state_changed_at=state_time,
             runtime_state_time_aware=state_time_aware,
             runtime_data_status=signal.data_status,
+            entry_requested_at=entry_requested_at,
             reason=signal.reason,
             next_trigger=signal.next_trigger,
             requested_quantity=requested_quantity,
+            minimum_exit_session_offset=minimum_exit_session_offset,
             entry_execution_policy_id=entry_execution_policy_id,
             entry_low=_decimal_from_runtime_number(
                 signal.entry_low,
@@ -931,6 +1073,7 @@ class RuntimeSignalSnapshot:
         expected = {
             "schema",
             "signal_id",
+            "runtime_episode_fact_id",
             "symbol",
             "market",
             "strategy_id",
@@ -948,9 +1091,11 @@ class RuntimeSignalSnapshot:
             "runtime_state_changed_at",
             "runtime_state_time_aware",
             "runtime_data_status",
+            "entry_requested_at",
             "reason",
             "next_trigger",
             "requested_quantity",
+            "minimum_exit_session_offset",
             "entry_execution_policy_id",
             "entry_low",
             "entry_high",
@@ -976,8 +1121,23 @@ class RuntimeSignalSnapshot:
             )
         except ValueError as exc:
             raise OutcomeCollectionError("runtime signal enum is invalid") from exc
+        horizon_sessions = _require_int(
+            document["horizon_sessions"],
+            "horizon_sessions",
+            minimum=1,
+            maximum=100000,
+        )
+        minimum_exit_session_offset = _require_int(
+            document["minimum_exit_session_offset"],
+            "minimum_exit_session_offset",
+            maximum=100000,
+        )
         snapshot = cls(
             signal_id=_require_text(document["signal_id"], "signal_id"),
+            runtime_episode_fact_id=_require_sha256(
+                document["runtime_episode_fact_id"],
+                "runtime_episode_fact_id",
+            ),
             symbol=_require_text(document["symbol"], "symbol"),
             market=_require_market(document["market"]),
             strategy_id=_require_text(document["strategy_id"], "strategy_id"),
@@ -985,11 +1145,7 @@ class RuntimeSignalSnapshot:
                 document["strategy_version"],
                 "strategy_version",
             ),
-            horizon_sessions=_require_int(
-                document["horizon_sessions"],
-                "horizon_sessions",
-                minimum=1,
-            ),
+            horizon_sessions=horizon_sessions,
             model_id=_require_optional_text(document["model_id"], "model_id"),
             instrument_id=_require_text(document["instrument_id"], "instrument_id"),
             identity_fact_id=_require_sha256(
@@ -1021,6 +1177,10 @@ class RuntimeSignalSnapshot:
                 "runtime_state_time_aware",
             ),
             runtime_data_status=data_status,
+            entry_requested_at=_datetime_from_text(
+                document["entry_requested_at"],
+                "entry_requested_at",
+            ),
             reason=_require_text(document["reason"], "reason"),
             next_trigger=_require_text(
                 document["next_trigger"],
@@ -1032,6 +1192,7 @@ class RuntimeSignalSnapshot:
                 "requested_quantity",
                 minimum=1,
             ),
+            minimum_exit_session_offset=minimum_exit_session_offset,
             entry_execution_policy_id=_require_sha256(
                 document["entry_execution_policy_id"],
                 "entry_execution_policy_id",
@@ -1092,7 +1253,7 @@ class RuntimeSignalSnapshot:
 def _case_id(snapshot: RuntimeSignalSnapshot, mode: OutcomeCollectionMode) -> str:
     return fingerprint(
         {
-            "schema": "stage4g-outcome-case-identity-v1",
+            "schema": "stage4g-outcome-case-identity-v2",
             "runtime_episode_id": snapshot.runtime_episode_id,
             "mode": mode.value,
         }
@@ -1124,7 +1285,7 @@ class OutcomeCollectionEvent:
         if not isinstance(self.event_type, OutcomeCollectionEventType):
             raise OutcomeCollectionError("event_type is invalid")
         fact_id = _require_sha256(self.fact_id, "fact_id")
-        observed = to_utc(ensure_aware(self.observed_at, "observed_at"))
+        observed = _aware_utc(self.observed_at, "observed_at")
         actor = _require_safe_token(self.recorded_by, "recorded_by")
         previous = _require_sha256(
             self.previous_event_hash,
@@ -1220,7 +1381,11 @@ class OutcomeCollectionCase:
     event_hashes: tuple[str, ...]
     entry_fill: OutcomeFillEvidence | None
     path: tuple[OutcomePathPoint, ...]
+    path_fact_ids: tuple[str, ...]
+    path_observed_at: tuple[datetime, ...]
     exit_intent: TradeIntentEvidence | None
+    exit_request_path_prefix_count: int | None
+    exit_request_path_prefix_id: str | None
     exit_fill: OutcomeFillEvidence | None
     terminal_reason: OutcomeTerminalReason | None
     prepared_outcome: SignalOutcome | None
@@ -1231,12 +1396,322 @@ class OutcomeCollectionCase:
     finalized_ledger_disposition: OutcomeLedgerDisposition | None
     state: OutcomeCollectionCaseState
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.mode, OutcomeCollectionMode):
+            raise OutcomeCollectionError("collection case mode is invalid")
+        if not isinstance(self.snapshot, RuntimeSignalSnapshot):
+            raise OutcomeCollectionError("collection case snapshot is invalid")
+        case_id = _require_sha256(self.case_id, "case_id")
+        if case_id != _case_id(self.snapshot, self.mode):
+            raise OutcomeCollectionError("collection case identity is invalid")
+        if type(self.event_hashes) is not tuple or not self.event_hashes:
+            raise OutcomeCollectionError(
+                "collection case event hashes must be a non-empty tuple"
+            )
+        event_hashes = tuple(
+            _require_sha256(item, "case event hash") for item in self.event_hashes
+        )
+        if len(event_hashes) != len(set(event_hashes)):
+            raise OutcomeCollectionError("collection case event hashes are duplicated")
+        if type(self.path) is not tuple or any(
+            not isinstance(item, OutcomePathPoint) for item in self.path
+        ):
+            raise OutcomeCollectionError("collection case path is invalid")
+        if (
+            type(self.path_fact_ids) is not tuple
+            or len(self.path_fact_ids) != len(self.path)
+        ):
+            raise OutcomeCollectionError(
+                "collection path fact IDs must align with path points"
+            )
+        path_fact_ids = tuple(
+            _require_sha256(item, "path fact ID") for item in self.path_fact_ids
+        )
+        if len(path_fact_ids) != len(set(path_fact_ids)):
+            raise OutcomeCollectionError("collection path fact IDs are duplicated")
+        if (
+            type(self.path_observed_at) is not tuple
+            or len(self.path_observed_at) != len(self.path)
+        ):
+            raise OutcomeCollectionError("collection path observation times are invalid")
+        path_observed_at = tuple(
+            _aware_utc(value, "path observed_at")
+            for value in self.path_observed_at
+        )
+        if any(
+            known_at < point.timestamp
+            for point, known_at in zip(
+                self.path,
+                path_observed_at,
+                strict=True,
+            )
+        ) or any(
+            current < previous
+            for previous, current in pairwise(path_observed_at)
+        ):
+            raise OutcomeCollectionError(
+                "collection path observation times are inconsistent"
+            )
+        object.__setattr__(self, "path_fact_ids", path_fact_ids)
+        object.__setattr__(self, "path_observed_at", path_observed_at)
+        if self.entry_fill is None:
+            if (
+                self.path
+                or path_fact_ids
+                or path_observed_at
+                or self.exit_intent is not None
+                or self.exit_fill is not None
+            ):
+                raise OutcomeCollectionError(
+                    "collection case without entry cannot contain trade-path facts"
+                )
+            if (
+                self.exit_request_path_prefix_count is not None
+                or self.exit_request_path_prefix_id is not None
+            ):
+                raise OutcomeCollectionError(
+                    "exit request path prefix requires an exit intent"
+                )
+            if (
+                self.terminal_reason is not None
+                and self.terminal_reason not in _NO_ENTRY_TERMINAL_REASONS
+            ):
+                raise OutcomeCollectionError(
+                    "collection no-entry terminal reason is invalid"
+                )
+        else:
+            if not isinstance(self.entry_fill, OutcomeFillEvidence):
+                raise OutcomeCollectionError("collection entry fill is invalid")
+            if (
+                self.entry_fill.intent_id != self.snapshot.entry_intent.intent_id
+                or self.entry_fill.symbol != self.snapshot.symbol
+                or self.entry_fill.market is not self.snapshot.market
+                or self.entry_fill.side is not TradeSide.BUY
+                or self.entry_fill.timestamp < self.snapshot.entry_requested_at
+                or self.entry_fill.quantity != self.snapshot.requested_quantity
+            ):
+                raise OutcomeCollectionError(
+                    "collection entry fill disagrees with the runtime snapshot"
+                )
+            previous_point: OutcomePathPoint | None = None
+            for point in self.path:
+                if (
+                    point.timestamp < self.entry_fill.timestamp
+                    or point.session_index < self.entry_fill.session_index
+                    or (
+                        previous_point is not None
+                        and (
+                            point.timestamp <= previous_point.timestamp
+                            or point.session_index < previous_point.session_index
+                        )
+                    )
+                ):
+                    raise OutcomeCollectionError(
+                        "collection path order is inconsistent"
+                    )
+                previous_point = point
+            if (
+                self.terminal_reason is not None
+                and self.terminal_reason not in _COMPLETE_TERMINAL_REASONS
+            ):
+                raise OutcomeCollectionError(
+                    "collection complete terminal reason is invalid"
+                )
+            if self.exit_intent is not None and (
+                not isinstance(self.exit_intent, TradeIntentEvidence)
+                or self.exit_intent.symbol != self.snapshot.symbol
+                or self.exit_intent.market is not self.snapshot.market
+                or self.exit_intent.side is not TradeSide.SELL
+                or self.exit_intent.requested_quantity != self.entry_fill.quantity
+                or self.exit_intent.requested_at < self.entry_fill.timestamp
+            ):
+                raise OutcomeCollectionError("collection exit intent is invalid")
+            if self.exit_intent is None:
+                if (
+                    self.exit_request_path_prefix_count is not None
+                    or self.exit_request_path_prefix_id is not None
+                ):
+                    raise OutcomeCollectionError(
+                        "exit request path prefix requires an exit intent"
+                    )
+            else:
+                if self.terminal_reason is None:
+                    raise OutcomeCollectionError(
+                        "collection exit intent has no terminal reason"
+                    )
+                prefix_count = _require_int(
+                    self.exit_request_path_prefix_count,
+                    "exit_request_path_prefix_count",
+                    maximum=len(self.path),
+                )
+                known_prefix_count = sum(
+                    known_at <= self.exit_intent.requested_at
+                    for known_at in path_observed_at
+                )
+                if prefix_count != known_prefix_count:
+                    raise OutcomeCollectionError(
+                        "exit request path prefix omits or includes unavailable facts"
+                    )
+                prefix_id = _require_sha256(
+                    self.exit_request_path_prefix_id,
+                    "exit_request_path_prefix_id",
+                )
+                request_path = self.path[:prefix_count]
+                request_path_observed_at = path_observed_at[:prefix_count]
+                request_path_fact_ids = path_fact_ids[:prefix_count]
+                expected_count, expected_prefix_id = _path_prefix_identity(
+                    self.case_id,
+                    request_path,
+                    request_path_fact_ids,
+                    request_path_observed_at,
+                )
+                if prefix_count != expected_count or prefix_id != expected_prefix_id:
+                    raise OutcomeCollectionError(
+                        "exit request path prefix identity is invalid"
+                    )
+                _validate_exit_reason_at_request(
+                    self.snapshot,
+                    self.entry_fill,
+                    self.exit_intent,
+                    self.terminal_reason,
+                    request_path,
+                    request_path_observed_at,
+                )
+            if self.exit_fill is not None:
+                if self.exit_intent is None or not isinstance(
+                    self.exit_fill,
+                    OutcomeFillEvidence,
+                ):
+                    raise OutcomeCollectionError(
+                        "collection exit fill requires a valid exit intent"
+                    )
+                if (
+                    self.exit_fill.intent_id != self.exit_intent.intent_id
+                    or self.exit_fill.symbol != self.snapshot.symbol
+                    or self.exit_fill.market is not self.snapshot.market
+                    or self.exit_fill.side is not TradeSide.SELL
+                    or self.exit_fill.quantity != self.entry_fill.quantity
+                    or self.exit_fill.timestamp < self.exit_intent.requested_at
+                    or self.exit_fill.session_index < self.entry_fill.session_index
+                    or (
+                        self.path
+                        and self.path[-1].timestamp > self.exit_fill.timestamp
+                    )
+                ):
+                    raise OutcomeCollectionError("collection exit fill is invalid")
+                if self.terminal_reason is None:
+                    raise OutcomeCollectionError(
+                        "collection terminal fill has no terminal reason"
+                    )
+                _validate_complete_path_coverage(
+                    self.snapshot,
+                    self.entry_fill,
+                    self.exit_fill,
+                    self.terminal_reason,
+                    self.path,
+                )
+            elif self.terminal_reason is not None and self.exit_intent is None:
+                raise OutcomeCollectionError(
+                    "collection terminal reason requires an exit intent"
+                )
+        if self.exit_intent is None and self.exit_fill is not None:
+            raise OutcomeCollectionError(
+                "collection exit fill cannot exist without an exit intent"
+            )
+        if self.terminal_reason is not None and not isinstance(
+            self.terminal_reason,
+            OutcomeTerminalReason,
+        ):
+            raise OutcomeCollectionError("collection terminal reason is invalid")
+        if self.prepared_outcome is not None:
+            if self.terminal_reason is None:
+                raise OutcomeCollectionError(
+                    "prepared collection case has no terminal reason"
+                )
+            if self.ledger_target_id is None:
+                raise OutcomeCollectionError(
+                    "prepared collection case has no ledger target"
+                )
+            _require_sha256(self.ledger_target_id, "ledger_target_id")
+            expected_outcome = _build_signal_outcome(
+                snapshot=self.snapshot,
+                mode=self.mode,
+                entry_fill=self.entry_fill,
+                path=self.path,
+                exit_intent=self.exit_intent,
+                exit_fill=self.exit_fill,
+                terminal_reason=self.terminal_reason,
+                recorded_at=self.prepared_outcome.recorded_at,
+            )
+            if expected_outcome != self.prepared_outcome:
+                raise OutcomeCollectionError(
+                    "prepared collection outcome disagrees with case facts"
+                )
+        elif self.ledger_target_id is not None:
+            raise OutcomeCollectionError(
+                "collection ledger target requires a prepared outcome"
+            )
+        final_values = (
+            self.finalized_record_hash,
+            self.finalized_record_append_order,
+            self.finalized_ledger_audit_id,
+            self.finalized_ledger_disposition,
+        )
+        if any(value is not None for value in final_values) and not all(
+            value is not None for value in final_values
+        ):
+            raise OutcomeCollectionError(
+                "finalized collection identities must be all present or all absent"
+            )
+        finalized = all(value is not None for value in final_values)
+        if finalized:
+            if self.prepared_outcome is None:
+                raise OutcomeCollectionError(
+                    "finalized collection case requires a prepared outcome"
+                )
+            _require_sha256(self.finalized_record_hash, "finalized_record_hash")
+            _require_int(
+                self.finalized_record_append_order,
+                "finalized_record_append_order",
+                minimum=1,
+            )
+            _require_sha256(
+                self.finalized_ledger_audit_id,
+                "finalized_ledger_audit_id",
+            )
+            if not isinstance(
+                self.finalized_ledger_disposition,
+                OutcomeLedgerDisposition,
+            ):
+                raise OutcomeCollectionError(
+                    "finalized ledger disposition is invalid"
+                )
+        if finalized:
+            expected_state = OutcomeCollectionCaseState.FINALIZED
+        elif self.prepared_outcome is not None:
+            expected_state = OutcomeCollectionCaseState.FINALIZATION_PREPARED
+        elif (
+            self.entry_fill is None and self.terminal_reason is not None
+        ) or self.exit_fill is not None:
+            expected_state = OutcomeCollectionCaseState.TERMINAL_READY
+        elif self.exit_intent is not None:
+            expected_state = OutcomeCollectionCaseState.EXIT_REQUESTED
+        elif self.entry_fill is not None:
+            expected_state = OutcomeCollectionCaseState.OPEN_POSITION
+        else:
+            expected_state = OutcomeCollectionCaseState.AWAITING_ENTRY
+        if self.state is not expected_state:
+            raise OutcomeCollectionError(
+                "collection case state disagrees with immutable facts"
+            )
+
     def as_dict(self) -> dict[str, Any]:
         return {
-            "schema": "stage4g-outcome-collection-case-v1",
+            "schema": "stage4g-outcome-collection-case-v3",
             "case_id": self.case_id,
             "mode": self.mode.value,
             "runtime_signal_id": self.snapshot.signal_id,
+            "runtime_episode_fact_id": self.snapshot.runtime_episode_fact_id,
             "runtime_episode_id": self.snapshot.runtime_episode_id,
             "outcome_signal_id": _outcome_signal_id(self.snapshot, self.mode),
             "decision_snapshot_id": self.snapshot.decision_snapshot_id,
@@ -1246,9 +1721,17 @@ class OutcomeCollectionCase:
                 None if self.entry_fill is None else self.entry_fill.fill_id
             ),
             "path_point_ids": [item.point_id for item in self.path],
+            "path_fact_ids": list(self.path_fact_ids),
+            "path_observed_at": [
+                _datetime_text(value) for value in self.path_observed_at
+            ],
             "exit_intent_id": (
                 None if self.exit_intent is None else self.exit_intent.intent_id
             ),
+            "exit_request_path_prefix_count": (
+                self.exit_request_path_prefix_count
+            ),
+            "exit_request_path_prefix_id": self.exit_request_path_prefix_id,
             "exit_fill_id": None if self.exit_fill is None else self.exit_fill.fill_id,
             "terminal_reason": (
                 None if self.terminal_reason is None else self.terminal_reason.value
@@ -1284,7 +1767,7 @@ class OutcomeCollectionAuditReport:
     audit_id: str = field(init=False)
 
     def __post_init__(self) -> None:
-        audited = to_utc(ensure_aware(self.audited_at, "audited_at"))
+        audited = _aware_utc(self.audited_at, "audited_at")
         hashes = tuple(
             _require_sha256(item, "audit event hash") for item in self.event_hashes
         )
@@ -1371,9 +1854,26 @@ class OutcomeCollectionFinalizationResult:
             raise OutcomeCollectionError("finalization outcome is invalid")
         if not isinstance(self.ledger_result, OutcomeLedgerAppendResult):
             raise OutcomeCollectionError("finalization ledger result is invalid")
-        _require_sha256(self.ledger_audit_id, "ledger_audit_id")
+        audit_id = _require_sha256(self.ledger_audit_id, "ledger_audit_id")
         if not isinstance(self.collection_disposition, OutcomeCollectionDisposition):
             raise OutcomeCollectionError("collection disposition is invalid")
+        if self.case.prepared_outcome != self.outcome:
+            raise OutcomeCollectionError(
+                "finalization result outcome differs from the prepared case"
+            )
+        if self.ledger_result.record.outcome != self.outcome:
+            raise OutcomeCollectionError(
+                "finalization result outcome differs from the outcome ledger"
+            )
+        if (
+            self.case.finalized_record_hash != self.ledger_result.record.record_hash
+            or self.case.finalized_record_append_order
+            != self.ledger_result.record.append_order
+            or self.case.finalized_ledger_audit_id != audit_id
+        ):
+            raise OutcomeCollectionError(
+                "finalization result identities are inconsistent"
+            )
 
 
 def _payload_document(
@@ -1461,7 +1961,7 @@ def _build_entry_fill_payload(
             symbol=snapshot.symbol,
             market=snapshot.market,
             side=TradeSide.BUY,
-            timestamp=to_utc(ensure_aware(timestamp, "entry fill timestamp")),
+            timestamp=_aware_utc(timestamp, "entry fill timestamp"),
             session_index=_require_int(session_index, "session_index"),
             quantity=_require_int(quantity, "quantity", minimum=1),
             reference_price=_require_decimal(
@@ -1588,7 +2088,7 @@ def _build_path_payload(
 ) -> tuple[dict[str, Any], OutcomePathPoint]:
     try:
         point = OutcomePathPoint(
-            timestamp=to_utc(ensure_aware(timestamp, "path timestamp")),
+            timestamp=_aware_utc(timestamp, "path timestamp"),
             session_index=_require_int(session_index, "session_index"),
             high=_require_decimal(high, "high", positive=True),
             low=_require_decimal(low, "low", positive=True),
@@ -1659,9 +2159,148 @@ def _parse_path_point(
     return point, evidence_ids
 
 
+def _path_prefix_identity(
+    case_id: str,
+    path: tuple[OutcomePathPoint, ...],
+    path_fact_ids: tuple[str, ...],
+    path_observed_at: tuple[datetime, ...],
+) -> tuple[int, str]:
+    if type(path) is not tuple or any(
+        not isinstance(point, OutcomePathPoint) for point in path
+    ):
+        raise OutcomeCollectionError("exit request path prefix is invalid")
+    if type(path_fact_ids) is not tuple or len(path_fact_ids) != len(path):
+        raise OutcomeCollectionError(
+            "exit request path fact IDs must align with path points"
+        )
+    fact_ids = tuple(
+        _require_sha256(value, "path fact ID") for value in path_fact_ids
+    )
+    if type(path_observed_at) is not tuple or len(path_observed_at) != len(path):
+        raise OutcomeCollectionError(
+            "exit request path observation times are invalid"
+        )
+    observed_at = tuple(
+        _aware_utc(value, "path observed_at") for value in path_observed_at
+    )
+    if any(
+        known_at < point.timestamp
+        for point, known_at in zip(path, observed_at, strict=True)
+    ) or any(current < previous for previous, current in pairwise(observed_at)):
+        raise OutcomeCollectionError(
+            "exit request path observation times are inconsistent"
+        )
+    point_ids = tuple(point.point_id for point in path)
+    if (
+        len(point_ids) != len(set(point_ids))
+        or len(fact_ids) != len(set(fact_ids))
+    ):
+        raise OutcomeCollectionError("exit request path prefix contains duplicates")
+    return (
+        len(point_ids),
+        fingerprint(
+            {
+                "schema": "stage4g-exit-request-path-prefix-v3",
+                "case_id": _require_sha256(case_id, "case_id"),
+                "path": [
+                    {
+                        "point_id": point.point_id,
+                        "fact_id": fact_id,
+                        "observed_at": _datetime_text(known_at),
+                    }
+                    for point, fact_id, known_at in zip(
+                        path,
+                        fact_ids,
+                        observed_at,
+                        strict=True,
+                    )
+                ],
+            }
+        ),
+    )
+
+
+def _validate_exit_reason_at_request(
+    snapshot: RuntimeSignalSnapshot,
+    entry_fill: OutcomeFillEvidence,
+    exit_intent: TradeIntentEvidence,
+    terminal_reason: OutcomeTerminalReason,
+    request_path: tuple[OutcomePathPoint, ...],
+    request_path_observed_at: tuple[datetime, ...],
+) -> None:
+    if len(request_path_observed_at) != len(request_path):
+        raise OutcomeCollectionError("exit request path knowledge is incomplete")
+    observable = tuple(
+        point
+        for point, known_at in zip(
+            request_path,
+            request_path_observed_at,
+            strict=True,
+        )
+        if point.observable
+        and point.timestamp <= exit_intent.requested_at
+        and known_at <= exit_intent.requested_at
+    )
+    horizon_session_index = entry_fill.session_index + snapshot.horizon_sessions
+    barrier_observable = tuple(
+        point
+        for point in observable
+        if point.session_index <= horizon_session_index
+    )
+    first_barrier: OutcomeTerminalReason | None = None
+    if terminal_reason in {
+        OutcomeTerminalReason.TARGET,
+        OutcomeTerminalReason.STOP,
+        OutcomeTerminalReason.TIMEOUT,
+    }:
+        for point in barrier_observable:
+            target_touched = point.high >= snapshot.target_1
+            stop_touched = point.low <= snapshot.invalidation_price
+            if target_touched and stop_touched:
+                raise OutcomeCollectionError(
+                    "target/stop order is ambiguous within one observable path point"
+                )
+            if target_touched:
+                first_barrier = OutcomeTerminalReason.TARGET
+                break
+            if stop_touched:
+                first_barrier = OutcomeTerminalReason.STOP
+                break
+    if terminal_reason in {
+        OutcomeTerminalReason.TARGET,
+        OutcomeTerminalReason.STOP,
+    }:
+        if first_barrier is None:
+            label = (
+                "target"
+                if terminal_reason is OutcomeTerminalReason.TARGET
+                else "invalidation"
+            )
+            raise OutcomeCollectionError(
+                f"{terminal_reason.value} requires an observable {label} touch "
+                "within the configured horizon by exit request time"
+            )
+        if first_barrier is not terminal_reason:
+            raise OutcomeCollectionError(
+                "terminal reason disagrees with the first observable barrier"
+            )
+    if terminal_reason is OutcomeTerminalReason.TIMEOUT:
+        if not any(
+            point.session_index == horizon_session_index for point in observable
+        ):
+            raise OutcomeCollectionError(
+                "TIMEOUT requires horizon evidence by exit request time"
+            )
+        if first_barrier is not None:
+            raise OutcomeCollectionError(
+                "TIMEOUT conflicts with an earlier observable barrier"
+            )
+
+
 def _build_exit_request_payload(
     case_id: str,
     snapshot: RuntimeSignalSnapshot,
+    entry_fill: OutcomeFillEvidence,
     *,
     requested_at: datetime,
     quantity: int,
@@ -1669,18 +2308,27 @@ def _build_exit_request_payload(
     execution_policy_id: str,
     reason: str,
     evidence_ids: tuple[str, ...],
-) -> tuple[dict[str, Any], TradeIntentEvidence]:
+    request_path: tuple[OutcomePathPoint, ...],
+    request_path_fact_ids: tuple[str, ...],
+    request_path_observed_at: tuple[datetime, ...],
+) -> tuple[dict[str, Any], TradeIntentEvidence, int, str]:
     if terminal_reason not in _COMPLETE_TERMINAL_REASONS:
         raise OutcomeCollectionError("exit terminal_reason is invalid")
-    requested = to_utc(ensure_aware(requested_at, "exit requested_at"))
+    requested = _aware_utc(requested_at, "exit requested_at")
     quantity = _require_int(quantity, "quantity", minimum=1)
     execution_policy = _require_sha256(
         execution_policy_id,
         "execution_policy_id",
     )
     reason = _require_text(reason, "exit reason")
+    path_prefix_count, path_prefix_id = _path_prefix_identity(
+        case_id,
+        request_path,
+        request_path_fact_ids,
+        request_path_observed_at,
+    )
     decision_identity = {
-        "schema": "stage4g-exit-decision-snapshot-v1",
+        "schema": "stage4g-exit-decision-snapshot-v3",
         "case_id": _require_sha256(case_id, "case_id"),
         "requested_at": _datetime_text(requested),
         "quantity": quantity,
@@ -1688,6 +2336,8 @@ def _build_exit_request_payload(
         "execution_policy_id": execution_policy,
         "reason": reason,
         "evidence_ids": list(evidence_ids),
+        "path_prefix_count": path_prefix_count,
+        "path_prefix_id": path_prefix_id,
     }
     decision_snapshot_id = fingerprint(decision_identity)
     try:
@@ -1702,6 +2352,16 @@ def _build_exit_request_payload(
         )
     except OutcomeContractError as exc:
         raise OutcomeCollectionError("exit intent contract is invalid") from exc
+    if not isinstance(entry_fill, OutcomeFillEvidence):
+        raise OutcomeCollectionError("exit request requires an entry fill")
+    _validate_exit_reason_at_request(
+        snapshot,
+        entry_fill,
+        intent,
+        terminal_reason,
+        request_path,
+        request_path_observed_at,
+    )
     payload = _payload_document(
         EXIT_REQUEST_SCHEMA,
         {
@@ -1711,17 +2371,29 @@ def _build_exit_request_payload(
             "execution_policy_id": execution_policy,
             "reason": reason,
             "evidence_ids": list(evidence_ids),
+            "path_prefix_count": path_prefix_count,
+            "path_prefix_id": path_prefix_id,
             "decision_snapshot_id": decision_snapshot_id,
             "intent_id": intent.intent_id,
         },
     )
-    return payload, intent
+    return payload, intent, path_prefix_count, path_prefix_id
 
 
 def _parse_exit_request(
     event: OutcomeCollectionEvent,
     snapshot: RuntimeSignalSnapshot,
-) -> tuple[TradeIntentEvidence, OutcomeTerminalReason, tuple[str, ...]]:
+    entry_fill: OutcomeFillEvidence,
+    request_path: tuple[OutcomePathPoint, ...],
+    request_path_fact_ids: tuple[str, ...],
+    request_path_observed_at: tuple[datetime, ...],
+) -> tuple[
+    TradeIntentEvidence,
+    OutcomeTerminalReason,
+    tuple[str, ...],
+    int,
+    str,
+]:
     payload = _parse_payload(
         event,
         EXIT_REQUEST_SCHEMA,
@@ -1732,6 +2404,8 @@ def _parse_exit_request(
             "execution_policy_id",
             "reason",
             "evidence_ids",
+            "path_prefix_count",
+            "path_prefix_id",
             "decision_snapshot_id",
             "intent_id",
         },
@@ -1746,19 +2420,61 @@ def _parse_exit_request(
     if not isinstance(evidence, list):
         raise OutcomeCollectionError("exit request evidence_ids must be an array")
     evidence_ids = _normalize_evidence_ids(evidence)
-    rebuilt_payload, intent = _build_exit_request_payload(
-        event.case_id,
-        snapshot,
-        requested_at=_datetime_from_text(payload["requested_at"], "requested_at"),
-        quantity=_require_int(payload["quantity"], "quantity", minimum=1),
-        terminal_reason=terminal,
-        execution_policy_id=_require_sha256(
-            payload["execution_policy_id"],
-            "execution_policy_id",
-        ),
-        reason=_require_text(payload["reason"], "reason"),
-        evidence_ids=evidence_ids,
+    if (
+        len(request_path_fact_ids) != len(request_path)
+        or len(request_path_observed_at) != len(request_path)
+    ):
+        raise OutcomeCollectionError("exit request path knowledge is incomplete")
+    requested_at = _datetime_from_text(
+        payload["requested_at"],
+        "requested_at",
     )
+    claimed_path_prefix_count = _require_int(
+        payload["path_prefix_count"],
+        "path_prefix_count",
+        maximum=len(request_path),
+    )
+    known_path_prefix_count = sum(
+        known_at <= requested_at for known_at in request_path_observed_at
+    )
+    if claimed_path_prefix_count != known_path_prefix_count:
+        raise OutcomeCollectionError(
+            "exit request path prefix omits or includes unavailable facts"
+        )
+    request_path = request_path[:claimed_path_prefix_count]
+    request_path_fact_ids = request_path_fact_ids[:claimed_path_prefix_count]
+    request_path_observed_at = request_path_observed_at[:claimed_path_prefix_count]
+    rebuilt_payload, intent, path_prefix_count, path_prefix_id = (
+        _build_exit_request_payload(
+            event.case_id,
+            snapshot,
+            entry_fill,
+            requested_at=requested_at,
+            quantity=_require_int(
+                payload["quantity"],
+                "quantity",
+                minimum=1,
+            ),
+            terminal_reason=terminal,
+            execution_policy_id=_require_sha256(
+                payload["execution_policy_id"],
+                "execution_policy_id",
+            ),
+            reason=_require_text(payload["reason"], "reason"),
+            evidence_ids=evidence_ids,
+            request_path=request_path,
+            request_path_fact_ids=request_path_fact_ids,
+            request_path_observed_at=request_path_observed_at,
+        )
+    )
+    if path_prefix_count != _require_int(
+        payload["path_prefix_count"],
+        "path_prefix_count",
+    ) or path_prefix_id != _require_sha256(
+        payload["path_prefix_id"],
+        "path_prefix_id",
+    ):
+        raise OutcomeCollectionError("exit request path prefix identity mismatch")
     if intent.decision_snapshot_id != _require_sha256(
         payload["decision_snapshot_id"],
         "decision_snapshot_id",
@@ -1766,7 +2482,7 @@ def _parse_exit_request(
         raise OutcomeCollectionError("exit request identity mismatch")
     if rebuilt_payload != dict(payload):
         raise OutcomeCollectionError("exit request payload is not canonical")
-    return intent, terminal, evidence_ids
+    return intent, terminal, evidence_ids, path_prefix_count, path_prefix_id
 
 
 def _build_exit_fill_payload(
@@ -1790,7 +2506,7 @@ def _build_exit_fill_payload(
             symbol=snapshot.symbol,
             market=snapshot.market,
             side=TradeSide.SELL,
-            timestamp=to_utc(ensure_aware(timestamp, "exit fill timestamp")),
+            timestamp=_aware_utc(timestamp, "exit fill timestamp"),
             session_index=_require_int(session_index, "session_index"),
             quantity=_require_int(quantity, "quantity", minimum=1),
             reference_price=_require_decimal(
@@ -1919,7 +2635,7 @@ def _build_no_entry_payload(
         NO_ENTRY_SCHEMA,
         {
             "fact_at": _datetime_text(
-                to_utc(ensure_aware(fact_at, "no-entry fact_at"))
+                _aware_utc(fact_at, "no-entry fact_at")
             ),
             "terminal_reason": terminal_reason.value,
             "reason": _require_text(reason, "no-entry reason"),
@@ -1991,7 +2707,7 @@ def _build_signal_outcome(
             policy_id=snapshot.policy_id,
             market_regime=snapshot.market_regime,
             classification_id=snapshot.classification_id,
-            recorded_at=to_utc(ensure_aware(recorded_at, "recorded_at")),
+            recorded_at=_aware_utc(recorded_at, "recorded_at"),
             entry_intent=snapshot.entry_intent,
             entry_fill=entry_fill,
             exit_intent=exit_intent,
@@ -2084,6 +2800,54 @@ def _build_finalized_payload(
     )
 
 
+def _finalized_payload_values(
+    value: object,
+) -> tuple[str, str, str, int, str, OutcomeLedgerDisposition]:
+    payload = _require_mapping(value, "finalized payload")
+    _require_fields(
+        payload,
+        {
+            "schema",
+            "fact_id",
+            "ledger_target_id",
+            "outcome_id",
+            "record_hash",
+            "record_append_order",
+            "ledger_audit_id",
+            "ledger_disposition",
+        },
+        "finalized payload",
+    )
+    if payload["schema"] != FINALIZED_SCHEMA:
+        raise OutcomeCollectionError("finalized payload schema is invalid")
+    try:
+        disposition = OutcomeLedgerDisposition(
+            _require_text(payload["ledger_disposition"], "ledger_disposition")
+        )
+    except ValueError as exc:
+        raise OutcomeCollectionError("ledger disposition is invalid") from exc
+    target = _require_sha256(payload["ledger_target_id"], "ledger_target_id")
+    outcome_id = _require_sha256(payload["outcome_id"], "outcome_id")
+    record_hash = _require_sha256(payload["record_hash"], "record_hash")
+    append_order = _require_int(
+        payload["record_append_order"],
+        "record_append_order",
+        minimum=1,
+    )
+    audit_id = _require_sha256(payload["ledger_audit_id"], "ledger_audit_id")
+    rebuilt = _build_finalized_payload(
+        ledger_target_id=target,
+        outcome_id=outcome_id,
+        record_hash=record_hash,
+        record_append_order=append_order,
+        ledger_audit_id=audit_id,
+        ledger_disposition=disposition,
+    )
+    if rebuilt != dict(payload):
+        raise OutcomeCollectionError("finalized payload is not canonical")
+    return target, outcome_id, record_hash, append_order, audit_id, disposition
+
+
 def _parse_finalized(
     event: OutcomeCollectionEvent,
 ) -> tuple[str, str, int, str, OutcomeLedgerDisposition]:
@@ -2099,39 +2863,10 @@ def _parse_finalized(
             "ledger_disposition",
         },
     )
-    try:
-        disposition = OutcomeLedgerDisposition(
-            _require_text(payload["ledger_disposition"], "ledger_disposition")
-        )
-    except ValueError as exc:
-        raise OutcomeCollectionError("ledger disposition is invalid") from exc
-    rebuilt = _build_finalized_payload(
-        ledger_target_id=_require_sha256(
-            payload["ledger_target_id"],
-            "ledger_target_id",
-        ),
-        outcome_id=_require_sha256(payload["outcome_id"], "outcome_id"),
-        record_hash=_require_sha256(payload["record_hash"], "record_hash"),
-        record_append_order=_require_int(
-            payload["record_append_order"],
-            "record_append_order",
-            minimum=1,
-        ),
-        ledger_audit_id=_require_sha256(
-            payload["ledger_audit_id"],
-            "ledger_audit_id",
-        ),
-        ledger_disposition=disposition,
+    target, _outcome_id, record_hash, append_order, audit_id, disposition = (
+        _finalized_payload_values(payload)
     )
-    if rebuilt != dict(payload):
-        raise OutcomeCollectionError("finalized payload is not canonical")
-    return (
-        str(payload["ledger_target_id"]),
-        str(payload["record_hash"]),
-        int(payload["record_append_order"]),
-        str(payload["ledger_audit_id"]),
-        disposition,
-    )
+    return target, record_hash, append_order, audit_id, disposition
 
 
 def _require_live_evidence(
@@ -2141,6 +2876,81 @@ def _require_live_evidence(
 ) -> None:
     if mode is OutcomeCollectionMode.LIVE_MANUAL and not evidence_ids:
         raise OutcomeCollectionError(f"live manual {name} requires evidence IDs")
+
+
+def _validate_complete_path_coverage(
+    snapshot: RuntimeSignalSnapshot,
+    entry_fill: OutcomeFillEvidence,
+    exit_fill: OutcomeFillEvidence,
+    terminal_reason: OutcomeTerminalReason,
+    path: tuple[OutcomePathPoint, ...],
+) -> None:
+    holding_sessions = exit_fill.session_index - entry_fill.session_index
+    if holding_sessions < 0:
+        raise OutcomeCollectionError("exit fill precedes the entry session")
+    if holding_sessions < snapshot.minimum_exit_session_offset:
+        raise OutcomeCollectionError(
+            "exit fill violates the frozen minimum session offset"
+        )
+    if (
+        terminal_reason is OutcomeTerminalReason.TIMEOUT
+        and holding_sessions < snapshot.horizon_sessions
+    ):
+        raise OutcomeCollectionError(
+            "TIMEOUT cannot occur before the configured session horizon"
+        )
+    observable_sessions = tuple(
+        sorted({point.session_index for point in path if point.observable})
+    )
+    expected_session_count = holding_sessions + 1
+    if (
+        len(observable_sessions) != expected_session_count
+        or not observable_sessions
+        or observable_sessions[0] != entry_fill.session_index
+        or observable_sessions[-1] != exit_fill.session_index
+        or any(
+            current != previous + 1
+            for previous, current in pairwise(observable_sessions)
+        )
+    ):
+        raise OutcomeCollectionError(
+            "complete outcome requires contiguous observable session coverage"
+        )
+    if any(point.session_index > exit_fill.session_index for point in path):
+        raise OutcomeCollectionError(
+            "collection path contains a point after the exit session"
+        )
+    observable_points = tuple(point for point in path if point.observable)
+    entry_points = tuple(
+        point
+        for point in observable_points
+        if point.session_index == entry_fill.session_index
+    )
+    exit_points = tuple(
+        point
+        for point in observable_points
+        if point.session_index == exit_fill.session_index
+    )
+    entry_low = min(point.low for point in entry_points)
+    entry_high = max(point.high for point in entry_points)
+    exit_low = min(point.low for point in exit_points)
+    exit_high = max(point.high for point in exit_points)
+    if not entry_low <= entry_fill.reference_price <= entry_high:
+        raise OutcomeCollectionError(
+            "entry reference price is outside the observable session range"
+        )
+    if not entry_low <= entry_fill.fill_price <= entry_high:
+        raise OutcomeCollectionError(
+            "entry fill price is outside the observable session range"
+        )
+    if not exit_low <= exit_fill.reference_price <= exit_high:
+        raise OutcomeCollectionError(
+            "exit reference price is outside the observable session range"
+        )
+    if not exit_low <= exit_fill.fill_price <= exit_high:
+        raise OutcomeCollectionError(
+            "exit fill price is outside the observable session range"
+        )
 
 
 def _project_case(events: tuple[OutcomeCollectionEvent, ...]) -> OutcomeCollectionCase:
@@ -2153,7 +2963,11 @@ def _project_case(events: tuple[OutcomeCollectionEvent, ...]) -> OutcomeCollecti
 
     entry_fill: OutcomeFillEvidence | None = None
     path: list[OutcomePathPoint] = []
+    path_fact_ids: list[str] = []
+    path_observed_at: list[datetime] = []
     exit_intent: TradeIntentEvidence | None = None
+    exit_request_path_prefix_count: int | None = None
+    exit_request_path_prefix_id: str | None = None
     exit_fill: OutcomeFillEvidence | None = None
     terminal_reason: OutcomeTerminalReason | None = None
     no_entry = False
@@ -2197,10 +3011,12 @@ def _project_case(events: tuple[OutcomeCollectionEvent, ...]) -> OutcomeCollecti
                     "paper entry requires LIVE or DELAYED runtime data"
                 )
             _require_live_evidence(mode, evidence_ids, "entry fill")
-            if fill.timestamp < snapshot.captured_at or fill.timestamp > event.observed_at:
+            if fill.timestamp < snapshot.entry_requested_at or fill.timestamp > event.observed_at:
                 raise OutcomeCollectionError("entry fill timestamp is outside evidence time")
-            if fill.quantity > snapshot.requested_quantity:
-                raise OutcomeCollectionError("entry fill exceeds requested quantity")
+            if fill.quantity != snapshot.requested_quantity:
+                raise OutcomeCollectionError(
+                    "entry fill must fully satisfy the requested quantity"
+                )
             entry_fill = fill
             continue
         if event.event_type is OutcomeCollectionEventType.NO_ENTRY:
@@ -2208,7 +3024,7 @@ def _project_case(events: tuple[OutcomeCollectionEvent, ...]) -> OutcomeCollecti
                 raise OutcomeCollectionError("no-entry conflicts with collected trade facts")
             fact_at, reason, evidence_ids = _parse_no_entry(event)
             _require_live_evidence(mode, evidence_ids, "no-entry fact")
-            if fact_at < snapshot.captured_at or fact_at > event.observed_at:
+            if fact_at < snapshot.entry_requested_at or fact_at > event.observed_at:
                 raise OutcomeCollectionError("no-entry timestamp is outside evidence time")
             no_entry = True
             terminal_reason = reason
@@ -2220,6 +3036,13 @@ def _project_case(events: tuple[OutcomeCollectionEvent, ...]) -> OutcomeCollecti
             _require_live_evidence(mode, evidence_ids, "path point")
             if point.timestamp < entry_fill.timestamp or point.timestamp > event.observed_at:
                 raise OutcomeCollectionError("path timestamp is outside evidence time")
+            if (
+                exit_intent is not None
+                and event.observed_at <= exit_intent.requested_at
+            ):
+                raise OutcomeCollectionError(
+                    "path observed after the exit request must be strictly later"
+                )
             if path and point.timestamp <= path[-1].timestamp:
                 raise OutcomeCollectionError("path timestamps must be appended in order")
             if path and point.session_index < path[-1].session_index:
@@ -2227,17 +3050,34 @@ def _project_case(events: tuple[OutcomeCollectionEvent, ...]) -> OutcomeCollecti
             if point.session_index < entry_fill.session_index:
                 raise OutcomeCollectionError("path point precedes entry session")
             path.append(point)
+            path_fact_ids.append(event.fact_id)
+            path_observed_at.append(event.observed_at)
             continue
         if event.event_type is OutcomeCollectionEventType.EXIT_REQUESTED:
             if entry_fill is None or no_entry or exit_intent is not None:
                 raise OutcomeCollectionError("exit request is not valid in this case state")
-            intent, reason, evidence_ids = _parse_exit_request(event, snapshot)
+            (
+                intent,
+                reason,
+                evidence_ids,
+                path_prefix_count,
+                path_prefix_id,
+            ) = _parse_exit_request(
+                event,
+                snapshot,
+                entry_fill,
+                tuple(path),
+                tuple(path_fact_ids),
+                tuple(path_observed_at),
+            )
             _require_live_evidence(mode, evidence_ids, "exit request")
             if intent.requested_at < entry_fill.timestamp or intent.requested_at > event.observed_at:
                 raise OutcomeCollectionError("exit request timestamp is outside evidence time")
             if intent.requested_quantity != entry_fill.quantity:
                 raise OutcomeCollectionError("exit request must close the filled quantity")
             exit_intent = intent
+            exit_request_path_prefix_count = path_prefix_count
+            exit_request_path_prefix_id = path_prefix_id
             terminal_reason = reason
             continue
         if event.event_type is OutcomeCollectionEventType.EXIT_FILLED:
@@ -2253,6 +3093,15 @@ def _project_case(events: tuple[OutcomeCollectionEvent, ...]) -> OutcomeCollecti
                 raise OutcomeCollectionError("exit fill precedes entry session")
             if path and path[-1].timestamp > fill.timestamp:
                 raise OutcomeCollectionError("collected path extends after exit fill")
+            if terminal_reason is None:
+                raise OutcomeCollectionError("exit fill has no terminal reason")
+            _validate_complete_path_coverage(
+                snapshot,
+                entry_fill,
+                fill,
+                terminal_reason,
+                tuple(path),
+            )
             exit_fill = fill
             continue
         if event.event_type is OutcomeCollectionEventType.FINALIZATION_PREPARED:
@@ -2334,7 +3183,11 @@ def _project_case(events: tuple[OutcomeCollectionEvent, ...]) -> OutcomeCollecti
         event_hashes=tuple(event.event_hash for event in events),
         entry_fill=entry_fill,
         path=tuple(path),
+        path_fact_ids=tuple(path_fact_ids),
+        path_observed_at=tuple(path_observed_at),
         exit_intent=exit_intent,
+        exit_request_path_prefix_count=exit_request_path_prefix_count,
+        exit_request_path_prefix_id=exit_request_path_prefix_id,
         exit_fill=exit_fill,
         terminal_reason=terminal_reason,
         prepared_outcome=prepared_outcome,
@@ -2354,14 +3207,15 @@ def _validate_events(
     expected_previous = _ZERO_HASH
     previous_observed: datetime | None = None
     seen_hashes: set[str] = set()
-    seen_facts: set[str] = set()
+    seen_facts: set[tuple[str, str]] = set()
     by_case: dict[str, list[OutcomeCollectionEvent]] = defaultdict(list)
     for expected_order, event in enumerate(events, start=1):
         if event.append_order != expected_order:
             raise OutcomeCollectionError("collection append order is not contiguous")
         if event.previous_event_hash != expected_previous:
             raise OutcomeCollectionError("collection event hash chain is broken")
-        if event.event_hash in seen_hashes or event.fact_id in seen_facts:
+        fact_key = (event.case_id, event.fact_id)
+        if event.event_hash in seen_hashes or fact_key in seen_facts:
             raise OutcomeCollectionError("collection event/fact identity is duplicated")
         if event.observed_at > cutoff:
             raise OutcomeCollectionError(
@@ -2374,13 +3228,24 @@ def _validate_events(
         expected_previous = event.event_hash
         previous_observed = event.observed_at
         seen_hashes.add(event.event_hash)
-        seen_facts.add(event.fact_id)
+        seen_facts.add(fact_key)
         by_case[event.case_id].append(event)
 
     cases = tuple(
         _project_case(tuple(case_events))
         for _case_id_value, case_events in sorted(by_case.items())
     )
+    episode_evidence: dict[str, dict[str, Any]] = {}
+    for case in cases:
+        evidence = case.snapshot._episode_payload()
+        existing_evidence = episode_evidence.setdefault(
+            case.snapshot.runtime_episode_id,
+            evidence,
+        )
+        if existing_evidence != evidence:
+            raise OutcomeCollectionError(
+                "runtime episode fact has inconsistent immutable evidence"
+            )
     outcome_signal_ids = tuple(
         _outcome_signal_id(case.snapshot, case.mode) for case in cases
     )
@@ -2392,38 +3257,72 @@ def _validate_events(
 def _catalog_columns(
     connection: sqlite3.Connection,
     table: str,
-) -> tuple[tuple[str, str, int, int], ...]:
+) -> tuple[tuple[str, str, int, int, int], ...]:
     return tuple(
-        (str(row[1]), str(row[2]).upper(), int(row[3]), int(row[5]))
-        for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+        (
+            str(row[1]),
+            str(row[2]).upper(),
+            int(row[3]),
+            int(row[5]),
+            int(row[6]),
+        )
+        for row in connection.execute(f"PRAGMA table_xinfo({table})").fetchall()
     )
 
 
-def _unique_index_columns(
+def _index_contracts(
     connection: sqlite3.Connection,
     table: str,
-) -> set[tuple[str, ...]]:
-    result: set[tuple[str, ...]] = set()
+) -> set[tuple[str | None, tuple[str, ...], int, str, int]]:
+    result: set[tuple[str | None, tuple[str, ...], int, str, int]] = set()
     for row in connection.execute(f"PRAGMA index_list({table})").fetchall():
-        if int(row[2]) != 1:
-            continue
         index_name = str(row[1])
+        unique = int(row[2])
+        origin = str(row[3])
+        partial = int(row[4])
         columns = tuple(
-            str(item[2])
+            str(item[1])
             for item in connection.execute(
-                f"PRAGMA index_info('{index_name}')"
+                "SELECT seqno,name FROM pragma_index_info(?) ORDER BY seqno",
+                (index_name,),
             ).fetchall()
         )
-        result.add(columns)
+        result.add(
+            (
+                index_name if origin == "c" else None,
+                columns,
+                unique,
+                origin,
+                partial,
+            )
+        )
     return result
 
 
-def _validate_collection_schema(connection: sqlite3.Connection) -> None:
+def _validate_collection_schema_unchecked(connection: sqlite3.Connection) -> None:
+    journal_mode_row = connection.execute("PRAGMA journal_mode").fetchone()
+    journal_mode = "" if journal_mode_row is None else str(journal_mode_row[0]).lower()
+    if journal_mode != "delete":
+        raise OutcomeCollectionError(
+            "collection database journal mode must remain DELETE"
+        )
     quick_check = tuple(
         str(row[0]) for row in connection.execute("PRAGMA quick_check").fetchall()
     )
     if quick_check != ("ok",):
         raise OutcomeCollectionError("collection SQLite integrity check failed")
+    executable_objects = tuple(
+        (str(row[0]), str(row[1]), str(row[2]))
+        for row in connection.execute(
+            "SELECT type,name,tbl_name FROM sqlite_master "
+            "WHERE type IN ('trigger','view') AND name NOT LIKE 'sqlite_%' "
+            "ORDER BY type,name,tbl_name"
+        ).fetchall()
+    )
+    if executable_objects:
+        raise OutcomeCollectionError(
+            "collection database contains forbidden executable schema objects"
+        )
     tables = {
         str(row[0])
         for row in connection.execute(
@@ -2449,19 +3348,33 @@ def _validate_collection_schema(connection: sqlite3.Connection) -> None:
     )
     if metadata != (("schema", COLLECTION_SCHEMA),):
         raise OutcomeCollectionError("collection schema identity is invalid")
-    required_unique = {("event_hash",), ("fact_id",)}
-    if not required_unique.issubset(
-        _unique_index_columns(connection, "outcome_collection_events")
-    ):
-        raise OutcomeCollectionError("collection uniqueness constraints are invalid")
-    query_index = tuple(
-        str(item[2])
-        for item in connection.execute(
-            "PRAGMA index_info('idx_outcome_collection_case')"
-        ).fetchall()
-    )
-    if query_index != ("case_id", "append_order"):
-        raise OutcomeCollectionError("collection case index is invalid")
+    expected_indexes = {
+        (None, ("event_hash",), 1, "u", 0),
+        (None, ("case_id", "fact_id"), 1, "u", 0),
+        (
+            "idx_outcome_collection_case",
+            ("case_id", "append_order"),
+            0,
+            "c",
+            0,
+        ),
+    }
+    if _index_contracts(
+        connection,
+        "outcome_collection_events",
+    ) != expected_indexes:
+        raise OutcomeCollectionError("collection index contracts are invalid")
+
+
+def _validate_collection_schema(connection: sqlite3.Connection) -> None:
+    try:
+        _validate_collection_schema_unchecked(connection)
+    except OutcomeCollectionError:
+        raise
+    except sqlite3.Error as exc:
+        raise OutcomeCollectionError(
+            "collection database schema validation failed"
+        ) from exc
 
 
 class OutcomeCollectionService:
@@ -2506,6 +3419,10 @@ class OutcomeCollectionService:
             self.database_path,
             "outcome collection database",
         )
+        # Bind the service only after the final published/existing file has been
+        # validated under its frozen filesystem identity.
+        with self._connection():
+            pass
 
     def _initialize(self) -> None:
         schema = """
@@ -2522,44 +3439,97 @@ class OutcomeCollectionService:
                 'CASE_OPENED','ENTRY_FILLED','PATH_POINT','EXIT_REQUESTED',
                 'EXIT_FILLED','NO_ENTRY','FINALIZATION_PREPARED','FINALIZED'
             )),
-            fact_id TEXT NOT NULL UNIQUE,
+            fact_id TEXT NOT NULL,
             observed_at TEXT NOT NULL,
             recorded_by TEXT NOT NULL,
             payload_json TEXT NOT NULL,
-            payload_sha256 TEXT NOT NULL
+            payload_sha256 TEXT NOT NULL,
+            UNIQUE(case_id, fact_id)
         );
         CREATE INDEX idx_outcome_collection_case
             ON outcome_collection_events(case_id, append_order);
         """
-        with closing(sqlite3.connect(self.database_path, timeout=30.0)) as connection:
-            connection.row_factory = sqlite3.Row
-            connection.execute("PRAGMA busy_timeout=30000")
-            connection.execute("BEGIN EXCLUSIVE")
+        if self.database_path.exists():
+            if not self.database_path.is_file() or _is_link(self.database_path):
+                raise OutcomeCollectionError(
+                    "outcome collection database must be a regular non-link file"
+                )
+            with closing(
+                _connect_sqlite(
+                    self.database_path,
+                    "outcome collection database",
+                )
+            ) as connection:
+                connection.row_factory = sqlite3.Row
+                _validate_collection_schema(connection)
+            return
+
+        checked_parent = _checked_path(
+            self.database_path.parent,
+            "outcome collection database parent",
+        )
+        if (
+            checked_parent != self.database_path.parent.resolve(strict=False)
+            or _is_link(self.database_path.parent)
+        ):
+            raise OutcomeCollectionError(
+                "outcome collection database parent identity changed"
+            )
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=self.database_path.parent,
+            prefix=f".{self.database_path.name}.init-",
+            suffix=".db",
+        )
+        os.close(descriptor)
+        temporary = Path(temporary_name)
+        try:
+            with closing(
+                _connect_sqlite(
+                    temporary,
+                    "outcome collection initialization database",
+                )
+            ) as connection:
+                connection.row_factory = sqlite3.Row
+                connection.execute("PRAGMA journal_mode=DELETE")
+                connection.execute("PRAGMA synchronous=FULL")
+                connection.executescript(schema)
+                connection.execute(
+                    "INSERT INTO outcome_collection_meta(key,value) "
+                    "VALUES('schema',?)",
+                    (COLLECTION_SCHEMA,),
+                )
+                connection.commit()
+                _validate_collection_schema(connection)
+            with temporary.open("rb+") as stream:
+                os.fsync(stream.fileno())
             try:
-                tables = {
-                    str(row[0])
-                    for row in connection.execute(
-                        "SELECT name FROM sqlite_master WHERE type='table' "
-                        "AND name NOT LIKE 'sqlite_%'"
-                    ).fetchall()
-                }
-                if not tables:
-                    connection.executescript(schema)
-                    connection.execute(
-                        "INSERT INTO outcome_collection_meta(key,value) "
-                        "VALUES('schema',?)",
-                        (COLLECTION_SCHEMA,),
-                    )
-                    connection.commit()
-                else:
-                    _validate_collection_schema(connection)
-                    connection.rollback()
-            except Exception:
-                connection.rollback()
-                raise
-        with closing(sqlite3.connect(self.database_path, timeout=30.0)) as connection:
-            connection.row_factory = sqlite3.Row
-            _validate_collection_schema(connection)
+                os.link(temporary, self.database_path)
+            except FileExistsError:
+                pass
+            except OSError as exc:
+                raise OutcomeCollectionError(
+                    "cannot atomically publish the outcome collection database"
+                ) from exc
+            if not self.database_path.is_file() or _is_link(self.database_path):
+                raise OutcomeCollectionError(
+                    "outcome collection database publish target is invalid"
+                )
+            with closing(
+                _connect_sqlite(
+                    self.database_path,
+                    "outcome collection database",
+                )
+            ) as connection:
+                connection.row_factory = sqlite3.Row
+                _validate_collection_schema(connection)
+        finally:
+            for suffix in ("", "-journal", "-wal", "-shm"):
+                candidate = Path(str(temporary) + suffix)
+                if candidate.exists() and not _is_link(candidate):
+                    try:
+                        candidate.unlink()
+                    except OSError:
+                        pass
 
     def _assert_database_identity(self) -> None:
         checked = _checked_path(
@@ -2602,13 +3572,28 @@ class OutcomeCollectionService:
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
         self._assert_database_identity()
-        connection = sqlite3.connect(self.database_path, timeout=30.0)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA busy_timeout=30000")
+        connection = _connect_sqlite(
+            self.database_path,
+            "outcome collection database",
+        )
         try:
+            # The pathname can be replaced after the pre-open check but before
+            # sqlite3 opens it.  Verify again while the connection is live, and
+            # once more before a successful caller can observe completion.
+            self._assert_database_identity()
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute("PRAGMA busy_timeout=30000")
+            connection.execute("PRAGMA synchronous=FULL")
             _validate_collection_schema(connection)
             yield connection
+            self._assert_database_identity()
+        except OutcomeCollectionError:
+            raise
+        except sqlite3.Error as exc:
+            raise OutcomeCollectionError(
+                "outcome collection database operation failed"
+            ) from exc
         finally:
             connection.close()
 
@@ -2621,6 +3606,10 @@ class OutcomeCollectionService:
         connection: sqlite3.Connection,
         cutoff: datetime,
     ) -> tuple[tuple[OutcomeCollectionEvent, ...], tuple[OutcomeCollectionCase, ...]]:
+        # Callers hold a SQLite transaction before reaching this boundary.  Recheck
+        # the schema under that lock so a trigger/view cannot be inserted between
+        # connection setup and the evidence read/write transaction.
+        _validate_collection_schema(connection)
         events = self._rows_to_events(
             connection.execute(
                 "SELECT * FROM outcome_collection_events ORDER BY append_order"
@@ -2638,9 +3627,17 @@ class OutcomeCollectionService:
     @staticmethod
     def _event_for_fact(
         events: tuple[OutcomeCollectionEvent, ...],
+        case_id: str,
         fact_id: str,
     ) -> OutcomeCollectionEvent | None:
-        return next((event for event in events if event.fact_id == fact_id), None)
+        return next(
+            (
+                event
+                for event in events
+                if event.case_id == case_id and event.fact_id == fact_id
+            ),
+            None,
+        )
 
     def _append_event_locked(
         self,
@@ -2655,7 +3652,7 @@ class OutcomeCollectionService:
     ) -> tuple[OutcomeCollectionEvent, OutcomeCollectionDisposition]:
         payload_json = _canonical_json_text(payload)
         fact_id = _require_sha256(payload.get("fact_id"), "fact_id")
-        existing = self._event_for_fact(events, fact_id)
+        existing = self._event_for_fact(events, case_id, fact_id)
         if existing is not None:
             if (
                 existing.case_id != case_id
@@ -2717,6 +3714,8 @@ class OutcomeCollectionService:
         signal: RuntimeTypes.Signal,
         *,
         mode: OutcomeCollectionMode,
+        runtime_episode_fact_id: str,
+        entry_requested_at: datetime,
         strategy_version: str,
         horizon_sessions: int,
         model_id: str | None,
@@ -2726,6 +3725,7 @@ class OutcomeCollectionService:
         policy_id: str,
         classification_id: str | None,
         requested_quantity: int,
+        minimum_exit_session_offset: int,
         entry_execution_policy_id: str,
         recorded_by: str,
     ) -> OutcomeCollectionAppendResult:
@@ -2735,10 +3735,12 @@ class OutcomeCollectionService:
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
-                observed = to_utc(ensure_aware(_utc_now(), "captured_at"))
+                observed = _aware_utc(_utc_now(), "captured_at")
                 events, cases = self._load_validated(connection, observed)
                 provisional = RuntimeSignalSnapshot.from_runtime_signal(
                     signal,
+                    runtime_episode_fact_id=runtime_episode_fact_id,
+                    entry_requested_at=entry_requested_at,
                     strategy_version=strategy_version,
                     horizon_sessions=horizon_sessions,
                     model_id=model_id,
@@ -2748,6 +3750,7 @@ class OutcomeCollectionService:
                     policy_id=policy_id,
                     classification_id=classification_id,
                     requested_quantity=requested_quantity,
+                    minimum_exit_session_offset=minimum_exit_session_offset,
                     entry_execution_policy_id=entry_execution_policy_id,
                     captured_at=observed,
                 )
@@ -2758,6 +3761,8 @@ class OutcomeCollectionService:
                     if existing is None
                     else RuntimeSignalSnapshot.from_runtime_signal(
                         signal,
+                        runtime_episode_fact_id=runtime_episode_fact_id,
+                        entry_requested_at=entry_requested_at,
                         strategy_version=strategy_version,
                         horizon_sessions=horizon_sessions,
                         model_id=model_id,
@@ -2767,6 +3772,7 @@ class OutcomeCollectionService:
                         policy_id=policy_id,
                         classification_id=classification_id,
                         requested_quantity=requested_quantity,
+                        minimum_exit_session_offset=minimum_exit_session_offset,
                         entry_execution_policy_id=entry_execution_policy_id,
                         captured_at=existing.snapshot.captured_at,
                     )
@@ -2807,7 +3813,7 @@ class OutcomeCollectionService:
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
-                observed = to_utc(ensure_aware(_utc_now(), "observed_at"))
+                observed = _aware_utc(_utc_now(), "observed_at")
                 events, cases = self._load_validated(connection, observed)
                 case = self._case_map(cases).get(case_id)
                 if case is None:
@@ -2922,15 +3928,45 @@ class OutcomeCollectionService:
         normalized_evidence = _normalize_evidence_ids(evidence_ids)
 
         def build(case: OutcomeCollectionCase, _observed: datetime) -> Mapping[str, Any]:
-            payload, _intent = _build_exit_request_payload(
-                case.case_id,
-                case.snapshot,
-                requested_at=requested_at,
-                quantity=quantity,
-                terminal_reason=terminal_reason,
-                execution_policy_id=execution_policy_id,
-                reason=reason,
-                evidence_ids=normalized_evidence,
+            if case.entry_fill is None:
+                raise OutcomeCollectionError(
+                    "exit request requires a collected entry fill"
+                )
+            requested = _aware_utc(requested_at, "exit requested_at")
+            request_path = case.path
+            request_path_fact_ids = case.path_fact_ids
+            request_path_observed_at = case.path_observed_at
+            if case.exit_intent is None:
+                prefix_count = sum(
+                    known_at <= requested for known_at in case.path_observed_at
+                )
+                request_path = case.path[:prefix_count]
+                request_path_fact_ids = case.path_fact_ids[:prefix_count]
+                request_path_observed_at = case.path_observed_at[:prefix_count]
+            else:
+                prefix_count = _require_int(
+                    case.exit_request_path_prefix_count,
+                    "exit_request_path_prefix_count",
+                    maximum=len(case.path),
+                )
+                request_path = case.path[:prefix_count]
+                request_path_fact_ids = case.path_fact_ids[:prefix_count]
+                request_path_observed_at = case.path_observed_at[:prefix_count]
+            payload, _intent, _path_prefix_count, _path_prefix_id = (
+                _build_exit_request_payload(
+                    case.case_id,
+                    case.snapshot,
+                    case.entry_fill,
+                    requested_at=requested,
+                    quantity=quantity,
+                    terminal_reason=terminal_reason,
+                    execution_policy_id=execution_policy_id,
+                    reason=reason,
+                    evidence_ids=normalized_evidence,
+                    request_path=request_path,
+                    request_path_fact_ids=request_path_fact_ids,
+                    request_path_observed_at=request_path_observed_at,
+                )
             )
             return payload
 
@@ -3015,25 +4051,45 @@ class OutcomeCollectionService:
     def _ledger_target_id(self, ledger: OutcomeLedger) -> str:
         if not isinstance(ledger, OutcomeLedger):
             raise OutcomeCollectionError("ledger must be OutcomeLedger")
-        catalog = ledger.catalog_path.resolve(strict=False)
-        root = ledger.record_root.resolve(strict=False)
-        if self.database_path == catalog or _same_existing_file(
-            self.database_path,
-            catalog,
-            "collection/outcome ledger database",
-        ):
+        try:
+            ledger._assert_record_root_identity()
+            ledger._assert_catalog_identity()
+            root = ledger.record_root.resolve(strict=False)
+            catalog = ledger.catalog_path.resolve(strict=False)
+            root_identity = ledger._record_root_identity
+            catalog_identity = ledger._catalog_identity
+            if catalog_identity is None:
+                raise OutcomeLedgerError("outcome catalog identity is unavailable")
+            if self.database_path == catalog or _same_existing_file(
+                self.database_path,
+                catalog,
+                "collection/outcome ledger database",
+            ):
+                raise OutcomeCollectionError(
+                    "collection database cannot be the outcome ledger catalog"
+                )
+            if self.database_path == root or self.database_path.is_relative_to(root):
+                raise OutcomeCollectionError(
+                    "collection database cannot be inside the outcome ledger record root"
+                )
+            # Recheck after reading both paths and frozen identities.  A replacement
+            # between validation and target construction must not bind the case to
+            # the replacement ledger.
+            ledger._assert_record_root_identity()
+            ledger._assert_catalog_identity()
+        except OutcomeCollectionError:
+            raise
+        except OutcomeLedgerError as exc:
             raise OutcomeCollectionError(
-                "collection database cannot be the outcome ledger catalog"
-            )
-        if self.database_path == root or self.database_path.is_relative_to(root):
-            raise OutcomeCollectionError(
-                "collection database cannot be inside the outcome ledger record root"
-            )
+                "outcome ledger target identity is invalid"
+            ) from exc
         return fingerprint(
             {
-                "schema": "stage4g-outcome-ledger-target-v1",
+                "schema": "stage4g-outcome-ledger-target-v2",
                 "record_root": str(root),
+                "record_root_identity": list(root_identity),
                 "catalog_path": str(catalog),
+                "catalog_identity": list(catalog_identity),
             }
         )
 
@@ -3049,7 +4105,7 @@ class OutcomeCollectionService:
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
-                observed = to_utc(ensure_aware(_utc_now(), "recorded_at"))
+                observed = _aware_utc(_utc_now(), "recorded_at")
                 events, cases = self._load_validated(connection, observed)
                 case = self._case_map(cases).get(case_id)
                 if case is None:
@@ -3059,6 +4115,7 @@ class OutcomeCollectionService:
                         raise OutcomeCollectionConflict(
                             "case was prepared for a different outcome ledger"
                         )
+                    connection.rollback()
                     return (
                         case,
                         case.prepared_outcome,
@@ -3106,13 +4163,59 @@ class OutcomeCollectionService:
         *,
         recorded_by: str,
     ) -> tuple[OutcomeCollectionCase, OutcomeCollectionDisposition]:
-        result = self._append_fact(
-            case_id,
-            OutcomeCollectionEventType.FINALIZED,
-            lambda _case, _observed: payload,
-            recorded_by=recorded_by,
+        case_id = _require_sha256(case_id, "case_id")
+        actor = _require_safe_token(recorded_by, "recorded_by")
+        target, outcome_id, record_hash, append_order, _audit_id, _disposition = (
+            _finalized_payload_values(payload)
         )
-        return self.get_case(case_id), result.disposition
+        with self._lock, self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                observed = _aware_utc(_utc_now(), "observed_at")
+                events, cases = self._load_validated(connection, observed)
+                case = self._case_map(cases).get(case_id)
+                if case is None:
+                    raise OutcomeCollectionError(
+                        "outcome collection case does not exist"
+                    )
+                if case.state is OutcomeCollectionCaseState.FINALIZED:
+                    if (
+                        case.ledger_target_id != target
+                        or case.prepared_outcome is None
+                        or case.prepared_outcome.outcome_id != outcome_id
+                        or case.finalized_record_hash != record_hash
+                        or case.finalized_record_append_order != append_order
+                    ):
+                        raise OutcomeCollectionConflict(
+                            "finalized case disagrees with immutable ledger evidence"
+                        )
+                    connection.rollback()
+                    return case, OutcomeCollectionDisposition.IDEMPOTENT
+                if case.state is not OutcomeCollectionCaseState.FINALIZATION_PREPARED:
+                    raise OutcomeCollectionError(
+                        "FINALIZED requires a prepared collection case"
+                    )
+                event, disposition = self._append_event_locked(
+                    connection,
+                    events,
+                    case_id=case_id,
+                    event_type=OutcomeCollectionEventType.FINALIZED,
+                    payload=payload,
+                    observed_at=observed,
+                    recorded_by=actor,
+                )
+                new_events = (
+                    events
+                    if disposition is OutcomeCollectionDisposition.IDEMPOTENT
+                    else (*events, event)
+                )
+                new_cases = _validate_events(new_events, observed)
+                finalized_case = self._case_map(new_cases)[case_id]
+                connection.commit()
+                return finalized_case, disposition
+            except Exception:
+                connection.rollback()
+                raise
 
     def finalize(
         self,
@@ -3175,11 +4278,13 @@ class OutcomeCollectionService:
             payload,
             recorded_by=recorded_by,
         )
+        if case.finalized_ledger_audit_id is None:
+            raise OutcomeCollectionError("finalized case has no ledger audit identity")
         return OutcomeCollectionFinalizationResult(
             case=case,
             outcome=outcome,
             ledger_result=ledger_result,
-            ledger_audit_id=ledger_audit.audit_id,
+            ledger_audit_id=case.finalized_ledger_audit_id,
             collection_disposition=disposition,
         )
 
@@ -3187,7 +4292,7 @@ class OutcomeCollectionService:
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
-                observed = to_utc(ensure_aware(_utc_now(), "audited_at"))
+                observed = _aware_utc(_utc_now(), "audited_at")
                 events, cases = self._load_validated(connection, observed)
                 connection.rollback()
             except Exception:
@@ -3213,7 +4318,7 @@ class OutcomeCollectionService:
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
-                observed = to_utc(ensure_aware(_utc_now(), "audited_at"))
+                observed = _aware_utc(_utc_now(), "audited_at")
                 _events, cases = self._load_validated(connection, observed)
                 connection.rollback()
                 return cases

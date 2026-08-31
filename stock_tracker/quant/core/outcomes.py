@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Context, Decimal, localcontext
 from enum import StrEnum
 
 from stock_tracker.core.types import Market
@@ -22,6 +22,7 @@ from .time import ensure_aware, to_utc
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _ZERO = Decimal(0)
+_DECIMAL_CONTEXT = Context(prec=50, rounding=ROUND_HALF_EVEN)
 
 
 class OutcomeContractError(ValueError):
@@ -129,7 +130,8 @@ def _median(values: tuple[Decimal, ...]) -> Decimal:
     middle = len(ordered) // 2
     if len(ordered) % 2:
         return ordered[middle]
-    return (ordered[middle - 1] + ordered[middle]) / Decimal(2)
+    with localcontext(_DECIMAL_CONTEXT):
+        return (ordered[middle - 1] + ordered[middle]) / Decimal(2)
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,12 +204,13 @@ class OutcomeFillEvidence:
         _require_decimal(self.reference_price, "reference_price", positive=True)
         _require_decimal(self.fill_price, "fill_price", positive=True)
         _require_decimal(self.explicit_cost, "explicit_cost", nonnegative=True)
-        adverse_delta = (
-            self.fill_price - self.reference_price
-            if self.side is TradeSide.BUY
-            else self.reference_price - self.fill_price
-        )
-        implicit_cost = max(_ZERO, adverse_delta) * Decimal(self.quantity)
+        with localcontext(_DECIMAL_CONTEXT):
+            adverse_delta = (
+                self.fill_price - self.reference_price
+                if self.side is TradeSide.BUY
+                else self.reference_price - self.fill_price
+            )
+            implicit_cost = max(_ZERO, adverse_delta) * Decimal(self.quantity)
         object.__setattr__(self, "implicit_cost", implicit_cost)
         for name in (
             "execution_rule_id",
@@ -241,16 +244,18 @@ class OutcomeFillEvidence:
 
     @property
     def total_cost(self) -> Decimal:
-        return self.explicit_cost + self.implicit_cost
+        with localcontext(_DECIMAL_CONTEXT):
+            return self.explicit_cost + self.implicit_cost
 
     @property
     def all_in_unit_price(self) -> Decimal:
         # The observed fill already contains slippage/impact versus reference.
         # Only explicit fees are added/subtracted here to avoid double counting.
-        unit_explicit_cost = self.explicit_cost / Decimal(self.quantity)
-        if self.side is TradeSide.BUY:
-            return self.fill_price + unit_explicit_cost
-        return self.fill_price - unit_explicit_cost
+        with localcontext(_DECIMAL_CONTEXT):
+            unit_explicit_cost = self.explicit_cost / Decimal(self.quantity)
+            if self.side is TradeSide.BUY:
+                return self.fill_price + unit_explicit_cost
+            return self.fill_price - unit_explicit_cost
 
 
 @dataclass(frozen=True, slots=True)
@@ -559,12 +564,13 @@ class SignalOutcome:
                 raise OutcomeContractError(
                     "filled entry requires invalidation_price"
                 )
-            entry_price = entry.all_in_unit_price
-            if self.invalidation_price >= entry_price:
-                raise OutcomeContractError(
-                    "invalidation_price must be below the costed entry price"
-                )
-            risk_per_share = entry_price - self.invalidation_price
+            with localcontext(_DECIMAL_CONTEXT):
+                entry_price = entry.all_in_unit_price
+                if self.invalidation_price >= entry_price:
+                    raise OutcomeContractError(
+                        "invalidation_price must be below the costed entry price"
+                    )
+                risk_per_share = entry_price - self.invalidation_price
             if any(
                 to_utc(point.timestamp) < to_utc(entry.timestamp)
                 or point.session_index < entry.session_index
@@ -635,23 +641,24 @@ class SignalOutcome:
                     raise OutcomeContractError(
                         "complete path requires at least one observable point"
                     )
-                exit_price = exit_fill.all_in_unit_price
                 risk = risk_per_share
                 assert risk is not None
-                metrics = OutcomeMetrics(
-                    entry_all_in_unit_price=entry_price,
-                    exit_net_unit_price=exit_price,
-                    realized_r=(exit_price - entry_price) / risk,
-                    mfe_r=(max(point.high for point in observable) - entry_price)
-                    / risk,
-                    mae_r=(min(point.low for point in observable) - entry_price)
-                    / risk,
-                    net_return=(exit_price - entry_price) / entry_price,
-                    holding_sessions=(
-                        exit_fill.session_index - entry.session_index
-                    ),
-                    total_cost=entry.total_cost + exit_fill.total_cost,
-                )
+                with localcontext(_DECIMAL_CONTEXT):
+                    exit_price = exit_fill.all_in_unit_price
+                    metrics = OutcomeMetrics(
+                        entry_all_in_unit_price=entry_price,
+                        exit_net_unit_price=exit_price,
+                        realized_r=(exit_price - entry_price) / risk,
+                        mfe_r=(max(point.high for point in observable) - entry_price)
+                        / risk,
+                        mae_r=(min(point.low for point in observable) - entry_price)
+                        / risk,
+                        net_return=(exit_price - entry_price) / entry_price,
+                        holding_sessions=(
+                            exit_fill.session_index - entry.session_index
+                        ),
+                        total_cost=entry.total_cost + exit_fill.total_cost,
+                    )
                 state = OutcomeState.COMPLETE
 
         if self.origin is OutcomeEvidenceOrigin.SYNTHETIC_FIXTURE:
@@ -880,42 +887,42 @@ def _scoreboard_metrics(
     resolved = tuple(item for item in metrics if item is not None)
     returns = tuple(item.realized_r for item in resolved)
     sample_count = len(returns)
-    wins = sum(1 for value in returns if value > _ZERO)
-    win_rate = Decimal(wins) / Decimal(sample_count)
-    average = sum(returns, start=_ZERO) / Decimal(sample_count)
-    gross_profit = sum(
-        (value for value in returns if value > _ZERO),
-        start=_ZERO,
-    )
-    gross_loss = -sum(
-        (value for value in returns if value < _ZERO),
-        start=_ZERO,
-    )
     notes: set[str] = set()
-    if gross_loss == _ZERO:
-        profit_factor: Decimal | None = None
-        notes.add("PROFIT_FACTOR_UNDEFINED_NO_LOSSES")
-    else:
-        profit_factor = gross_profit / gross_loss
-    cumulative = _ZERO
-    peak = _ZERO
-    max_drawdown = _ZERO
-    for value in returns:
-        cumulative += value
-        peak = max(peak, cumulative)
-        max_drawdown = max(max_drawdown, peak - cumulative)
-    recent = returns[-min(policy.recent_window, sample_count) :]
-    weights = tuple(Decimal(index) for index in range(1, len(recent) + 1))
-    weighted = sum(
-        (value * weight for value, weight in zip(recent, weights)),
-        start=_ZERO,
-    ) / sum(weights, start=_ZERO)
-    average_holding = sum(
-        (Decimal(item.holding_sessions) for item in resolved),
-        start=_ZERO,
-    ) / Decimal(sample_count)
-    return (
-        StrategyScoreboardMetrics(
+    with localcontext(_DECIMAL_CONTEXT):
+        wins = sum(1 for value in returns if value > _ZERO)
+        win_rate = Decimal(wins) / Decimal(sample_count)
+        average = sum(returns, start=_ZERO) / Decimal(sample_count)
+        gross_profit = sum(
+            (value for value in returns if value > _ZERO),
+            start=_ZERO,
+        )
+        gross_loss = -sum(
+            (value for value in returns if value < _ZERO),
+            start=_ZERO,
+        )
+        if gross_loss == _ZERO:
+            profit_factor: Decimal | None = None
+            notes.add("PROFIT_FACTOR_UNDEFINED_NO_LOSSES")
+        else:
+            profit_factor = gross_profit / gross_loss
+        cumulative = _ZERO
+        peak = _ZERO
+        max_drawdown = _ZERO
+        for value in returns:
+            cumulative += value
+            peak = max(peak, cumulative)
+            max_drawdown = max(max_drawdown, peak - cumulative)
+        recent = returns[-min(policy.recent_window, sample_count) :]
+        weights = tuple(Decimal(index) for index in range(1, len(recent) + 1))
+        weighted = sum(
+            (value * weight for value, weight in zip(recent, weights)),
+            start=_ZERO,
+        ) / sum(weights, start=_ZERO)
+        average_holding = sum(
+            (Decimal(item.holding_sessions) for item in resolved),
+            start=_ZERO,
+        ) / Decimal(sample_count)
+        scoreboard_metrics = StrategyScoreboardMetrics(
             sample_count=sample_count,
             win_rate=win_rate,
             average_r=average,
@@ -925,9 +932,8 @@ def _scoreboard_metrics(
             max_drawdown_r=max_drawdown,
             recent_weighted_expectancy_r=weighted,
             average_holding_sessions=average_holding,
-        ),
-        tuple(sorted(notes)),
-    )
+        )
+    return scoreboard_metrics, tuple(sorted(notes))
 
 
 def _bucket_metrics(
@@ -951,18 +957,21 @@ def _bucket_metrics(
         if len(values) < policy.minimum_bucket_samples:
             continue
         returns = tuple(values)
-        result.append(
-            OutcomeBucketMetrics(
-                kind=kind,
-                key=key,
-                sample_count=len(returns),
-                win_rate=(
-                    Decimal(sum(1 for value in returns if value > _ZERO))
-                    / Decimal(len(returns))
-                ),
-                average_r=sum(returns, start=_ZERO) / Decimal(len(returns)),
+        with localcontext(_DECIMAL_CONTEXT):
+            win_rate = (
+                Decimal(sum(1 for value in returns if value > _ZERO))
+                / Decimal(len(returns))
             )
-        )
+            average_r = sum(returns, start=_ZERO) / Decimal(len(returns))
+            result.append(
+                OutcomeBucketMetrics(
+                    kind=kind,
+                    key=key,
+                    sample_count=len(returns),
+                    win_rate=win_rate,
+                    average_r=average_r,
+                )
+            )
     return tuple(sorted(result, key=lambda item: item.bucket_id))
 
 

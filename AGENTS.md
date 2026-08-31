@@ -157,6 +157,20 @@ qa/                       前端/可视化 QA 工具
 - Acceptance 输出固定 `research_grade=false`、`t3_reached=false`、`license_clearance_complete=false`，直到新阶段建立受信任、独立、可撤销的 Authority Registry；
 - `data/` 下真实 Capture、Manifest 与 Report 不得提交 Git，也不得修改生产 SQLite。
 
+### 5.6 Stage 4F–4H Outcome 证据与可信准入边界
+
+- Stage 4F 只保存 terminal `SignalOutcome` candidate record；物理 Lane 仅允许 `DIAGNOSTIC_ONLY / LIVE_CANDIDATE`，调用方自报 `verified=true`、高 Evidence Tier 或 SHA 引用不得自动成为真实战绩；
+- Stage 4G Collection schema v3 当前是**手工驱动的 Collection/Finalization Core**，不是已接线的自动 Runtime Service；没有 SignalManager/EventBus/Scheduler/Market Event/Broker Adapter、worker、CLI/API 或重启补采时，不得写成 automatic collection 已完成；
+- Runtime `signal_id` 不是交易 episode 唯一键。Stage 4G 必须绑定外部不可变 `runtime_episode_fact_id`；相同 fact 下任一 snapshot drift 必须冲突，新 episode 必须来自新的 occurrence artifact；
+- `entry_requested_at`、runtime state time、capture、fill、path、exit 与 audit 时间必须 timezone-aware；不得把 collector capture time 冒充真实 entry request time，也不得给 legacy naive time 静默附加时区；
+- 退出理由的 known-at 由 `EXIT_REQUEST` 前已 durable append 的最大连续 PATH 前缀决定；前缀必须同时绑定 point ID、完整 PATH event `fact_id` 与 collection `observed_at`，请求后补录的早时间戳事实不得回填解释旧决策；
+- Complete Outcome 必须完整满足 requested quantity，覆盖 entry 到 exit 的连续 observable sessions，reference/fill 位于对应 session 区间，holding 不得小于冻结的 `minimum_exit_session_offset`；该 offset 与策略 horizon 独立，实际延迟成交必须保留；TARGET/STOP 必须匹配请求前、horizon 内 first-touch，TIMEOUT 必须到达 horizon 且此前没有水平障碍，同一 PATH point 双触发失败关闭；具体 instrument 的 T+0/T+1 等规则由版本化 policy 提供，不得只按 `Market` 粗暴硬编码；
+- 普通未成交过期、用户撤单、停牌、无交易、休市与数据缺失尚未完成独立 Outcome/Path 合同；不得借用 `DATA_INVALID / ORDER_REJECTED` 或伪造 OHLC 关闭样本；
+- Stage 4G 的 `LIVE_MANUAL`、evidence IDs、hash chain 或 Broker callback 仍只是候选证据，不能替代独立 Authority、签名、权限、PIT、撤销和 source-independence 审查；
+- 下一执行顺序必须是 `Stage 4G.1 Operational Runtime Evidence Adapter → Stage 4H Trusted Outcome Admission Authority → admitted-sample shadow → Stage 4I Scoreboard API/UI`，不得直接跳过 episode/execution/path 证据来源层；
+- Stage 4H 必须使用独立 append-only Authority Store，不得修改 Stage 4G/4F evidence；Collector/Requester 不能作为唯一 Approver，private key 不得进入仓库/数据库/日志，标准库 SHA/HMAC/布尔字段不得伪装为非对称签名；
+- Admission、撤销、key rotation、policy 与 role 必须按 `known_at/effective_from/recorded_at/as_of` 进行 PIT 查询；在签名后端、独立权限和足够 admitted 样本完成前，Scoreboard 固定 `INSUFFICIENT_REAL_EVIDENCE`。
+
 ## 6. 数据可信等级
 
 统一使用：
@@ -619,7 +633,7 @@ python -m stock_tracker --once
 9. Stage 3C：free-stockdb 与 HiThink 等可选数据 Sidecar/捕获源继续默认关闭，在真实许可、覆盖与对账通过后再晋级；
 10. Stage 3D–5C：XTP read-only Sidecar、Market Event Store、Signal Monitor、Monitor Workspace 和 synthetic Shadow（工程已完成；真实 Login/Subscribe、Level 1/2、Live Shadow、吞吐与保存权待 operational 验收）；
 11. Stage 3A/3B：Event Intelligence + Big Trend v1；
-12. Stage 4：Stage 4F append-only Outcome Evidence Ledger 工程实现与独立审查已完成；下一步为 Runtime Outcome Collection/Finalization、独立 Trusted Outcome Admission Authority、真实 Strategy Scoreboard 与正式 PIT Replay；
+12. Stage 4：Stage 4F append-only Outcome Ledger 已完成；Stage 4G Collection schema v3 manual Collection/Finalization Core 已硬化 first-touch、PATH fact/known-time 前缀和延迟成交语义，但自动 Runtime Evidence Adapter 尚未实现。下一顺序为 Stage 4G.1 aware Runtime Decision Artifact/transactional outbox/worker/path/execution adapter → Stage 4H 独立 Trusted Outcome Admission Authority → admitted-sample shadow → Stage 4I Strategy Scoreboard API/UI 与正式 PIT Replay；
 13. Stage 5：真实数据上的模型准确率迭代；
 14. Stage 6：港股通与美股独立扩展；
 15. Stage 7：可选券商只读能力；任何执行/报单能力必须另立安全规格并取得用户单独授权。

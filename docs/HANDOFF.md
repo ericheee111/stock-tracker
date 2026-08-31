@@ -2,7 +2,7 @@
 
 > 主理人：齐活林（Delivery Director）｜团队：许清楚(PM) / 高见远(Architect) / 寇豆码(Engineer) / 严过关(QA)
 > 对应 PRD：`docs/PRD-股票辅助判断与交易参考网站.md`（v1.1；A 股优先的个人交易决策驾驶舱）
-> 最新对齐日期：2026-08-30
+> 最新对齐日期：2026-08-31
 > 用途：供其他 Agent / 开发者按 v1.1 产品优先级、Hybrid H0–H5 与后续 Stage 路线接续工作。
 
 ---
@@ -10,6 +10,8 @@
 ## 0. TL;DR
 
 stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + 独立 Quant Foundation** 的真实可运行系统。v1.1 将产品中心冻结为“今天该怎么操作”，市场资源按 A 股、港股通、美股排序，并把 Core Opportunity、Big Trend、Event Intelligence、持仓/Exit、Strategy Scoreboard、Replay 与混合部署设为主线。Stage 1 的严格决策合同、Portfolio REST/UI、真实 `/api/brief/today` 和 Today Action 首页已经接线。Hybrid H0–H4 的仓库侧工程实现和本地验收现已完成：loopback/Tailscale Bootstrap、Runtime Config、统一 REST/SSE/Health URL Builder、Origin-scoped 会话访问、API Major/Engine/Build 握手、exact CORS/OPTIONS、API-only Target、远程写审计、Windows 恢复计划、Power Guard、no-secret 静态构建和在线/离线浏览器验收均已落地；H5 已实现可信 Tailnet 优先、公开模式失败关闭的只读门禁。真实 Tailscale、两设备、Windows 重启/休眠、Pages 实际部署和任何公开入口仍待 operational 验收。概率、Big Trend 和策略战绩仍诚实降级，这些工程能力不等于真实投资表现。
+
+Stage 4G 独立复审已把先前“Runtime Service 完成”修正为“manual Collection/Finalization Core schema v3 已完成 R0 收敛”：first-touch、PATH fact/known-time 前缀与延迟成交语义已失败关闭；自动 Runtime Decision Artifact、transactional outbox、Market Path/Execution Adapter、worker/cursor/recovery 仍未接线，必须先完成 Stage 4G.1，才能进入独立签名/撤销/PIT 的 Stage 4H Admission Authority。
 
 > **路线覆盖规则：** 下文保留的 v0.4 Wave、T1–T15 和历史提交记录用于追溯；若与新版产品优先级冲突，以 PRD v1.1、根 `AGENTS.md`、`docs/HYBRID-DEPLOYMENT-ARCHITECTURE-v1.md` 和 `docs/PRODUCT-GAP-MATRIX-v1.1.md` 为准。
 
@@ -51,9 +53,13 @@ stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + �
 - Stage 4F 只有 `DIAGNOSTIC_ONLY` / `LIVE_CANDIDATE` 两条物理 Lane。即使 `SignalOutcome.real_scoreboard_eligible=true`，调用方自报的 `verified=true` 或 verification SHA 也不能升级为可信真实战绩；`TRUSTED_OUTCOME_AUTHORITY_CONFIGURED=false`，真实 `scoreboard_records` 固定为空，保持 `TRUSTED_OUTCOME_ADMISSION_NOT_CONFIGURED / INSUFFICIENT_REAL_EVIDENCE`；
 - Stage 4F 最新门禁：focused `36/36 + 11 subtests`、source distribution `2/2`（83 个关键路径 subtests）、Quant `664/664 + 316 subtests`、Runtime `521 passed, 1 skipped + 350 subtests`、Today Mock `17/17`、真实 Today API/Web `17/17`、Portfolio CRUD `13/13`；targeted Ruff、compileall、pip check、Quant contract smoke、synthetic fixture benchmark 与 production migration dry-run 均通过。`data/stock_tracker.db` 在本轮验证前后 SHA-256 均为 `6d2f1fdc5b48180c1cb32d15e8619770dc1b5edb56d13cea0072bffe964f20f2`；Review 为 `ENGINEERING_READY_FOR_MERGE / APPEND_ONLY_INTEGRITY_PASSED / TRUSTED_OUTCOME_ADMISSION_PENDING / REAL_PERFORMANCE_CLAIM_BLOCKED`；
 - Stage 4F 干净 Git Index 首轮发现“源码包没有运行数据库时，生产路径守卫先泄漏 `FileNotFoundError`”的分发缺陷；现已将精确生产路径拒绝前移、其余缺失路径统一为 `OutcomeLedgerError` 并补 absent-production regression。修复后的 Index 通过 Stage 4F `36 + 11 subtests`、Quant `662 passed, 2 expected skips + 233 subtests`、Runtime `521 passed, 1 skipped + 350 subtests`、Ruff、compileall、Quant smoke 与 synthetic benchmark；
+- 2026-08-31 Stage 4G 独立复审确认：提交 `a075026` 实际完成的是 manual Collection/Finalization Core，不是已接线的自动 Runtime Service。原实现存在 episode 可由 mutable snapshot 漂移静默新建、capture time 冒充 entry request、naive datetime 入量化身份、不完整 path 标 complete、market-rule/horizon/target-stop 证据缺口、Collection DB 非原子初始化、全局 fact ID 误冲突、并发 FINALIZED marker、Ledger path-only target、Case `dataclasses.replace()` 伪状态等问题；R0 收敛已逐项失败关闭并补回归；
+- Stage 4G Collection schema v3 现在要求外部 `runtime_episode_fact_id` 与 timezone-aware `entry_requested_at`，相同 fact 下 snapshot drift 冲突；Complete path 必须逐 session 连续，退出请求冻结 PATH point/fact/known-time 最大前缀，TARGET/STOP/TIMEOUT 按 horizon 内 first-touch，双触发失败关闭，`minimum_exit_session_offset` 与 horizon 分离并保留延迟成交；Collection DB 原子发布、fact 唯一性按 `(case_id,fact_id)`、两阶段 finalization 并发幂等并绑定 Ledger filesystem identity；v1/v2 evidence 不静默改写；
+- `runtime_episode_fact_id`、execution/path evidence 和 session index 当前仍来自受控调用方，因此 Live Manual 固定 `BEST_EFFORT / verified=false / LIVE_CANDIDATE`。普通 entry expiry/user cancel 与 suspension/no-trade/missing-data 仍没有自动证据合同。下一步设计分别固化在 `STAGE4G1-OPERATIONAL-RUNTIME-EVIDENCE-ADAPTER-DESIGN.md` 与 `STAGE4H-TRUSTED-OUTCOME-ADMISSION-AUTHORITY-DESIGN.md`；
+- Stage 4G-R0 checkout 门禁：focused `60 + 11 subtests`，Outcome/Stage 4F adjacent `116 + 114 subtests`，完整 Quant `725 + 327 subtests`，Runtime `521 passed / 1 expected skip + 350 subtests`，source-distribution/no-bytecode `3 + 83 subtests`，Today Mock `17/17`、真实临时 API/Web Today `17/17`、Portfolio CRUD `13/13`；Ruff、compileall、`pip check`、Quant smoke、synthetic benchmark 与 production migration dry-run 通过。`data/stock_tracker.db` 前后 SHA-256 均为 `ce4156bf641e061d86ce944167ad2b1347f2437c130a7cf6eee26892fb78cbb7`，`database_modified=false`；测试候选 tree（本条证据写回前）`655b3e421aa3f4f65a33f57d593e028e37974f9f` 通过 focused `114 + 31 subtests`、Quant `723 passed / 2 expected skips + 244 subtests`、Runtime `521 passed / 1 expected skip + 350 subtests`、Ruff、compileall、Quant smoke 与 synthetic benchmark；
 - Scheduler 的重复 BAR 方法定义已收敛为一套；BAR Universe 覆盖 radar、自选、持仓和活跃信号；
 - 日线有效数据标记为 `DELAYED` 而不是 `LIVE`，避免把 EOD 数据伪装成盘中实时；
-- 下一阶段并行推进两条受阻主线：数据侧恢复 Eastmoney 或配置另一个获准来源，完成 A 股真实双源 Stage 2H Acceptance，再由仓库外独立主体提供可审计、可撤销的 Source Independence、字段单位/币种、复权、许可与辅助事实证据；Outcome 侧实现 Runtime Outcome Collection/Finalization Service，随后另立 Trusted Outcome Admission Authority。两类 Trusted Authority 均不能由调用方自报字段替代；真实样本不足时不得生成真实战绩或模型晋级结论。
+- 下一阶段并行推进两条受阻主线：数据侧恢复 Eastmoney 或配置另一个获准来源，完成 A 股真实双源 Stage 2H Acceptance，再由仓库外独立主体提供可审计、可撤销的 Source Independence、字段单位/币种、复权、许可与辅助事实证据；Outcome 侧先执行 Stage 4G.1 Operational Runtime Evidence Adapter，建立 aware Runtime Decision Artifact、显式 Runtime migration、Signal/history/outbox 原子事务、系统 episode fact、Market Path/Execution Adapter、worker/cursor/recovery，再实施 Stage 4H 独立签名/撤销/PIT Trusted Outcome Admission Authority，最后才进入 admitted-sample shadow 与 Stage 4I Scoreboard API/UI。两类 Trusted Authority 均不能由调用方自报字段替代；真实样本不足时不得生成真实战绩或模型晋级结论。
 
 ---
 
