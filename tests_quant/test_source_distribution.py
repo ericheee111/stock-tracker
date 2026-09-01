@@ -69,6 +69,7 @@ class TestSourceDistribution(unittest.TestCase):
             "stock_tracker/runtime_evidence/store.py",
             "stock_tracker/runtime_evidence/worker.py",
             "stock_tracker/storage/migrations_runtime/0001_runtime_evidence_outbox.sql",
+            "stock_tracker/storage/migrations_runtime/0002_runtime_occurrence_identity.sql",
             "stock_tracker/storage/runtime_migrations.py",
             "stock_tracker/quant/storage/migrations/0004_corporate_action_identity.sql",
             "tests_quant/test_adjusted_market_data.py",

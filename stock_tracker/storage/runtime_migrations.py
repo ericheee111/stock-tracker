@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
 import sqlite3
 import tempfile
 from contextlib import closing
@@ -11,19 +12,24 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-RUNTIME_MIGRATION_SCHEMA = "stage4g1-runtime-migration-history-v1"
-RUNTIME_OUTBOX_SCHEMA_VERSION = 1
+RUNTIME_MIGRATION_SCHEMA = "stage4g1-runtime-migration-report-v3"
+RUNTIME_EVIDENCE_STORE_SCHEMA = "stage4g1-runtime-evidence-store-v2"
+RUNTIME_OUTBOX_SCHEMA_VERSION = 2
 _MIGRATION_ROOT = Path(__file__).with_name("migrations_runtime")
-_MIGRATION_FILE = _MIGRATION_ROOT / "0001_runtime_evidence_outbox.sql"
-_MIGRATION_NAME = "runtime_evidence_outbox"
-_RUNTIME_TABLES = {
-    "runtime_schema_migration",
-    "runtime_transition_outbox",
-    "runtime_outbox_delivery",
-    "runtime_outbox_cursor",
-    "runtime_outbox_quarantine",
-}
-_EXPECTED_COLUMNS = {
+
+
+@dataclass(frozen=True, slots=True)
+class _Migration:
+    version: int
+    name: str
+    path: Path
+
+
+_MIGRATIONS = (
+    _Migration(1, "runtime_evidence_outbox", _MIGRATION_ROOT / "0001_runtime_evidence_outbox.sql"),
+    _Migration(2, "runtime_occurrence_identity", _MIGRATION_ROOT / "0002_runtime_occurrence_identity.sql"),
+)
+_TABLE_COLUMNS_V1 = {
     "runtime_schema_migration": (
         ("version", "INTEGER", 0, 1, 0),
         ("name", "TEXT", 1, 0, 0),
@@ -68,7 +74,32 @@ _EXPECTED_COLUMNS = {
         ("metadata_sha256", "TEXT", 1, 0, 0),
     ),
 }
-_EXPECTED_EXPLICIT_INDEXES = {
+_TABLE_COLUMNS_V2 = {
+    **_TABLE_COLUMNS_V1,
+    "runtime_evidence_meta": (
+        ("key", "TEXT", 0, 1, 0),
+        ("value", "TEXT", 1, 0, 0),
+    ),
+    "runtime_transition_occurrence": (
+        ("occurrence_order", "INTEGER", 0, 1, 0),
+        ("occurrence_dedup_id", "TEXT", 1, 0, 0),
+        ("decision_content_id", "TEXT", 1, 0, 0),
+        ("artifact_id", "TEXT", 1, 0, 0),
+        ("transition_event_id", "TEXT", 1, 0, 0),
+        ("upstream_occurrence_id", "TEXT", 0, 0, 0),
+        ("signal_history_id", "INTEGER", 1, 0, 0),
+        ("created_at", "TEXT", 1, 0, 0),
+    ),
+    "runtime_worker_integrity_block": (
+        ("block_order", "INTEGER", 0, 1, 0),
+        ("block_id", "TEXT", 1, 0, 0),
+        ("worker_id", "TEXT", 1, 0, 0),
+        ("artifact_id", "TEXT", 1, 0, 0),
+        ("block_code", "TEXT", 1, 0, 0),
+        ("blocked_at", "TEXT", 1, 0, 0),
+    ),
+}
+_INDEXES_V1 = {
     "idx_runtime_transition_signal": (
         "runtime_transition_outbox",
         ("runtime_signal_id", "append_order"),
@@ -85,74 +116,109 @@ _EXPECTED_EXPLICIT_INDEXES = {
         0,
     ),
 }
-_EXPECTED_TRIGGERS = {
-    "runtime_schema_migration_no_update": (
-        "runtime_schema_migration",
-        (
-            "CREATE TRIGGER runtime_schema_migration_no_update "
-            "BEFORE UPDATE ON runtime_schema_migration BEGIN "
-            "SELECT RAISE(ABORT, 'runtime_schema_migration is append-only'); END"
-        ),
-    ),
-    "runtime_schema_migration_no_delete": (
-        "runtime_schema_migration",
-        (
-            "CREATE TRIGGER runtime_schema_migration_no_delete "
-            "BEFORE DELETE ON runtime_schema_migration BEGIN "
-            "SELECT RAISE(ABORT, 'runtime_schema_migration is append-only'); END"
-        ),
-    ),
-    "runtime_transition_outbox_no_update": (
-        "runtime_transition_outbox",
-        (
-            "CREATE TRIGGER runtime_transition_outbox_no_update "
-            "BEFORE UPDATE ON runtime_transition_outbox BEGIN "
-            "SELECT RAISE(ABORT, 'runtime_transition_outbox payload is immutable'); END"
-        ),
-    ),
-    "runtime_transition_outbox_no_delete": (
-        "runtime_transition_outbox",
-        (
-            "CREATE TRIGGER runtime_transition_outbox_no_delete "
-            "BEFORE DELETE ON runtime_transition_outbox BEGIN "
-            "SELECT RAISE(ABORT, 'runtime_transition_outbox payload is immutable'); END"
-        ),
-    ),
-    "runtime_outbox_quarantine_no_update": (
-        "runtime_outbox_quarantine",
-        (
-            "CREATE TRIGGER runtime_outbox_quarantine_no_update "
-            "BEFORE UPDATE ON runtime_outbox_quarantine BEGIN "
-            "SELECT RAISE(ABORT, 'runtime_outbox_quarantine is append-only'); END"
-        ),
-    ),
-    "runtime_outbox_quarantine_no_delete": (
-        "runtime_outbox_quarantine",
-        (
-            "CREATE TRIGGER runtime_outbox_quarantine_no_delete "
-            "BEFORE DELETE ON runtime_outbox_quarantine BEGIN "
-            "SELECT RAISE(ABORT, 'runtime_outbox_quarantine is append-only'); END"
-        ),
+_INDEXES_V2 = {
+    **_INDEXES_V1,
+    "idx_runtime_occurrence_decision": (
+        "runtime_transition_occurrence",
+        ("decision_content_id", "occurrence_order"),
+        0,
     ),
 }
 
 
-class RuntimeMigrationError(RuntimeError):
-    pass
+def _append_only_trigger(name: str, table: str, message: str) -> tuple[str, str]:
+    return (
+        table,
+        (
+            f"CREATE TRIGGER {name} BEFORE UPDATE ON {table} BEGIN "
+            f"SELECT RAISE(ABORT, '{message}'); END"
+        ),
+    )
 
 
-class RuntimeMigrationRequired(RuntimeMigrationError):
-    pass
+_TRIGGERS_V1 = {
+    "runtime_schema_migration_no_update": _append_only_trigger(
+        "runtime_schema_migration_no_update", "runtime_schema_migration", "runtime_schema_migration is append-only"
+    ),
+    "runtime_schema_migration_no_delete": (
+        "runtime_schema_migration",
+        (
+            "CREATE TRIGGER runtime_schema_migration_no_delete BEFORE DELETE ON runtime_schema_migration "
+            "BEGIN SELECT RAISE(ABORT, 'runtime_schema_migration is append-only'); END"
+        ),
+    ),
+    "runtime_transition_outbox_no_update": _append_only_trigger(
+        "runtime_transition_outbox_no_update", "runtime_transition_outbox", "runtime_transition_outbox payload is immutable"
+    ),
+    "runtime_transition_outbox_no_delete": (
+        "runtime_transition_outbox",
+        (
+            "CREATE TRIGGER runtime_transition_outbox_no_delete BEFORE DELETE ON runtime_transition_outbox "
+            "BEGIN SELECT RAISE(ABORT, 'runtime_transition_outbox payload is immutable'); END"
+        ),
+    ),
+    "runtime_outbox_quarantine_no_update": _append_only_trigger(
+        "runtime_outbox_quarantine_no_update", "runtime_outbox_quarantine", "runtime_outbox_quarantine is append-only"
+    ),
+    "runtime_outbox_quarantine_no_delete": (
+        "runtime_outbox_quarantine",
+        (
+            "CREATE TRIGGER runtime_outbox_quarantine_no_delete BEFORE DELETE ON runtime_outbox_quarantine "
+            "BEGIN SELECT RAISE(ABORT, 'runtime_outbox_quarantine is append-only'); END"
+        ),
+    ),
+}
+_TRIGGERS_V2 = {
+    **_TRIGGERS_V1,
+    "runtime_evidence_meta_no_update": _append_only_trigger(
+        "runtime_evidence_meta_no_update", "runtime_evidence_meta", "runtime_evidence_meta is append-only"
+    ),
+    "runtime_evidence_meta_no_delete": (
+        "runtime_evidence_meta",
+        (
+            "CREATE TRIGGER runtime_evidence_meta_no_delete BEFORE DELETE ON runtime_evidence_meta "
+            "BEGIN SELECT RAISE(ABORT, 'runtime_evidence_meta is append-only'); END"
+        ),
+    ),
+    "runtime_transition_occurrence_no_update": _append_only_trigger(
+        "runtime_transition_occurrence_no_update", "runtime_transition_occurrence", "runtime_transition_occurrence is append-only"
+    ),
+    "runtime_transition_occurrence_no_delete": (
+        "runtime_transition_occurrence",
+        (
+            "CREATE TRIGGER runtime_transition_occurrence_no_delete BEFORE DELETE ON runtime_transition_occurrence "
+            "BEGIN SELECT RAISE(ABORT, 'runtime_transition_occurrence is append-only'); END"
+        ),
+    ),
+    "runtime_worker_integrity_block_no_update": _append_only_trigger(
+        "runtime_worker_integrity_block_no_update", "runtime_worker_integrity_block", "runtime_worker_integrity_block is append-only"
+    ),
+    "runtime_worker_integrity_block_no_delete": (
+        "runtime_worker_integrity_block",
+        (
+            "CREATE TRIGGER runtime_worker_integrity_block_no_delete BEFORE DELETE ON runtime_worker_integrity_block "
+            "BEGIN SELECT RAISE(ABORT, 'runtime_worker_integrity_block is append-only'); END"
+        ),
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
 class RuntimeMigrationReport:
     mode: str
     database: str
+    target_schema_state: str
+    target_schema_audit_passed: bool
+    rehearsal_performed: bool
+    rehearsal_audit_passed: bool
+    migration_history_valid: bool
     current_version: int
+    latest_version: int
     pending_versions: tuple[int, ...]
+    source_database_sha256: str
+    would_modify: bool
     database_modified: bool
-    schema_audit_passed: bool
+    runtime_store_id: str | None
     backup_path: str | None
     backup_sha256: str | None
 
@@ -161,10 +227,18 @@ class RuntimeMigrationReport:
             "schema": RUNTIME_MIGRATION_SCHEMA,
             "mode": self.mode,
             "database": self.database,
+            "target_schema_state": self.target_schema_state,
+            "target_schema_audit_passed": self.target_schema_audit_passed,
+            "rehearsal_performed": self.rehearsal_performed,
+            "rehearsal_audit_passed": self.rehearsal_audit_passed,
+            "migration_history_valid": self.migration_history_valid,
             "current_version": self.current_version,
+            "latest_version": self.latest_version,
             "pending_versions": list(self.pending_versions),
+            "source_database_sha256": self.source_database_sha256,
+            "would_modify": self.would_modify,
             "database_modified": self.database_modified,
-            "schema_audit_passed": self.schema_audit_passed,
+            "runtime_store_id": self.runtime_store_id,
             "backup_path": self.backup_path,
             "backup_sha256": self.backup_sha256,
             "auto_trade": False,
@@ -172,33 +246,63 @@ class RuntimeMigrationReport:
         }
 
 
-def _migration_sql() -> str:
+class RuntimeMigrationError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "RUNTIME_MIGRATION_INVALID",
+        report: RuntimeMigrationReport | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.report = report
+
+
+class RuntimeMigrationRequired(RuntimeMigrationError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class _TargetInspection:
+    state: str
+    audit_passed: bool
+    history_valid: bool
+    current_version: int
+    runtime_store_id: str | None
+
+
+def _migration_sql(migration: _Migration) -> str:
     try:
-        return _MIGRATION_FILE.read_text(encoding="utf-8")
+        return migration.path.read_text(encoding="utf-8")
     except OSError as exc:
         raise RuntimeMigrationError("runtime migration SQL is unavailable") from exc
 
 
-def _migration_checksum() -> str:
-    normalized = _migration_sql().replace("\r\n", "\n").replace("\r", "\n")
+def _migration_checksum(migration: _Migration) -> str:
+    normalized = _migration_sql(migration).replace("\r\n", "\n").replace("\r", "\n")
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def _utc_text(value: datetime) -> str:
     if value.tzinfo is None or value.utcoffset() is None:
         raise RuntimeMigrationError("migration time must be timezone-aware")
-    return value.astimezone(timezone.utc).isoformat(timespec="microseconds").replace(
-        "+00:00", "Z"
-    )
+    return value.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
-def _sql_literal(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
+def _utc_from_text(value: object) -> datetime:
+    if type(value) is not str or not value.endswith("Z") or len(value) > 64:
+        raise RuntimeMigrationError("migration history time must be canonical UTC")
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError as exc:
+        raise RuntimeMigrationError("migration history time must be ISO-8601") from exc
+    if _utc_text(parsed) != value:
+        raise RuntimeMigrationError("migration history time must be canonical UTC")
+    return parsed
 
 
-def _table_columns(
-    connection: sqlite3.Connection, table: str
-) -> tuple[tuple[str, str, int, int, int], ...]:
+def _table_columns(connection: sqlite3.Connection, table: str) -> tuple[tuple[str, str, int, int, int], ...]:
     return tuple(
         (str(row[1]), str(row[2]).upper(), int(row[3]), int(row[5]), int(row[6]))
         for row in connection.execute(f"PRAGMA table_xinfo({table})").fetchall()
@@ -207,77 +311,126 @@ def _table_columns(
 
 def _normalized_sql(value: object) -> str:
     if type(value) is not str:
-        raise RuntimeMigrationError("runtime trigger SQL definition is missing")
+        raise RuntimeMigrationError("runtime SQL definition is missing")
     return " ".join(value.lower().split()).rstrip(";")
 
 
-def audit_runtime_evidence_schema(connection: sqlite3.Connection) -> None:
+def _expected_history(version: int) -> list[tuple[int, str, str]]:
+    return [(item.version, item.name, _migration_checksum(item)) for item in _MIGRATIONS[:version]]
+
+
+def _validate_version_schema(connection: sqlite3.Connection, version: int) -> str | None:
+    columns = _TABLE_COLUMNS_V1 if version == 1 else _TABLE_COLUMNS_V2
+    indexes = _INDEXES_V1 if version == 1 else _INDEXES_V2
+    triggers = _TRIGGERS_V1 if version == 1 else _TRIGGERS_V2
+    tables = {
+        str(row[0])
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'runtime_%'"
+        ).fetchall()
+    }
+    if tables != set(columns):
+        code = "RUNTIME_SCHEMA_PARTIAL" if set(columns) - tables else "RUNTIME_SCHEMA_INVALID"
+        raise RuntimeMigrationError("runtime evidence table set is invalid", code=code)
+    for table, expected in columns.items():
+        if _table_columns(connection, table) != expected:
+            raise RuntimeMigrationError(f"runtime table schema is invalid: {table}")
+    if connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='view' AND name LIKE 'runtime_%' LIMIT 1"
+    ).fetchone() is not None:
+        raise RuntimeMigrationError("runtime evidence views are forbidden")
+    actual_triggers = {
+        str(row[0]): (str(row[1]), _normalized_sql(row[2]))
+        for row in connection.execute(
+            "SELECT name,tbl_name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name LIKE 'runtime_%'"
+        ).fetchall()
+    }
+    expected_triggers = {name: (table, _normalized_sql(sql)) for name, (table, sql) in triggers.items()}
+    if actual_triggers != expected_triggers:
+        raise RuntimeMigrationError("runtime evidence trigger set is invalid")
+    actual_indexes: dict[str, tuple[str, tuple[str, ...], int]] = {}
+    for table in tables:
+        for row in connection.execute(f"PRAGMA index_list({table})").fetchall():
+            if str(row[3]) != "c":
+                continue
+            name = str(row[1])
+            actual_indexes[name] = (
+                table,
+                tuple(str(item[1]) for item in connection.execute(
+                    "SELECT seqno,name FROM pragma_index_info(?) ORDER BY seqno", (name,)
+                ).fetchall()),
+                int(row[2]),
+            )
+    if actual_indexes != indexes:
+        raise RuntimeMigrationError("runtime evidence index set is invalid")
+    if version == 1:
+        return None
+    metadata = {
+        str(row[0]): str(row[1])
+        for row in connection.execute("SELECT key,value FROM runtime_evidence_meta ORDER BY key").fetchall()
+    }
+    if set(metadata) != {"schema", "runtime_store_id"} or metadata.get("schema") != RUNTIME_EVIDENCE_STORE_SCHEMA:
+        raise RuntimeMigrationError("runtime evidence metadata is invalid")
+    store_id = metadata["runtime_store_id"]
+    if len(store_id) != 64 or any(c not in "0123456789abcdef" for c in store_id):
+        raise RuntimeMigrationError("runtime evidence store identity is invalid")
+    return store_id
+
+
+def _inspect_target(connection: sqlite3.Connection) -> _TargetInspection:
     try:
-        quick_check = tuple(
-            str(row[0]) for row in connection.execute("PRAGMA quick_check").fetchall()
-        )
-        if quick_check != ("ok",):
-            raise RuntimeMigrationError("runtime database integrity check failed")
-        tables = {
+        if tuple(str(row[0]) for row in connection.execute("PRAGMA quick_check").fetchall()) != ("ok",):
+            return _TargetInspection("INVALID", False, False, 0, None)
+        runtime_tables = {
             str(row[0])
             for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'runtime_%'"
             ).fetchall()
         }
-        if tables != _RUNTIME_TABLES:
-            raise RuntimeMigrationRequired("runtime evidence migration is not applied")
-        for table, expected in _EXPECTED_COLUMNS.items():
-            if _table_columns(connection, table) != expected:
-                raise RuntimeMigrationError(f"runtime table schema is invalid: {table}")
-        views = tuple(
-            str(row[0])
-            for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='view' AND name LIKE 'runtime_%'"
-            ).fetchall()
-        )
-        if views:
-            raise RuntimeMigrationError("runtime evidence views are forbidden")
-        triggers = {
-            str(row[0]): (str(row[1]), _normalized_sql(row[2]))
-            for row in connection.execute(
-                "SELECT name,tbl_name,sql FROM sqlite_master "
-                "WHERE type='trigger' AND tbl_name LIKE 'runtime_%'"
-            ).fetchall()
-        }
-        expected_triggers = {
-            name: (table, _normalized_sql(sql))
-            for name, (table, sql) in _EXPECTED_TRIGGERS.items()
-        }
-        if triggers != expected_triggers:
-            raise RuntimeMigrationError("runtime evidence trigger set is invalid")
-        explicit_indexes: dict[str, tuple[str, tuple[str, ...], int]] = {}
-        for table in _RUNTIME_TABLES:
-            for row in connection.execute(f"PRAGMA index_list({table})").fetchall():
-                if str(row[3]) != "c":
-                    continue
-                name = str(row[1])
-                columns = tuple(
-                    str(item[1])
-                    for item in connection.execute(
-                        "SELECT seqno,name FROM pragma_index_info(?) ORDER BY seqno",
-                        (name,),
-                    ).fetchall()
-                )
-                explicit_indexes[name] = (table, columns, int(row[2]))
-        if explicit_indexes != _EXPECTED_EXPLICIT_INDEXES:
-            raise RuntimeMigrationError("runtime evidence index set is invalid")
+        if not runtime_tables:
+            return _TargetInspection("UNINITIALIZED", True, True, 0, None)
+        if "runtime_schema_migration" not in runtime_tables:
+            return _TargetInspection("PARTIALLY_MIGRATED", False, False, 0, None)
         rows = connection.execute(
-            "SELECT version,name,checksum FROM runtime_schema_migration ORDER BY version"
+            "SELECT version,name,checksum,applied_at FROM runtime_schema_migration "
+            "ORDER BY version"
         ).fetchall()
-        expected_rows = [
-            (RUNTIME_OUTBOX_SCHEMA_VERSION, _MIGRATION_NAME, _migration_checksum())
-        ]
-        if [tuple(row) for row in rows] != expected_rows:
-            raise RuntimeMigrationError("runtime migration history is invalid")
-    except RuntimeMigrationError:
-        raise
-    except sqlite3.Error as exc:
-        raise RuntimeMigrationError("runtime evidence schema audit failed") from exc
+        versions = [int(row[0]) for row in rows]
+        if not versions:
+            return _TargetInspection("PARTIALLY_MIGRATED", False, False, 0, None)
+        if any(version < 1 or version > RUNTIME_OUTBOX_SCHEMA_VERSION for version in versions):
+            return _TargetInspection("UNKNOWN_VERSION", False, False, max(versions), None)
+        current = versions[-1]
+        if [tuple(row)[:3] for row in rows] != _expected_history(current):
+            return _TargetInspection("INVALID", False, False, current, None)
+        try:
+            applied_times = [_utc_from_text(row[3]) for row in rows]
+        except RuntimeMigrationError:
+            return _TargetInspection("INVALID", False, False, current, None)
+        if applied_times != sorted(applied_times):
+            return _TargetInspection("INVALID", False, False, current, None)
+        try:
+            store_id = _validate_version_schema(connection, current)
+        except RuntimeMigrationError as exc:
+            state = "PARTIALLY_MIGRATED" if exc.code == "RUNTIME_SCHEMA_PARTIAL" else "INVALID"
+            return _TargetInspection(state, False, True, current, None)
+        state = "VALID_LATEST_VERSION" if current == RUNTIME_OUTBOX_SCHEMA_VERSION else "VALID_CURRENT_VERSION"
+        return _TargetInspection(state, True, True, current, store_id)
+    except sqlite3.Error:
+        return _TargetInspection("INVALID", False, False, 0, None)
+
+
+def audit_runtime_evidence_schema(connection: sqlite3.Connection) -> str:
+    inspection = _inspect_target(connection)
+    if inspection.state in {"UNINITIALIZED", "VALID_CURRENT_VERSION"}:
+        raise RuntimeMigrationRequired(
+            "runtime evidence migration is not at the latest version", code="RUNTIME_MIGRATION_REQUIRED"
+        )
+    if inspection.state != "VALID_LATEST_VERSION" or inspection.runtime_store_id is None:
+        raise RuntimeMigrationError(
+            f"runtime evidence target is {inspection.state}", code="RUNTIME_DATABASE_INTEGRITY"
+        )
+    return inspection.runtime_store_id
 
 
 def runtime_evidence_schema_ready(connection: sqlite3.Connection) -> bool:
@@ -288,59 +441,72 @@ def runtime_evidence_schema_ready(connection: sqlite3.Connection) -> bool:
     return True
 
 
-def _applied_version(connection: sqlite3.Connection) -> int:
-    table = connection.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_schema_migration'"
-    ).fetchone()
-    if table is None:
-        return 0
-    rows = connection.execute(
-        "SELECT version,name,checksum FROM runtime_schema_migration ORDER BY version"
-    ).fetchall()
-    if not rows:
-        raise RuntimeMigrationError("runtime migration history is empty")
-    expected = (RUNTIME_OUTBOX_SCHEMA_VERSION, _MIGRATION_NAME, _migration_checksum())
-    if len(rows) != 1 or tuple(rows[0]) != expected:
-        raise RuntimeMigrationError("runtime migration history is invalid")
-    return int(rows[-1][0])
+def _apply_pending(connection: sqlite3.Connection, current_version: int, applied_at: datetime) -> str:
+    created_store_id: str | None = None
+    for migration in _MIGRATIONS[current_version:]:
+        script = "BEGIN IMMEDIATE;\n" + _migration_sql(migration)
+        if migration.version == 2:
+            created_store_id = hashlib.sha256(secrets.token_bytes(32)).hexdigest()
+            script += (
+                "\nINSERT INTO runtime_evidence_meta(key,value) VALUES"
+                f"('schema','{RUNTIME_EVIDENCE_STORE_SCHEMA}'),"
+                f"('runtime_store_id','{created_store_id}');"
+            )
+        script += (
+            "\nINSERT INTO runtime_schema_migration(version,name,checksum,applied_at) VALUES("
+            f"{migration.version},'{migration.name}','{_migration_checksum(migration)}','{_utc_text(applied_at)}');\nCOMMIT;"
+        )
+        try:
+            connection.executescript(script)
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+    inspected = _inspect_target(connection)
+    if inspected.state != "VALID_LATEST_VERSION" or inspected.runtime_store_id is None:
+        raise RuntimeMigrationError("runtime migration did not reach latest schema")
+    if created_store_id is not None and created_store_id != inspected.runtime_store_id:
+        raise RuntimeMigrationError("runtime evidence store identity changed during migration")
+    return inspected.runtime_store_id
 
 
-def _apply_connection(connection: sqlite3.Connection, applied_at: datetime) -> None:
-    current = _applied_version(connection)
-    if current == RUNTIME_OUTBOX_SCHEMA_VERSION:
-        audit_runtime_evidence_schema(connection)
-        return
-    if current != 0:
-        raise RuntimeMigrationError("unsupported runtime migration version")
-    script = (
-        "BEGIN IMMEDIATE;\n"
-        + _migration_sql()
-        + "\nINSERT INTO runtime_schema_migration(version,name,checksum,applied_at) VALUES("
-        + str(RUNTIME_OUTBOX_SCHEMA_VERSION)
-        + ","
-        + _sql_literal(_MIGRATION_NAME)
-        + ","
-        + _sql_literal(_migration_checksum())
-        + ","
-        + _sql_literal(_utc_text(applied_at))
-        + ");\nCOMMIT;"
-    )
+def _is_link(path: Path) -> bool:
+    return path.is_symlink() or bool(getattr(os.path, "isjunction", lambda _: False)(path))
+
+
+def _checked_path(value: str | Path, name: str, *, must_exist: bool) -> Path:
+    absolute = Path(value).expanduser().absolute()
+    for candidate in (absolute, *absolute.parents):
+        if candidate.exists() and _is_link(candidate):
+            raise RuntimeMigrationError(f"{name} cannot traverse a link")
     try:
-        connection.executescript(script)
-        audit_runtime_evidence_schema(connection)
-    except Exception:
-        if connection.in_transaction:
-            connection.rollback()
-        raise
+        resolved = absolute.resolve(strict=must_exist)
+    except OSError as exc:
+        raise RuntimeMigrationError(f"cannot resolve {name}") from exc
+    if must_exist and (not resolved.is_file() or _is_link(resolved)):
+        raise RuntimeMigrationError(f"{name} must be a regular non-link file")
+    return resolved
+
+
+def _path_identity(path: Path, name: str) -> tuple[int, int]:
+    try:
+        status = path.stat()
+    except OSError as exc:
+        raise RuntimeMigrationError(f"cannot inspect {name}") from exc
+    return int(status.st_dev), int(status.st_ino)
 
 
 def _read_only_connection(path: Path) -> sqlite3.Connection:
-    if not path.is_file() or path.is_symlink():
-        raise RuntimeMigrationError("runtime database must be a regular file")
+    checked = _checked_path(path, "runtime database", must_exist=True)
+    identity = _path_identity(checked, "runtime database")
     try:
-        return sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=30.0)
+        connection = sqlite3.connect(checked.as_uri() + "?mode=ro", uri=True, timeout=30.0)
     except sqlite3.Error as exc:
         raise RuntimeMigrationError("cannot open runtime database read-only") from exc
+    if _path_identity(checked, "runtime database") != identity:
+        connection.close()
+        raise RuntimeMigrationError("runtime database was replaced while opening")
+    return connection
 
 
 def _sha256_file(path: Path) -> str:
@@ -352,7 +518,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _backup_no_overwrite(source: Path, backup: Path) -> str:
-    if backup.exists() or backup.is_symlink():
+    if backup.exists() or _is_link(backup):
         raise RuntimeMigrationError("runtime migration backup target must not exist")
     backup.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
@@ -378,6 +544,41 @@ def _backup_no_overwrite(source: Path, backup: Path) -> str:
             temporary.unlink()
 
 
+def _report(
+    *,
+    mode: str,
+    database: Path,
+    inspection: _TargetInspection,
+    source_sha: str,
+    rehearsal_performed: bool,
+    rehearsal_audit_passed: bool,
+    database_modified: bool,
+    runtime_store_id: str | None,
+    would_modify: bool | None = None,
+    backup_path: Path | None = None,
+    backup_sha256: str | None = None,
+) -> RuntimeMigrationReport:
+    pending = tuple(item.version for item in _MIGRATIONS if item.version > inspection.current_version)
+    return RuntimeMigrationReport(
+        mode=mode,
+        database=str(database),
+        target_schema_state=inspection.state,
+        target_schema_audit_passed=inspection.audit_passed,
+        rehearsal_performed=rehearsal_performed,
+        rehearsal_audit_passed=rehearsal_audit_passed,
+        migration_history_valid=inspection.history_valid,
+        current_version=inspection.current_version,
+        latest_version=RUNTIME_OUTBOX_SCHEMA_VERSION,
+        pending_versions=pending,
+        source_database_sha256=source_sha,
+        would_modify=bool(pending) if would_modify is None else would_modify,
+        database_modified=database_modified,
+        runtime_store_id=runtime_store_id,
+        backup_path=None if backup_path is None else str(backup_path),
+        backup_sha256=backup_sha256,
+    )
+
+
 def migrate_runtime_database(
     database: str | Path,
     *,
@@ -387,42 +588,93 @@ def migrate_runtime_database(
 ) -> RuntimeMigrationReport:
     if type(apply) is not bool:
         raise RuntimeMigrationError("apply must be boolean")
-    database_path = Path(database).expanduser().resolve(strict=True)
+    database_path = _checked_path(database, "runtime database", must_exist=True)
+    expected_identity = _path_identity(database_path, "runtime database")
+    source_sha = _sha256_file(database_path)
     observed = datetime.now(timezone.utc) if now is None else now
     _utc_text(observed)
     with closing(_read_only_connection(database_path)) as source:
-        current = _applied_version(source)
-        pending = () if current == RUNTIME_OUTBOX_SCHEMA_VERSION else (1,)
-        if not apply:
+        inspection = _inspect_target(source)
+        if not inspection.audit_passed:
+            report = _report(
+                mode="APPLY" if apply else "DRY_RUN",
+                database=database_path,
+                inspection=inspection,
+                source_sha=source_sha,
+                rehearsal_performed=False,
+                rehearsal_audit_passed=False,
+                database_modified=False,
+                runtime_store_id=inspection.runtime_store_id,
+            )
+            raise RuntimeMigrationError(
+                f"runtime migration target is {inspection.state}",
+                code="RUNTIME_TARGET_SCHEMA_INVALID",
+                report=report,
+            )
+        try:
             with closing(sqlite3.connect(":memory:")) as rehearsal:
                 source.backup(rehearsal)
-                _apply_connection(rehearsal, observed)
-            return RuntimeMigrationReport(
-                mode="DRY_RUN",
-                database=str(database_path),
-                current_version=current,
-                pending_versions=pending,
+                _apply_pending(rehearsal, inspection.current_version, observed)
+                audit_runtime_evidence_schema(rehearsal)
+        except Exception as exc:
+            report = _report(
+                mode="APPLY" if apply else "DRY_RUN",
+                database=database_path,
+                inspection=inspection,
+                source_sha=source_sha,
+                rehearsal_performed=True,
+                rehearsal_audit_passed=False,
                 database_modified=False,
-                schema_audit_passed=True,
-                backup_path=None,
-                backup_sha256=None,
+                runtime_store_id=inspection.runtime_store_id,
             )
+            raise RuntimeMigrationError(
+                "runtime migration rehearsal failed", code="RUNTIME_REHEARSAL_FAILED", report=report
+            ) from exc
+    if _path_identity(database_path, "runtime database") != expected_identity or _sha256_file(database_path) != source_sha:
+        raise RuntimeMigrationError("runtime database changed during migration rehearsal")
+    if not apply:
+        return _report(
+            mode="DRY_RUN",
+            database=database_path,
+            inspection=inspection,
+            source_sha=source_sha,
+            rehearsal_performed=True,
+            rehearsal_audit_passed=True,
+            database_modified=False,
+            runtime_store_id=inspection.runtime_store_id,
+        )
     if backup is None:
         raise RuntimeMigrationError("--apply requires an explicit backup path")
-    backup_path = Path(backup).expanduser().resolve(strict=False)
+    backup_path = _checked_path(backup, "runtime migration backup", must_exist=False)
     if database_path == backup_path:
         raise RuntimeMigrationError("backup path must differ from runtime database")
     backup_sha = _backup_no_overwrite(database_path, backup_path)
+    if _path_identity(database_path, "runtime database") != expected_identity:
+        raise RuntimeMigrationError("runtime database was replaced before migration apply")
     with closing(sqlite3.connect(database_path, timeout=30.0)) as connection:
-        _apply_connection(connection, observed)
-    return RuntimeMigrationReport(
+        connection.execute("PRAGMA foreign_keys=ON")
+        runtime_store_id = _apply_pending(connection, inspection.current_version, observed)
+    if _path_identity(database_path, "runtime database") != expected_identity:
+        raise RuntimeMigrationError("runtime database was replaced during migration")
+    after_sha = _sha256_file(database_path)
+    modified = source_sha != after_sha
+    if bool(inspection.current_version < RUNTIME_OUTBOX_SCHEMA_VERSION) != modified:
+        raise RuntimeMigrationError("runtime migration modification result is inconsistent")
+    with closing(_read_only_connection(database_path)) as verified:
+        final_inspection = _inspect_target(verified)
+        if audit_runtime_evidence_schema(verified) != runtime_store_id:
+            raise RuntimeMigrationError("runtime migration verification failed")
+    return _report(
         mode="APPLY",
-        database=str(database_path),
-        current_version=RUNTIME_OUTBOX_SCHEMA_VERSION,
-        pending_versions=(),
-        database_modified=bool(pending),
-        schema_audit_passed=True,
-        backup_path=str(backup_path),
+        database=database_path,
+        inspection=final_inspection,
+        source_sha=source_sha,
+        rehearsal_performed=True,
+        rehearsal_audit_passed=True,
+        database_modified=modified,
+        runtime_store_id=runtime_store_id,
+        would_modify=inspection.current_version < RUNTIME_OUTBOX_SCHEMA_VERSION,
+        backup_path=backup_path,
         backup_sha256=backup_sha,
     )
 
@@ -432,6 +684,7 @@ def report_json(report: RuntimeMigrationReport) -> str:
 
 
 __all__ = [
+    "RUNTIME_EVIDENCE_STORE_SCHEMA",
     "RUNTIME_MIGRATION_SCHEMA",
     "RUNTIME_OUTBOX_SCHEMA_VERSION",
     "RuntimeMigrationError",

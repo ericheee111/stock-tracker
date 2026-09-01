@@ -28,7 +28,10 @@ def main(argv: list[str] | None = None) -> int:
             backup=args.backup,
         )
     except RuntimeMigrationError as exc:
-        print(str(exc), file=sys.stderr)
+        if exc.report is not None:
+            print(report_json(exc.report), file=sys.stderr)
+        else:
+            print(str(exc), file=sys.stderr)
         return 2
     print(report_json(report))
     return 0

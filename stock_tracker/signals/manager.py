@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from ..core import types as T
@@ -24,11 +24,20 @@ from ..runtime_evidence.contracts import (
     RuntimeEvidenceContractError,
     SystemUtcClock,
     UtcClock,
-    build_runtime_decision_artifact,
+    build_runtime_decision_draft,
     require_utc_clock_value,
+    runtime_signal_version_id,
 )
-from ..storage.repository import Repository, RuntimeOutboxError, to_jsonable
-from ..storage.runtime_migrations import RuntimeMigrationError
+from ..storage.repository import (
+    Repository,
+    RuntimeDatabaseIntegrityError,
+    RuntimeEvidenceUnavailableError,
+    RuntimeOutboxConflict,
+    RuntimeOutboxError,
+    RuntimeSignalPersistence,
+    SignalPersistenceError,
+    to_jsonable,
+)
 from ..strategies.base import SignalCandidate, Strategy
 from ..strategies.s1_breakout import S1Breakout
 from ..strategies.s2_pullback import S2Pullback
@@ -42,6 +51,13 @@ def _price_usable(q: T.Quote) -> bool:
     """价格字段是否可用于策略/特征计算（无 None 且为正）。"""
     return all(p is not None and p > 0 for p in
                (q.last, q.prev_close, q.open, q.high, q.low))
+
+
+@dataclass(frozen=True, slots=True)
+class _SignalPersistenceOutcome:
+    status: str
+    artifact_id: str | None
+    error_code: str | None
 
 
 class SignalManager:
@@ -70,72 +86,168 @@ class SignalManager:
         artifact_id: str | None,
         error_code: str | None,
     ) -> None:
-        self._bus.publish(
-            "runtime_evidence",
-            {
-                "schema": "stage4g1-runtime-evidence-status-v1",
-                "runtime_signal_id": signal_id,
-                "status": status,
-                "artifact_id": artifact_id,
-                "error_code": error_code,
-                "auto_trade": False,
-                "stage4g_case_opened": False,
-            },
-        )
+        try:
+            self._bus.publish(
+                "runtime_evidence",
+                {
+                    "schema": "stage4g1-runtime-evidence-status-v1",
+                    "runtime_signal_id": signal_id,
+                    "status": status,
+                    "artifact_id": artifact_id,
+                    "error_code": error_code,
+                    "auto_trade": False,
+                    "stage4g_case_opened": False,
+                },
+            )
+        except Exception:  # noqa: BLE001 - observational status must not break decisions
+            return
 
     def _persist_signal_with_runtime_evidence(
         self,
         *,
         signal: T.Signal,
+        existing: T.Signal | None,
         changed: bool,
         quote: T.Quote,
         bars: list[T.Bar],
         dq: T.DataQuality,
         decision_requested_at: datetime,
-    ) -> None:
+    ) -> _SignalPersistenceOutcome | None:
         observed_at = require_utc_clock_value(self.clock.now(), "observed_at")
-        artifact = None
+        try:
+            expected_previous_signal_version_id = runtime_signal_version_id(
+                existing,
+                allow_legacy_naive_datetime=True,
+            )
+        except RuntimeEvidenceContractError as exc:
+            self._publish_runtime_evidence(
+                signal_id=signal.signal_id,
+                status="SIGNAL_PERSISTENCE_FAILED",
+                artifact_id=None,
+                error_code=exc.code,
+            )
+            return None
+
+        decision_draft = None
         build_error: RuntimeEvidenceContractError | None = None
+        evidence_unavailable: RuntimeEvidenceUnavailableError | None = None
         if changed:
             try:
-                artifact = build_runtime_decision_artifact(
+                runtime_store_id = self.repo.runtime_evidence_store_id()
+                decision_draft = build_runtime_decision_draft(
+                    runtime_store_id=runtime_store_id,
                     signal=signal,
+                    previous_signal=existing,
                     quote=quote,
                     bars=bars,
                     data_quality=dq,
                     bundle=self.bundle,
                     decision_requested_at=decision_requested_at,
                     observed_at=observed_at,
-                    instrument_metadata=self.store.get_instrument(signal.symbol),
+                    instrument_metadata=self.store.get_instrument(signal.symbol) or {},
                 )
             except RuntimeEvidenceContractError as exc:
                 build_error = exc
+            except RuntimeEvidenceUnavailableError as exc:
+                evidence_unavailable = exc
+            except (
+                RuntimeDatabaseIntegrityError,
+                RuntimeOutboxConflict,
+                RuntimeOutboxError,
+                SignalPersistenceError,
+            ) as exc:
+                self._publish_runtime_evidence(
+                    signal_id=signal.signal_id,
+                    status="SIGNAL_PERSISTENCE_FAILED",
+                    artifact_id=None,
+                    error_code=type(exc).__name__,
+                )
+                return None
+
+        if evidence_unavailable is not None:
+            try:
+                persisted = self.repo.persist_signal_decision(
+                    signal,
+                    changed=changed,
+                    observed_at=observed_at,
+                    expected_previous_signal_version_id=expected_previous_signal_version_id,
+                )
+            except (
+                RuntimeDatabaseIntegrityError,
+                RuntimeOutboxConflict,
+                RuntimeOutboxError,
+                SignalPersistenceError,
+            ) as core_error:
+                self._publish_runtime_evidence(
+                    signal_id=signal.signal_id,
+                    status="SIGNAL_PERSISTENCE_FAILED",
+                    artifact_id=None,
+                    error_code=type(core_error).__name__,
+                )
+                return None
+            return _SignalPersistenceOutcome(
+                "UNAVAILABLE",
+                None,
+                "RUNTIME_EVIDENCE_UNAVAILABLE",
+            )
+
         try:
-            persisted = self.repo.persist_signal_decision(
+            persisted: RuntimeSignalPersistence = self.repo.persist_signal_decision(
                 signal,
                 changed=changed,
                 observed_at=observed_at,
-                artifact=artifact,
+                expected_previous_signal_version_id=expected_previous_signal_version_id,
+                decision_draft=decision_draft,
                 quarantine_reason=None if build_error is None else build_error.code,
             )
-        except (RuntimeMigrationError, RuntimeOutboxError, sqlite3.Error) as exc:
-            self.repo.persist_signal_decision(
-                signal,
-                changed=changed,
-                observed_at=observed_at,
+        except RuntimeEvidenceUnavailableError:
+            try:
+                persisted = self.repo.persist_signal_decision(
+                    signal,
+                    changed=changed,
+                    observed_at=observed_at,
+                    expected_previous_signal_version_id=expected_previous_signal_version_id,
+                )
+            except (
+                RuntimeDatabaseIntegrityError,
+                RuntimeOutboxConflict,
+                RuntimeOutboxError,
+                SignalPersistenceError,
+            ) as core_error:
+                self._publish_runtime_evidence(
+                    signal_id=signal.signal_id,
+                    status="SIGNAL_PERSISTENCE_FAILED",
+                    artifact_id=None,
+                    error_code=type(core_error).__name__,
+                )
+                return None
+            return _SignalPersistenceOutcome(
+                "UNAVAILABLE",
+                None,
+                "RUNTIME_EVIDENCE_UNAVAILABLE",
             )
+        except (
+            RuntimeDatabaseIntegrityError,
+            RuntimeOutboxConflict,
+            RuntimeOutboxError,
+            SignalPersistenceError,
+        ) as error:
             self._publish_runtime_evidence(
                 signal_id=signal.signal_id,
-                status="UNAVAILABLE",
+                status="SIGNAL_PERSISTENCE_FAILED",
                 artifact_id=None,
-                error_code=type(exc).__name__,
+                error_code=type(error).__name__,
             )
-            return
-        self._publish_runtime_evidence(
-            signal_id=signal.signal_id,
-            status=persisted.evidence_status,
-            artifact_id=persisted.artifact_id,
-            error_code=None if build_error is None else build_error.code,
+            return None
+        evidence_status = persisted.evidence_status
+        error_code = None if build_error is None else build_error.code
+        if evidence_status == "SIGNAL_ALREADY_PERSISTED_WITHOUT_OUTBOX":
+            evidence_status = "UNAVAILABLE"
+            error_code = "SIGNAL_ALREADY_PERSISTED_WITHOUT_OUTBOX"
+        return _SignalPersistenceOutcome(
+            evidence_status,
+            persisted.artifact_id,
+            error_code,
         )
 
     def _build_strategies(self) -> list[Strategy]:
@@ -356,16 +468,28 @@ class SignalManager:
             if sig is None:
                 continue
             changed = existing is None or existing.state != sig.state
-            self._persist_signal_with_runtime_evidence(
+            persistence = self._persist_signal_with_runtime_evidence(
                 signal=sig,
+                existing=existing,
                 changed=changed,
                 quote=quote,
                 bars=bars,
                 dq=dq,
                 decision_requested_at=decision_requested_at,
             )
+            if persistence is None:
+                continue
             self.store.upsert_signal(sig)
-            self._bus.publish("signal", to_jsonable(sig))
+            try:
+                self._bus.publish("signal", to_jsonable(sig))
+            except Exception:  # noqa: BLE001, S110 - durable state survives transport
+                pass
+            self._publish_runtime_evidence(
+                signal_id=sig.signal_id,
+                status=persistence.status,
+                artifact_id=persistence.artifact_id,
+                error_code=persistence.error_code,
+            )
             self._publish_monitor_facts(
                 signal=sig,
                 quote=quote,

@@ -108,8 +108,29 @@ _CATALOG_SCHEMA_SQL = (
 )
 
 
+class RuntimeArtifactFailureClass(StrEnum):
+    ROW_PERMANENT = "ROW_PERMANENT"
+    ROW_TRANSIENT = "ROW_TRANSIENT"
+    STORE_INTEGRITY_BLOCK = "STORE_INTEGRITY_BLOCK"
+
+
 class RuntimeArtifactStoreError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "ARTIFACT_STORE_INTEGRITY_FAILURE",
+        failure_class: RuntimeArtifactFailureClass = (
+            RuntimeArtifactFailureClass.STORE_INTEGRITY_BLOCK
+        ),
+    ) -> None:
+        if type(code) is not str or not code or code != code.strip():
+            raise TypeError("code must be a trimmed non-empty string")
+        if type(failure_class) is not RuntimeArtifactFailureClass:
+            raise TypeError("failure_class must be RuntimeArtifactFailureClass")
+        super().__init__(message)
+        self.code = code
+        self.failure_class = failure_class
 
 
 class RuntimeArtifactAppendDisposition(StrEnum):
@@ -253,9 +274,16 @@ def _atomic_write_no_overwrite(path: Path, raw: bytes) -> bool:
             created = True
         except FileExistsError:
             if not path.is_file() or _is_link(path) or path.read_bytes() != raw:
-                raise RuntimeArtifactStoreError("immutable artifact record collision")
+                raise RuntimeArtifactStoreError(
+                    "immutable artifact record collision",
+                    code="ARTIFACT_ID_COLLISION",
+                )
         except OSError as exc:
-            raise RuntimeArtifactStoreError("cannot atomically publish artifact") from exc
+            raise RuntimeArtifactStoreError(
+                "cannot atomically publish artifact",
+                code="ARTIFACT_RECORD_PUBLICATION_IO",
+                failure_class=RuntimeArtifactFailureClass.ROW_TRANSIENT,
+            ) from exc
         return created
     finally:
         try:
@@ -297,16 +325,28 @@ def _validate_catalog_schema(connection: sqlite3.Connection) -> tuple[str, str]:
             ).fetchall()
         }
         if tables != {"runtime_artifact_meta", "runtime_artifacts"}:
-            raise RuntimeArtifactStoreError("artifact catalog table set is invalid")
+            raise RuntimeArtifactStoreError(
+                "artifact catalog table set is invalid",
+                code="ARTIFACT_STORE_SCHEMA_MISMATCH",
+            )
         if _table_columns(connection, "runtime_artifact_meta") != _META_COLUMNS:
-            raise RuntimeArtifactStoreError("artifact metadata columns are invalid")
+            raise RuntimeArtifactStoreError(
+                "artifact metadata columns are invalid",
+                code="ARTIFACT_STORE_SCHEMA_MISMATCH",
+            )
         if _table_columns(connection, "runtime_artifacts") != _ARTIFACT_COLUMNS:
-            raise RuntimeArtifactStoreError("artifact record columns are invalid")
+            raise RuntimeArtifactStoreError(
+                "artifact record columns are invalid",
+                code="ARTIFACT_STORE_SCHEMA_MISMATCH",
+            )
         views = connection.execute(
             "SELECT name FROM sqlite_master WHERE type='view' AND name NOT LIKE 'sqlite_%'"
         ).fetchall()
         if views:
-            raise RuntimeArtifactStoreError("artifact catalog views are forbidden")
+            raise RuntimeArtifactStoreError(
+                "artifact catalog views are forbidden",
+                code="ARTIFACT_STORE_SCHEMA_MISMATCH",
+            )
         triggers = {
             str(row[0]): (str(row[1]), _normalized_sql(row[2]))
             for row in connection.execute(
@@ -319,7 +359,10 @@ def _validate_catalog_schema(connection: sqlite3.Connection) -> tuple[str, str]:
             for name, (table, sql) in _EXPECTED_TRIGGERS.items()
         }
         if triggers != expected_triggers:
-            raise RuntimeArtifactStoreError("artifact catalog trigger set is invalid")
+            raise RuntimeArtifactStoreError(
+                "artifact catalog trigger set is invalid",
+                code="ARTIFACT_STORE_SCHEMA_MISMATCH",
+            )
         explicit_indexes: dict[str, tuple[str, ...]] = {}
         for table in tables:
             for row in connection.execute(f"PRAGMA index_list({table})").fetchall():
@@ -336,7 +379,10 @@ def _validate_catalog_schema(connection: sqlite3.Connection) -> tuple[str, str]:
         if explicit_indexes != {
             "idx_runtime_artifacts_signal": ("runtime_signal_id", "append_order")
         }:
-            raise RuntimeArtifactStoreError("artifact catalog index set is invalid")
+            raise RuntimeArtifactStoreError(
+                "artifact catalog index set is invalid",
+                code="ARTIFACT_STORE_SCHEMA_MISMATCH",
+            )
         metadata = {
             str(row[0]): str(row[1])
             for row in connection.execute(
@@ -344,9 +390,15 @@ def _validate_catalog_schema(connection: sqlite3.Connection) -> tuple[str, str]:
             ).fetchall()
         }
         if set(metadata) != {"schema", "store_id"}:
-            raise RuntimeArtifactStoreError("artifact catalog metadata is invalid")
+            raise RuntimeArtifactStoreError(
+                "artifact catalog metadata is invalid",
+                code="ARTIFACT_STORE_SCHEMA_MISMATCH",
+            )
         if metadata["schema"] != RUNTIME_ARTIFACT_STORE_SCHEMA:
-            raise RuntimeArtifactStoreError("artifact catalog schema identity is invalid")
+            raise RuntimeArtifactStoreError(
+                "artifact catalog schema identity is invalid",
+                code="ARTIFACT_STORE_SCHEMA_MISMATCH",
+            )
         store_id = metadata["store_id"]
         if len(store_id) != 64 or any(c not in "0123456789abcdef" for c in store_id):
             raise RuntimeArtifactStoreError("artifact store identity is invalid")
@@ -354,7 +406,10 @@ def _validate_catalog_schema(connection: sqlite3.Connection) -> tuple[str, str]:
     except RuntimeArtifactStoreError:
         raise
     except sqlite3.Error as exc:
-        raise RuntimeArtifactStoreError("artifact catalog schema audit failed") from exc
+        raise RuntimeArtifactStoreError(
+            "artifact catalog schema audit failed",
+            code="ARTIFACT_STORE_SCHEMA_MISMATCH",
+        ) from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -644,13 +699,19 @@ class RuntimeArtifactStore:
         if _checked_path(self.record_root, "artifact record root") != self.record_root:
             raise RuntimeArtifactStoreError("artifact record root identity changed")
         if _path_identity(self.record_root, "artifact record root") != self._record_root_identity:
-            raise RuntimeArtifactStoreError("artifact record root was replaced")
+            raise RuntimeArtifactStoreError(
+                "artifact record root was replaced",
+                code="ARTIFACT_STORE_IDENTITY_REPLACED",
+            )
         if not self.catalog_path.is_file() or _is_link(self.catalog_path):
             raise RuntimeArtifactStoreError("artifact catalog must remain a regular file")
         if self._catalog_identity is not None and _path_identity(
             self.catalog_path, "artifact catalog"
         ) != self._catalog_identity:
-            raise RuntimeArtifactStoreError("artifact catalog was replaced")
+            raise RuntimeArtifactStoreError(
+                "artifact catalog was replaced",
+                code="ARTIFACT_STORE_IDENTITY_REPLACED",
+            )
         for target in (self.production_database, *self.forbidden_paths):
             if _same_existing_file(self.catalog_path, target):
                 raise RuntimeArtifactStoreError("artifact catalog aliases a forbidden path")
@@ -660,12 +721,26 @@ class RuntimeArtifactStore:
         except OSError as exc:
             raise RuntimeArtifactStoreError("cannot read artifact catalog") from exc
         if header != _SQLITE_HEADER:
-            raise RuntimeArtifactStoreError("artifact catalog is not SQLite")
+            raise RuntimeArtifactStoreError(
+                "artifact catalog is not SQLite",
+                code="ARTIFACT_STORE_IDENTITY_REPLACED",
+            )
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
         self._assert_identities()
-        connection = sqlite3.connect(self.catalog_path, timeout=30.0)
+        try:
+            connection = sqlite3.connect(self.catalog_path, timeout=30.0)
+        except sqlite3.Error as exc:
+            raise RuntimeArtifactStoreError(
+                "cannot open artifact catalog",
+                code="ARTIFACT_CATALOG_OPEN_FAILED",
+                failure_class=(
+                    RuntimeArtifactFailureClass.ROW_TRANSIENT
+                    if isinstance(exc, sqlite3.OperationalError)
+                    else RuntimeArtifactFailureClass.STORE_INTEGRITY_BLOCK
+                ),
+            ) from exc
         connection.row_factory = sqlite3.Row
         try:
             connection.execute("PRAGMA foreign_keys=ON")
@@ -674,6 +749,18 @@ class RuntimeArtifactStore:
             _validate_catalog_schema(connection)
             yield connection
             self._assert_identities()
+        except RuntimeArtifactStoreError:
+            raise
+        except sqlite3.Error as exc:
+            raise RuntimeArtifactStoreError(
+                "artifact catalog operation failed",
+                code="ARTIFACT_CATALOG_OPERATION_FAILED",
+                failure_class=(
+                    RuntimeArtifactFailureClass.ROW_TRANSIENT
+                    if isinstance(exc, sqlite3.OperationalError)
+                    else RuntimeArtifactFailureClass.STORE_INTEGRITY_BLOCK
+                ),
+            ) from exc
         finally:
             connection.close()
 
@@ -701,7 +788,10 @@ class RuntimeArtifactStore:
             artifact_payload_sha == str(row["payload_sha256"]),
         )
         if not all(values):
-            raise RuntimeArtifactStoreError("artifact catalog disagrees with record file")
+            raise RuntimeArtifactStoreError(
+                "artifact catalog disagrees with record file",
+                code="ARTIFACT_STORE_CATALOG_RECORD_MISMATCH",
+            )
         return record
 
     def _validate_state(
@@ -713,7 +803,10 @@ class RuntimeArtifactStore:
     ) -> tuple[RuntimeArtifactRecord, ...]:
         _schema, store_id = _validate_catalog_schema(connection)
         if store_id != self.store_id:
-            raise RuntimeArtifactStoreError("artifact store identity changed")
+            raise RuntimeArtifactStoreError(
+                "artifact store identity changed",
+                code="ARTIFACT_STORE_IDENTITY_REPLACED",
+            )
         rows = connection.execute(
             "SELECT * FROM runtime_artifacts ORDER BY append_order"
         ).fetchall()
@@ -726,16 +819,28 @@ class RuntimeArtifactStore:
             if record.append_order != expected_order:
                 raise RuntimeArtifactStoreError("artifact append order is not contiguous")
             if record.previous_record_hash != expected_previous:
-                raise RuntimeArtifactStoreError("artifact record hash chain is broken")
+                raise RuntimeArtifactStoreError(
+                    "artifact record hash chain is broken",
+                    code="ARTIFACT_STORE_HASH_CHAIN_FAILURE",
+                )
             if record.stored_at > audited_at:
-                raise RuntimeArtifactStoreError("artifact was stored after audit time")
+                raise RuntimeArtifactStoreError(
+                    "artifact was stored after audit time",
+                    code="ARTIFACT_STORE_CLOCK_ROLLBACK",
+                )
             if previous_stored_at is not None and record.stored_at < previous_stored_at:
-                raise RuntimeArtifactStoreError("artifact store time is not monotonic")
+                raise RuntimeArtifactStoreError(
+                    "artifact store time is not monotonic",
+                    code="ARTIFACT_STORE_CLOCK_ROLLBACK",
+                )
             artifact_observed = _utc_from_text(
                 record.artifact.identity_dict()["observed_at_utc"], "observed_at_utc"
             )
             if record.stored_at < artifact_observed:
-                raise RuntimeArtifactStoreError("artifact stored_at precedes observation")
+                raise RuntimeArtifactStoreError(
+                    "artifact stored_at precedes observation",
+                    code="ARTIFACT_STORE_CLOCK_ROLLBACK",
+                )
             expected_previous = record.record_hash
             previous_stored_at = record.stored_at
             expected_files.add(_safe_record_path(self.record_root, record.record_file))
@@ -749,13 +854,27 @@ class RuntimeArtifactStore:
         if allowed_orphan is not None:
             unexpected.discard(allowed_orphan.resolve(strict=False))
         if expected_files - actual_files or unexpected:
-            raise RuntimeArtifactStoreError("artifact record inventory mismatch")
+            raise RuntimeArtifactStoreError(
+                "artifact record inventory mismatch",
+                code="ARTIFACT_STORE_INVENTORY_MISMATCH",
+            )
         return tuple(records)
 
     def append(self, artifact: RuntimeDecisionArtifact) -> RuntimeArtifactAppendResult:
-        if not isinstance(artifact, RuntimeDecisionArtifact):
-            raise RuntimeArtifactStoreError("artifact must be RuntimeDecisionArtifact")
-        artifact = RuntimeDecisionArtifact.from_json_bytes(artifact.to_json_bytes())
+        if type(artifact) is not RuntimeDecisionArtifact:
+            raise RuntimeArtifactStoreError(
+                "artifact must be RuntimeDecisionArtifact",
+                code="ROW_ARTIFACT_TYPE_INVALID",
+                failure_class=RuntimeArtifactFailureClass.ROW_PERMANENT,
+            )
+        try:
+            artifact = RuntimeDecisionArtifact.from_json_bytes(artifact.to_json_bytes())
+        except RuntimeEvidenceContractError as exc:
+            raise RuntimeArtifactStoreError(
+                "artifact contract is invalid",
+                code="ROW_ARTIFACT_CONTRACT_INVALID",
+                failure_class=RuntimeArtifactFailureClass.ROW_PERMANENT,
+            ) from exc
         created_path: Path | None = None
         created_raw: bytes | None = None
         with self._lock, self._connection() as connection:
@@ -777,13 +896,19 @@ class RuntimeArtifactStore:
                 )
                 if existing is not None:
                     if existing.artifact != artifact:
-                        raise RuntimeArtifactStoreError("artifact identity conflict")
+                        raise RuntimeArtifactStoreError(
+                            "artifact identity conflict",
+                            code="ARTIFACT_ID_COLLISION",
+                        )
                     connection.rollback()
                     return RuntimeArtifactAppendResult(
                         RuntimeArtifactAppendDisposition.IDEMPOTENT, existing
                     )
                 if records and observed < records[-1].stored_at:
-                    raise RuntimeArtifactStoreError("artifact store clock moved backward")
+                    raise RuntimeArtifactStoreError(
+                        "artifact store clock moved backward",
+                        code="ARTIFACT_STORE_CLOCK_ROLLBACK",
+                    )
                 expected_previous = _ZERO_HASH if not records else records[-1].record_hash
                 if target.exists():
                     if not target.is_file() or _is_link(target):
@@ -799,7 +924,10 @@ class RuntimeArtifactStore:
                         != f"records/{artifact.artifact_id[:2]}/{artifact.artifact_id}.json"
                         or record.stored_at > observed
                     ):
-                        raise RuntimeArtifactStoreError("orphan artifact record identity mismatch")
+                        raise RuntimeArtifactStoreError(
+                            "orphan artifact record identity mismatch",
+                            code="ARTIFACT_ID_COLLISION",
+                        )
                 else:
                     record = RuntimeArtifactRecord.create(
                         append_order=len(records) + 1,
@@ -902,6 +1030,7 @@ __all__ = [
     "RuntimeArtifactAppendDisposition",
     "RuntimeArtifactAppendResult",
     "RuntimeArtifactAuditReport",
+    "RuntimeArtifactFailureClass",
     "RuntimeArtifactRecord",
     "RuntimeArtifactStore",
     "RuntimeArtifactStoreError",

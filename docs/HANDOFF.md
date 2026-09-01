@@ -231,19 +231,3 @@ Stage 4G 独立复审已把先前“Runtime Service 完成”修正为“manual 
 
 - 把 `qa/ui/shot.cjs` 接入 CI：每次前端改动后跑一遍，断言 `indexGrid.len>0` / `topList.len>0` / `sheet open` / 无 `pageerror`。需 CI 环境装 Playwright + Chromium（`PLAYWRIGHT_PATH` 或 `npm i -D playwright`）。
 - N3 修复后，应补一个「故意写坏 TOML → 启动应报错而非静默回退」的测试。
-
----
-
-## 10. Stage 4G.1 Checkpoint A Runtime Artifact / Outbox
-
-> 日期：2026-09-01｜分支：`agent/codex-stage4g1`｜状态：`CODEX_CHECKPOINT_READY / WORKBUDDY_CHECKPOINT_PASS_PENDING`
-
-- Runtime 现在使用可注入 UTC Clock，生成严格 canonical `RuntimeDecisionArtifact`、`artifact_id` 和 `runtime_episode_fact_id`；调用方不能自报晋级字段，naive datetime、未知字段和非有限数值均失败关闭。
-- Runtime migration 使用独立 checksum history；`scripts/runtime_migrate.py` 默认 dry-run，只有显式 `--apply` 加显式新 backup path 才能修改目标数据库。
-- Signal current state、Signal history 和 immutable outbox payload 在同一个 `BEGIN IMMEDIATE` transaction 中提交。payload 禁止 UPDATE/DELETE；delivery/lease/retry/quarantine/cursor 与 payload 分离。Outcome evidence lane 失败时事务回滚，正常信号与页面路径独立落库，不被破坏。
-- 独立 Artifact Store 使用 stable identity、append-only catalog、atomic no-overwrite publication、连续 append order、hash chain，以及对 schema/index/trigger/view/generated column 的精确审计。Worker 保持 at-least-once delivery、idempotent exactly-once observable publication，并且只在 artifact durable 且全量 audit 成功后推进 cursor；poison payload 进入 quarantine。
-- Checkpoint A 不打开 Stage 4G Outcome Collection case。Checkpoint B-D、Trusted Outcome Admission、真实 Strategy Scoreboard、Broker/XTP write API 和 `auto_trade=true` 均未实现或启用。
-- 当前验证：focused `17/17`；Runtime `539 passed, 1 expected skip`；Quant `724/724`；source distribution `2/2`；Today Mock `17/17`；真实临时 Today API/Web `17/17`；Portfolio CRUD `13/13`；changed-file Ruff、compileall、pip check、Quant smoke、synthetic benchmark 通过；Runtime/Quant migration 均为 dry-run。
-- 仅使用 synthetic fixture 和临时数据库；生产 `data/stock_tracker.db` SHA-256 前后均为 `ce4156bf641e061d86ce944167ad2b1347f2437c130a7cf6eee26892fb78cbb7`。
-- 全仓 Ruff 探针仍报告 249 项既有、非本 Checkpoint 文件的问题；本次所有修改的 Python 文件 targeted Ruff 通过。
-- 本 Checkpoint 只进入一个本地 scoped commit，并停止等待同一 WorkBuddy 会话给出 `WORKBUDDY_CHECKPOINT_PASS:A`；此前不得开始 Checkpoint B 或 push。

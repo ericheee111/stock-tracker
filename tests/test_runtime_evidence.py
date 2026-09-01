@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import hashlib
+import io
+import json
 import sqlite3
 import tempfile
 import unittest
-from contextlib import closing
+import uuid
+from contextlib import closing, redirect_stderr, redirect_stdout
+from dataclasses import fields, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
+from scripts.runtime_migrate import main as runtime_migrate_main
 from stock_tracker.core import types as T
 from stock_tracker.core.config import load_configs
 from stock_tracker.core.store import MarketStore
@@ -16,11 +21,15 @@ from stock_tracker.data_quality.gate import DataQualityGate
 from stock_tracker.features.engine import FeatureEngine
 from stock_tracker.runtime_evidence.contracts import (
     RuntimeDecisionArtifact,
+    RuntimeDecisionDraft,
     RuntimeEvidenceContractError,
     build_runtime_decision_artifact,
+    build_runtime_decision_draft,
+    runtime_signal_version_id,
 )
 from stock_tracker.runtime_evidence.store import (
     RuntimeArtifactAppendDisposition,
+    RuntimeArtifactFailureClass,
     RuntimeArtifactRecord,
     RuntimeArtifactStore,
     RuntimeArtifactStoreError,
@@ -30,8 +39,16 @@ from stock_tracker.runtime_evidence.worker import (
     RuntimeArtifactWorkerStatus,
 )
 from stock_tracker.signals.manager import SignalManager
+from stock_tracker.storage import runtime_migrations as runtime_migrations_module
 from stock_tracker.storage.db import close_all, get_connection
-from stock_tracker.storage.repository import Repository
+from stock_tracker.storage.repository import (
+    Repository,
+    RuntimeDatabaseIntegrityError,
+    RuntimeEvidenceUnavailableError,
+    RuntimeOutboxConflict,
+    RuntimeOutboxError,
+    SignalPersistenceError,
+)
 from stock_tracker.storage.runtime_migrations import (
     RuntimeMigrationError,
     audit_runtime_evidence_schema,
@@ -155,29 +172,82 @@ class RuntimeEvidenceTestCase(unittest.TestCase):
             )
         return database
 
-    def artifact(self, *, signal_id: str = "600519.SH:S1") -> RuntimeDecisionArtifact:
-        signal, quote, bars, quality = _runtime_inputs(self.now, signal_id=signal_id)
-        return build_runtime_decision_artifact(
+    def runtime_store_id(self, database: Path) -> str:
+        return Repository(str(database)).runtime_evidence_store_id()
+
+    def draft(
+        self,
+        *,
+        signal_id: str = "600519.SH:S1",
+        runtime_store_id: str = "a" * 64,
+        previous_signal: T.Signal | None = None,
+        signal: T.Signal | None = None,
+        quote: T.Quote | None = None,
+        bars: list[T.Bar] | None = None,
+        quality: T.DataQuality | None = None,
+        decision_requested_at: datetime | None = None,
+        observed_at: datetime | None = None,
+        upstream_occurrence_id: str | None = None,
+    ) -> RuntimeDecisionDraft:
+        if signal is None or quote is None or bars is None or quality is None:
+            default_signal, default_quote, default_bars, default_quality = _runtime_inputs(
+                self.now,
+                signal_id=signal_id,
+            )
+            signal = default_signal if signal is None else signal
+            quote = default_quote if quote is None else quote
+            bars = default_bars if bars is None else bars
+            quality = default_quality if quality is None else quality
+        return build_runtime_decision_draft(
+            runtime_store_id=runtime_store_id,
             signal=signal,
+            previous_signal=previous_signal,
             quote=quote,
             bars=bars,
             data_quality=quality,
             bundle=self.bundle,
-            decision_requested_at=self.now,
-            observed_at=self.now,
+            decision_requested_at=decision_requested_at or self.now,
+            observed_at=observed_at or self.now,
             instrument_metadata={"exchange": "SSE"},
+            upstream_occurrence_id=upstream_occurrence_id,
+        )
+
+    def artifact(
+        self,
+        *,
+        transition_event_id: str = "b" * 64,
+        **kwargs,
+    ) -> RuntimeDecisionArtifact:
+        return build_runtime_decision_artifact(
+            draft=self.draft(**kwargs),
+            transition_event_id=transition_event_id,
         )
 
 
 class TestRuntimeDecisionArtifact(RuntimeEvidenceTestCase):
-    def test_system_ids_are_canonical_and_occurrence_specific(self) -> None:
+    def test_system_ids_are_canonical_and_retry_deterministic(self) -> None:
         first = self.artifact()
         second = self.artifact()
+        later_observation = self.artifact(
+            observed_at=self.now + timedelta(seconds=1),
+        )
         self.assertEqual(first.artifact_id, first.runtime_episode_fact_id)
         self.assertEqual(first, RuntimeDecisionArtifact.from_json_bytes(first.to_json_bytes()))
-        self.assertNotEqual(first.artifact_id, second.artifact_id)
+        self.assertEqual(first.artifact_id, second.artifact_id)
+        self.assertEqual(
+            first.identity_dict()["transition_event_id"],
+            later_observation.identity_dict()["transition_event_id"],
+        )
+        self.assertNotEqual(first.artifact_id, later_observation.artifact_id)
+        self.assertEqual(first.decision_content_id, later_observation.decision_content_id)
+        self.assertEqual(first.occurrence_dedup_id, later_observation.occurrence_dedup_id)
         self.assertEqual(first.outcome_case_status, "OUTCOME_EVIDENCE_PENDING")
         identity = first.identity_dict()
+        self.assertEqual(identity["runtime_store_id"], "a" * 64)
+        self.assertEqual(
+            identity["signal_version_id"],
+            runtime_signal_version_id(_runtime_inputs(self.now)[0]),
+        )
         self.assertFalse(identity["auto_trade"])
         self.assertTrue(
             identity["instrument_id"].startswith("UNRESOLVED_RUNTIME_IDENTITY:")
@@ -186,6 +256,14 @@ class TestRuntimeDecisionArtifact(RuntimeEvidenceTestCase):
             "INSTRUMENT_IDENTITY_AUTHORITY_PENDING", identity["incomplete_reasons"]
         )
         self.assertTrue(all(value is None for value in identity["execution_rules"].values()))
+        for field_name in (
+            "signal_snapshot",
+            "data_snapshot",
+            "policy_snapshot",
+            "identity_snapshot",
+            "classification_snapshot",
+        ):
+            self.assertIsInstance(identity[field_name], dict)
 
     def test_strict_contract_rejects_extra_bool_numeric_and_noncanonical_json(self) -> None:
         document = self.artifact().as_dict()
@@ -199,12 +277,74 @@ class TestRuntimeDecisionArtifact(RuntimeEvidenceTestCase):
         with self.assertRaises(RuntimeEvidenceContractError):
             RuntimeDecisionArtifact.from_json_bytes(b'{"runtime_episode_fact_id": "x"}')
 
+    def test_snapshot_hashes_are_rebuilt_from_embedded_canonical_evidence(self) -> None:
+        document = self.artifact().as_dict()
+        document["data_snapshot"]["quote"]["last"] = 999.0
+        with self.assertRaisesRegex(
+            RuntimeEvidenceContractError,
+            "data_snapshot_id mismatch",
+        ):
+            RuntimeDecisionArtifact.from_dict(document)
+
+        document = self.artifact().as_dict()
+        document["signal_snapshot"]["signal"]["reason"] = "tampered"
+        with self.assertRaisesRegex(
+            RuntimeEvidenceContractError,
+            "signal_version_id mismatch",
+        ):
+            RuntimeDecisionArtifact.from_dict(document)
+
+    def test_nested_snapshot_sources_require_exact_project_types(self) -> None:
+        class ForgedBar(T.Bar):
+            pass
+
+        signal, quote, bars, quality = _runtime_inputs(self.now)
+        forged_bar = ForgedBar(
+            **{
+                item.name: getattr(bars[0], item.name)
+                for item in fields(T.Bar)
+                if item.init
+            }
+        )
+        with self.assertRaisesRegex(
+            RuntimeEvidenceContractError,
+            "bar instrument identity mismatch",
+        ):
+            self.artifact(
+                signal=signal,
+                quote=quote,
+                bars=[forged_bar],
+                quality=quality,
+            )
+
+        class ForgedMetadata(dict):
+            pass
+
+        with self.assertRaisesRegex(
+            RuntimeEvidenceContractError,
+            "instrument_metadata must be an exact dict",
+        ):
+            build_runtime_decision_draft(
+                runtime_store_id="a" * 64,
+                signal=signal,
+                previous_signal=None,
+                quote=quote,
+                bars=bars,
+                data_quality=quality,
+                bundle=self.bundle,
+                decision_requested_at=self.now,
+                observed_at=self.now,
+                instrument_metadata=ForgedMetadata(exchange="SSE"),
+            )
+
     def test_legacy_naive_formal_time_fails_closed(self) -> None:
         signal, quote, bars, quality = _runtime_inputs(self.now)
         signal.state_changed_at = self.now.replace(tzinfo=None)
         with self.assertRaises(RuntimeEvidenceContractError) as caught:
-            build_runtime_decision_artifact(
+            build_runtime_decision_draft(
+                runtime_store_id="a" * 64,
                 signal=signal,
+                previous_signal=None,
                 quote=quote,
                 bars=bars,
                 data_quality=quality,
@@ -214,8 +354,63 @@ class TestRuntimeDecisionArtifact(RuntimeEvidenceTestCase):
             )
         self.assertEqual(caught.exception.code, "LEGACY_NAIVE_RUNTIME_TIME")
 
+    def test_quote_bar_and_data_quality_subclasses_fail_closed(self) -> None:
+        signal, quote, bars, quality = _runtime_inputs(self.now)
+
+        class ForgedQuote(T.Quote):
+            pass
+
+        class ForgedBar(T.Bar):
+            pass
+
+        class ForgedQuality(T.DataQuality):
+            pass
+
+        forged_quote = ForgedQuote(
+            **{item.name: getattr(quote, item.name) for item in fields(T.Quote) if item.init}
+        )
+        forged_bar = ForgedBar(
+            **{item.name: getattr(bars[0], item.name) for item in fields(T.Bar) if item.init}
+        )
+        forged_quality = ForgedQuality(
+            **{
+                item.name: getattr(quality, item.name)
+                for item in fields(T.DataQuality)
+                if item.init
+            }
+        )
+        for name, candidate_quote, candidate_bars, candidate_quality in (
+            ("quote", forged_quote, bars, quality),
+            ("bar", quote, [forged_bar], quality),
+            ("quality", quote, bars, forged_quality),
+        ):
+            with self.subTest(name=name), self.assertRaises(
+                RuntimeEvidenceContractError
+            ):
+                self.draft(
+                    signal=signal,
+                    quote=candidate_quote,
+                    bars=candidate_bars,
+                    quality=candidate_quality,
+                )
+
 
 class TestRuntimeMigrationAndTransaction(RuntimeEvidenceTestCase):
+    def _install_runtime_v1(self, database: Path) -> None:
+        migration = runtime_migrations_module._MIGRATIONS[0]
+        with closing(sqlite3.connect(database)) as connection:
+            connection.executescript(migration.path.read_text(encoding="utf-8"))
+            connection.execute(
+                "INSERT INTO runtime_schema_migration(version,name,checksum,applied_at) "
+                "VALUES(1,?,?,?)",
+                (
+                    migration.name,
+                    runtime_migrations_module._migration_checksum(migration),
+                    runtime_migrations_module._utc_text(self.now),
+                ),
+            )
+            connection.commit()
+
     def test_migration_defaults_to_dry_run_and_apply_requires_backup(self) -> None:
         root = self.temporary_root()
         database = self.new_database(root)
@@ -223,7 +418,17 @@ class TestRuntimeMigrationAndTransaction(RuntimeEvidenceTestCase):
         report = migrate_runtime_database(database, now=self.now)
         self.assertEqual(report.mode, "DRY_RUN")
         self.assertFalse(report.database_modified)
-        self.assertEqual(report.pending_versions, (1,))
+        self.assertEqual(report.pending_versions, (1, 2))
+        self.assertEqual(report.target_schema_state, "UNINITIALIZED")
+        self.assertTrue(report.target_schema_audit_passed)
+        self.assertTrue(report.rehearsal_performed)
+        self.assertTrue(report.rehearsal_audit_passed)
+        self.assertTrue(report.migration_history_valid)
+        self.assertEqual(report.current_version, 0)
+        self.assertEqual(report.latest_version, 2)
+        self.assertEqual(report.source_database_sha256, before)
+        self.assertTrue(report.would_modify)
+        self.assertIsNone(report.runtime_store_id)
         self.assertEqual(_sha256_file(database), before)
         with self.assertRaises(RuntimeMigrationError):
             migrate_runtime_database(database, apply=True, now=self.now)
@@ -235,9 +440,168 @@ class TestRuntimeMigrationAndTransaction(RuntimeEvidenceTestCase):
         )
         self.assertEqual(applied.mode, "APPLY")
         self.assertTrue(applied.database_modified)
-        self.assertEqual(applied.current_version, 1)
+        self.assertEqual(applied.current_version, 2)
+        self.assertEqual(applied.target_schema_state, "VALID_LATEST_VERSION")
+        self.assertTrue(applied.target_schema_audit_passed)
+        self.assertTrue(applied.rehearsal_audit_passed)
+        self.assertIsNotNone(applied.runtime_store_id)
         with closing(sqlite3.connect(database)) as connection:
-            audit_runtime_evidence_schema(connection)
+            self.assertEqual(
+                audit_runtime_evidence_schema(connection),
+                applied.runtime_store_id,
+            )
+        verified = migrate_runtime_database(database, now=self.now)
+        self.assertTrue(verified.target_schema_audit_passed)
+        self.assertEqual(verified.runtime_store_id, applied.runtime_store_id)
+        self.assertEqual(verified.pending_versions, ())
+
+    def test_runtime_migration_cli_emits_machine_readable_success_and_failure(self) -> None:
+        root = self.temporary_root()
+        database = self.new_database(root)
+        standard = io.StringIO()
+        with redirect_stdout(standard):
+            exit_code = runtime_migrate_main(["--database", str(database)])
+        self.assertEqual(exit_code, 0)
+        success = json.loads(standard.getvalue())
+        for field_name in (
+            "target_schema_state",
+            "target_schema_audit_passed",
+            "rehearsal_performed",
+            "rehearsal_audit_passed",
+            "migration_history_valid",
+            "current_version",
+            "latest_version",
+            "pending_versions",
+            "source_database_sha256",
+            "would_modify",
+            "database_modified",
+        ):
+            self.assertIn(field_name, success)
+
+        invalid_root = root / "invalid"
+        invalid_root.mkdir()
+        invalid = self.new_database(invalid_root, migrate=True)
+        with closing(sqlite3.connect(invalid)) as connection:
+            connection.execute("CREATE VIEW runtime_invalid_view AS SELECT 1 AS value")
+            connection.commit()
+        error = io.StringIO()
+        with redirect_stderr(error):
+            exit_code = runtime_migrate_main(["--database", str(invalid)])
+        self.assertEqual(exit_code, 2)
+        failure = json.loads(error.getvalue())
+        self.assertEqual(failure["target_schema_state"], "INVALID")
+        self.assertFalse(failure["target_schema_audit_passed"])
+        self.assertFalse(failure["rehearsal_performed"])
+
+    def test_dry_run_audits_the_actual_target_before_rehearsal(self) -> None:
+        root = self.temporary_root()
+        database = self.new_database(root, migrate=True)
+        with closing(sqlite3.connect(database)) as connection:
+            connection.executescript(
+                "DROP TRIGGER runtime_transition_outbox_no_update;"
+                "CREATE TRIGGER runtime_transition_outbox_no_update "
+                "BEFORE UPDATE ON runtime_transition_outbox BEGIN SELECT 1; END;"
+            )
+            connection.commit()
+        before = _sha256_file(database)
+        with self.assertRaises(RuntimeMigrationError) as caught:
+            migrate_runtime_database(database, now=self.now)
+        self.assertEqual(caught.exception.report.target_schema_state, "INVALID")
+        self.assertFalse(caught.exception.report.target_schema_audit_passed)
+        self.assertFalse(caught.exception.report.rehearsal_performed)
+        self.assertEqual(_sha256_file(database), before)
+
+    def test_migration_reports_current_latest_partial_unknown_and_rehearsal(self) -> None:
+        current_root = self.temporary_root() / "current"
+        current_root.mkdir()
+        current_database = self.new_database(current_root)
+        self._install_runtime_v1(current_database)
+        current_before = _sha256_file(current_database)
+        current = migrate_runtime_database(current_database, now=self.now)
+        self.assertEqual(current.target_schema_state, "VALID_CURRENT_VERSION")
+        self.assertTrue(current.target_schema_audit_passed)
+        self.assertTrue(current.migration_history_valid)
+        self.assertEqual(current.current_version, 1)
+        self.assertEqual(current.pending_versions, (2,))
+        self.assertEqual(_sha256_file(current_database), current_before)
+
+        tampered_root = self.temporary_root() / "history-tamper"
+        tampered_root.mkdir()
+        tampered_database = self.new_database(tampered_root)
+        self._install_runtime_v1(tampered_database)
+        with closing(sqlite3.connect(tampered_database)) as connection:
+            trigger_sql = str(
+                connection.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='trigger' "
+                    "AND name='runtime_schema_migration_no_update'"
+                ).fetchone()[0]
+            )
+            connection.execute("DROP TRIGGER runtime_schema_migration_no_update")
+            connection.execute(
+                "UPDATE runtime_schema_migration SET checksum='tampered' WHERE version=1"
+            )
+            connection.execute(trigger_sql)
+            connection.commit()
+        with self.assertRaises(RuntimeMigrationError) as tampered_caught:
+            migrate_runtime_database(tampered_database, now=self.now)
+        self.assertEqual(tampered_caught.exception.report.target_schema_state, "INVALID")
+        self.assertFalse(tampered_caught.exception.report.migration_history_valid)
+        self.assertFalse(tampered_caught.exception.report.rehearsal_performed)
+
+        latest_root = self.temporary_root() / "latest"
+        latest_root.mkdir()
+        latest_database = self.new_database(latest_root, migrate=True)
+        latest = migrate_runtime_database(latest_database, now=self.now)
+        self.assertEqual(latest.target_schema_state, "VALID_LATEST_VERSION")
+        self.assertEqual(latest.pending_versions, ())
+        self.assertFalse(latest.would_modify)
+
+        partial_root = self.temporary_root() / "partial"
+        partial_root.mkdir()
+        partial_database = self.new_database(partial_root)
+        with closing(sqlite3.connect(partial_database)) as connection:
+            connection.execute("CREATE TABLE runtime_partial(value TEXT)")
+            connection.commit()
+        with self.assertRaises(RuntimeMigrationError) as partial_caught:
+            migrate_runtime_database(partial_database, now=self.now)
+        self.assertEqual(
+            partial_caught.exception.report.target_schema_state,
+            "PARTIALLY_MIGRATED",
+        )
+
+        unknown_root = self.temporary_root() / "unknown"
+        unknown_root.mkdir()
+        unknown_database = self.new_database(unknown_root)
+        self._install_runtime_v1(unknown_database)
+        with closing(sqlite3.connect(unknown_database)) as connection:
+            connection.execute(
+                "INSERT INTO runtime_schema_migration(version,name,checksum,applied_at) "
+                "VALUES(99,'unknown','unknown',?)",
+                (self.now.isoformat().replace("+00:00", "Z"),),
+            )
+            connection.commit()
+        with self.assertRaises(RuntimeMigrationError) as unknown_caught:
+            migrate_runtime_database(unknown_database, now=self.now)
+        self.assertEqual(
+            unknown_caught.exception.report.target_schema_state,
+            "UNKNOWN_VERSION",
+        )
+
+        rehearsal_root = self.temporary_root() / "rehearsal"
+        rehearsal_root.mkdir()
+        rehearsal_database = self.new_database(rehearsal_root)
+        rehearsal_before = _sha256_file(rehearsal_database)
+        with mock.patch.object(
+            runtime_migrations_module,
+            "_apply_pending",
+            side_effect=RuntimeMigrationError("fixture rehearsal failure"),
+        ), self.assertRaises(RuntimeMigrationError) as rehearsal_caught:
+            migrate_runtime_database(rehearsal_database, now=self.now)
+        rehearsal_report = rehearsal_caught.exception.report
+        self.assertTrue(rehearsal_report.target_schema_audit_passed)
+        self.assertTrue(rehearsal_report.rehearsal_performed)
+        self.assertFalse(rehearsal_report.rehearsal_audit_passed)
+        self.assertEqual(_sha256_file(rehearsal_database), rehearsal_before)
 
     def test_schema_audit_rejects_trigger_body_index_view_and_generated_column(self) -> None:
         mutations = (
@@ -280,13 +644,20 @@ class TestRuntimeMigrationAndTransaction(RuntimeEvidenceTestCase):
         root = self.temporary_root()
         database = self.new_database(root, migrate=True)
         repository = Repository(str(database))
-        signal, _quote, _bars, _quality = _runtime_inputs(self.now)
-        artifact = self.artifact()
+        signal, quote, bars, quality = _runtime_inputs(self.now)
+        draft = self.draft(
+            runtime_store_id=repository.runtime_evidence_store_id(),
+            signal=signal,
+            quote=quote,
+            bars=bars,
+            quality=quality,
+        )
         result = repository.persist_signal_decision(
             signal,
             changed=True,
             observed_at=self.now,
-            artifact=artifact,
+            expected_previous_signal_version_id=None,
+            decision_draft=draft,
         )
         self.assertEqual(result.evidence_status, "OUTBOX_PENDING")
         connection = get_connection(str(database))
@@ -301,49 +672,345 @@ class TestRuntimeMigrationAndTransaction(RuntimeEvidenceTestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             connection.execute(
                 "UPDATE runtime_transition_outbox SET payload_json='{}' WHERE artifact_id=?",
-                (artifact.artifact_id,),
+                (result.artifact_id,),
             )
         connection.rollback()
         with self.assertRaises(sqlite3.IntegrityError):
             connection.execute(
                 "DELETE FROM runtime_transition_outbox WHERE artifact_id=?",
-                (artifact.artifact_id,),
+                (result.artifact_id,),
             )
         connection.rollback()
         connection.execute(
             "UPDATE runtime_outbox_delivery SET retry_count=1 WHERE artifact_id=?",
-            (artifact.artifact_id,),
+            (result.artifact_id,),
         )
         connection.commit()
         self.assertEqual(
             connection.execute(
                 "SELECT retry_count FROM runtime_outbox_delivery WHERE artifact_id=?",
-                (artifact.artifact_id,),
+                (result.artifact_id,),
             ).fetchone()[0],
             1,
+        )
+
+    def test_transition_cas_is_idempotent_and_rejects_stale_concurrency(self) -> None:
+        root = self.temporary_root()
+        database = self.new_database(root, migrate=True)
+        repository = Repository(str(database))
+        runtime_store_id = repository.runtime_evidence_store_id()
+        previous, quote, bars, quality = _runtime_inputs(self.now)
+        repository.persist_signal_decision(
+            previous,
+            changed=True,
+            observed_at=self.now,
+            expected_previous_signal_version_id=None,
+        )
+        previous_version = runtime_signal_version_id(previous)
+        target = replace(
+            previous,
+            state=T.SignalState.TRIGGERED,
+            previous_state=T.SignalState.WATCH,
+            state_changed_at=self.now + timedelta(seconds=1),
+            reason="triggered",
+        )
+        draft = self.draft(
+            runtime_store_id=runtime_store_id,
+            signal=target,
+            previous_signal=previous,
+            quote=quote,
+            bars=bars,
+            quality=quality,
+            decision_requested_at=self.now + timedelta(seconds=1),
+            observed_at=self.now + timedelta(seconds=1),
+        )
+        first = repository.persist_signal_decision(
+            target,
+            changed=True,
+            observed_at=self.now + timedelta(seconds=1),
+            expected_previous_signal_version_id=previous_version,
+            decision_draft=draft,
+        )
+        retry = repository.persist_signal_decision(
+            target,
+            changed=True,
+            observed_at=self.now + timedelta(seconds=1),
+            expected_previous_signal_version_id=previous_version,
+            decision_draft=draft,
+        )
+        self.assertEqual(first.artifact_id, retry.artifact_id)
+        self.assertEqual(first.outbox_append_order, retry.outbox_append_order)
+        self.assertEqual(retry.evidence_status, "OUTBOX_PENDING")
+
+        stale = replace(
+            target,
+            state=T.SignalState.ACTIVE,
+            previous_state=T.SignalState.WATCH,
+            state_changed_at=self.now + timedelta(seconds=2),
+            reason="stale concurrent decision",
+        )
+        stale_draft = self.draft(
+            runtime_store_id=runtime_store_id,
+            signal=stale,
+            previous_signal=previous,
+            quote=quote,
+            bars=bars,
+            quality=quality,
+            decision_requested_at=self.now + timedelta(seconds=2),
+            observed_at=self.now + timedelta(seconds=2),
+        )
+        with self.assertRaisesRegex(RuntimeOutboxConflict, "changed after"):
+            repository.persist_signal_decision(
+                stale,
+                changed=True,
+                observed_at=self.now + timedelta(seconds=2),
+                expected_previous_signal_version_id=previous_version,
+                decision_draft=stale_draft,
+            )
+
+        next_signal = replace(
+            target,
+            state=T.SignalState.ACTIVE,
+            previous_state=T.SignalState.TRIGGERED,
+            state_changed_at=self.now + timedelta(seconds=3),
+            reason="next committed occurrence",
+        )
+        next_draft = self.draft(
+            runtime_store_id=runtime_store_id,
+            signal=next_signal,
+            previous_signal=target,
+            quote=quote,
+            bars=bars,
+            quality=quality,
+            decision_requested_at=self.now + timedelta(seconds=3),
+            observed_at=self.now + timedelta(seconds=3),
+        )
+        next_result = repository.persist_signal_decision(
+            next_signal,
+            changed=True,
+            observed_at=self.now + timedelta(seconds=3),
+            expected_previous_signal_version_id=runtime_signal_version_id(target),
+            decision_draft=next_draft,
+        )
+        self.assertNotEqual(next_result.artifact_id, first.artifact_id)
+        connection = get_connection(str(database))
+        self.assertEqual(
+            connection.execute("SELECT COUNT(*) FROM runtime_transition_outbox").fetchone()[0],
+            2,
         )
 
     def test_runtime_lane_failure_rolls_back_signal_and_history(self) -> None:
         root = self.temporary_root()
         database = self.new_database(root, migrate=True)
+        repository = Repository(str(database))
+        runtime_store_id = repository.runtime_evidence_store_id()
         with closing(sqlite3.connect(database)) as connection:
             connection.execute(
                 "CREATE TRIGGER runtime_test_abort BEFORE INSERT ON runtime_transition_outbox "
                 "BEGIN SELECT RAISE(ABORT, 'fixture abort'); END"
             )
-        repository = Repository(str(database))
-        signal, _quote, _bars, _quality = _runtime_inputs(self.now)
-        with self.assertRaises(RuntimeMigrationError):
+        signal, quote, bars, quality = _runtime_inputs(self.now)
+        draft = self.draft(
+            runtime_store_id=runtime_store_id,
+            signal=signal,
+            quote=quote,
+            bars=bars,
+            quality=quality,
+        )
+        with self.assertRaises(RuntimeDatabaseIntegrityError):
             repository.persist_signal_decision(
                 signal,
                 changed=True,
                 observed_at=self.now,
-                artifact=self.artifact(),
+                expected_previous_signal_version_id=None,
+                decision_draft=draft,
             )
         connection = get_connection(str(database))
         self.assertEqual(connection.execute("SELECT COUNT(*) FROM signals").fetchone()[0], 0)
         self.assertEqual(
             connection.execute("SELECT COUNT(*) FROM signal_history").fetchone()[0], 0
+        )
+
+    def test_occurrence_identity_retry_drift_rescan_and_upstream_occurrence(self) -> None:
+        root = self.temporary_root()
+        database = self.new_database(root, migrate=True)
+        repository = Repository(str(database))
+        runtime_store_id = repository.runtime_evidence_store_id()
+        previous, quote, bars, quality = _runtime_inputs(self.now)
+        repository.persist_signal_decision(
+            previous,
+            changed=True,
+            observed_at=self.now,
+            expected_previous_signal_version_id=None,
+        )
+        target = replace(
+            previous,
+            state=T.SignalState.TRIGGERED,
+            previous_state=T.SignalState.WATCH,
+            state_changed_at=self.now + timedelta(seconds=1),
+            reason="triggered",
+        )
+        draft = self.draft(
+            runtime_store_id=runtime_store_id,
+            signal=target,
+            previous_signal=previous,
+            quote=quote,
+            bars=bars,
+            quality=quality,
+            decision_requested_at=self.now + timedelta(seconds=1),
+            observed_at=self.now + timedelta(seconds=1),
+        )
+        first = repository.persist_signal_decision(
+            target,
+            changed=True,
+            observed_at=self.now + timedelta(seconds=1),
+            expected_previous_signal_version_id=runtime_signal_version_id(previous),
+            decision_draft=draft,
+        )
+        retry = repository.persist_signal_decision(
+            target,
+            changed=True,
+            observed_at=self.now + timedelta(seconds=1),
+            expected_previous_signal_version_id=runtime_signal_version_id(previous),
+            decision_draft=draft,
+        )
+        self.assertEqual(retry.artifact_id, first.artifact_id)
+        connection = get_connection(str(database))
+        occurrence = connection.execute(
+            "SELECT occurrence_dedup_id,decision_content_id,transition_event_id "
+            "FROM runtime_transition_occurrence"
+        ).fetchone()
+        self.assertEqual(str(occurrence["occurrence_dedup_id"]), draft.occurrence_dedup_id)
+        self.assertEqual(str(occurrence["decision_content_id"]), draft.decision_content_id)
+        self.assertRegex(str(occurrence["transition_event_id"]), r"^[0-9a-f]{64}$")
+
+        drift = self.draft(
+            runtime_store_id=runtime_store_id,
+            signal=target,
+            previous_signal=previous,
+            quote=quote,
+            bars=bars,
+            quality=quality,
+            decision_requested_at=self.now + timedelta(seconds=1),
+            observed_at=self.now + timedelta(seconds=2),
+        )
+        self.assertEqual(drift.occurrence_dedup_id, draft.occurrence_dedup_id)
+        with self.assertRaisesRegex(RuntimeOutboxConflict, "payload drift"):
+            repository.persist_signal_decision(
+                target,
+                changed=True,
+                observed_at=self.now + timedelta(seconds=2),
+                expected_previous_signal_version_id=runtime_signal_version_id(previous),
+                decision_draft=drift,
+            )
+
+        history_before = len(repository.load_signal_history(target.signal_id))
+        unchanged = repository.persist_signal_decision(
+            target,
+            changed=False,
+            observed_at=self.now + timedelta(seconds=2),
+            expected_previous_signal_version_id=runtime_signal_version_id(target),
+        )
+        self.assertEqual(unchanged.evidence_status, "NOT_REQUESTED")
+        self.assertEqual(len(repository.load_signal_history(target.signal_id)), history_before)
+        self.assertEqual(
+            connection.execute("SELECT COUNT(*) FROM runtime_transition_outbox").fetchone()[0],
+            1,
+        )
+
+        repeated = replace(
+            target,
+            previous_state=T.SignalState.TRIGGERED,
+            state_changed_at=self.now + timedelta(seconds=3),
+            reason="upstream repeated occurrence",
+        )
+        repeated_draft = self.draft(
+            runtime_store_id=runtime_store_id,
+            signal=repeated,
+            previous_signal=target,
+            quote=quote,
+            bars=bars,
+            quality=quality,
+            decision_requested_at=self.now + timedelta(seconds=3),
+            observed_at=self.now + timedelta(seconds=3),
+            upstream_occurrence_id="upstream-occurrence-2",
+        )
+        repeated_result = repository.persist_signal_decision(
+            repeated,
+            changed=True,
+            observed_at=self.now + timedelta(seconds=3),
+            expected_previous_signal_version_id=runtime_signal_version_id(target),
+            decision_draft=repeated_draft,
+        )
+        self.assertNotEqual(repeated_result.artifact_id, first.artifact_id)
+        self.assertEqual(
+            connection.execute("SELECT COUNT(*) FROM runtime_transition_occurrence").fetchone()[0],
+            2,
+        )
+
+    def test_rolled_back_generated_transition_id_leaves_no_duplicate(self) -> None:
+        root = self.temporary_root()
+        database = self.new_database(root, migrate=True)
+        repository = Repository(str(database))
+        signal, quote, bars, quality = _runtime_inputs(self.now)
+        draft = self.draft(
+            runtime_store_id=repository.runtime_evidence_store_id(),
+            signal=signal,
+            quote=quote,
+            bars=bars,
+            quality=quality,
+        )
+        original_audit = repository._audit_runtime_outbox_state_connection
+        audit_calls = 0
+
+        def fail_after_insert(connection):
+            nonlocal audit_calls
+            audit_calls += 1
+            if audit_calls == 2:
+                raise RuntimeOutboxError("fixture rollback after generated id")
+            return original_audit(connection)
+
+        first_uuid = uuid.UUID(int=1)
+        second_uuid = uuid.UUID(int=2)
+        with mock.patch.object(
+            repository,
+            "_audit_runtime_outbox_state_connection",
+            side_effect=fail_after_insert,
+        ), mock.patch(
+            "stock_tracker.storage.repository.uuid.uuid4",
+            side_effect=(first_uuid, second_uuid),
+        ) as generated:
+            with self.assertRaises(RuntimeOutboxError):
+                repository.persist_signal_decision(
+                    signal,
+                    changed=True,
+                    observed_at=self.now,
+                    expected_previous_signal_version_id=None,
+                    decision_draft=draft,
+                )
+            result = repository.persist_signal_decision(
+                signal,
+                changed=True,
+                observed_at=self.now,
+                expected_previous_signal_version_id=None,
+                decision_draft=draft,
+            )
+        self.assertEqual(generated.call_count, 2)
+        connection = get_connection(str(database))
+        self.assertEqual(connection.execute("SELECT COUNT(*) FROM signals").fetchone()[0], 1)
+        self.assertEqual(connection.execute("SELECT COUNT(*) FROM signal_history").fetchone()[0], 1)
+        self.assertEqual(
+            connection.execute("SELECT COUNT(*) FROM runtime_transition_occurrence").fetchone()[0],
+            1,
+        )
+        expected_transition = hashlib.sha256(second_uuid.bytes).hexdigest()
+        self.assertEqual(
+            connection.execute(
+                "SELECT transition_event_id FROM runtime_transition_occurrence "
+                "WHERE artifact_id=?",
+                (result.artifact_id,),
+            ).fetchone()[0],
+            expected_transition,
         )
 
 
@@ -359,17 +1026,29 @@ class TestRuntimeArtifactStoreAndWorker(RuntimeEvidenceTestCase):
         )
 
     def enqueue(
-        self, repository: Repository, artifact: RuntimeDecisionArtifact
-    ) -> None:
+        self, repository: Repository, draft: RuntimeDecisionDraft
+    ) -> RuntimeDecisionArtifact:
+        identity = draft.identity_dict()
         signal, _quote, _bars, _quality = _runtime_inputs(
-            self.now, signal_id=artifact.identity_dict()["runtime_signal_id"]
+            self.now,
+            signal_id=identity["runtime_signal_id"],
         )
-        repository.persist_signal_decision(
+        result = repository.persist_signal_decision(
             signal,
             changed=True,
-            observed_at=self.now,
-            artifact=artifact,
+            observed_at=datetime.fromisoformat(
+                identity["observed_at_utc"].replace("Z", "+00:00")
+            ),
+            expected_previous_signal_version_id=identity[
+                "expected_previous_signal_version_id"
+            ],
+            decision_draft=draft,
         )
+        row = get_connection(repository.db_path).execute(
+            "SELECT payload_json FROM runtime_transition_outbox WHERE artifact_id=?",
+            (result.artifact_id,),
+        ).fetchone()
+        return RuntimeDecisionArtifact.from_json_bytes(str(row[0]).encode("utf-8"))
 
     def test_store_is_append_only_idempotent_and_identity_stable(self) -> None:
         root = self.temporary_root()
@@ -462,8 +1141,10 @@ class TestRuntimeArtifactStoreAndWorker(RuntimeEvidenceTestCase):
         root = self.temporary_root()
         database = self.new_database(root, migrate=True)
         repository = Repository(str(database))
-        artifact = self.artifact()
-        self.enqueue(repository, artifact)
+        draft = self.draft(
+            runtime_store_id=repository.runtime_evidence_store_id()
+        )
+        artifact = self.enqueue(repository, draft)
         clock = FrozenClock(self.now)
         store = self.new_store(root, database, clock)
         worker = RuntimeArtifactWorker(repository, store, clock=clock)
@@ -478,15 +1159,23 @@ class TestRuntimeArtifactStoreAndWorker(RuntimeEvidenceTestCase):
         root = self.temporary_root()
         database = self.new_database(root, migrate=True)
         repository = Repository(str(database))
-        artifact = self.artifact()
-        self.enqueue(repository, artifact)
+        draft = self.draft(
+            runtime_store_id=repository.runtime_evidence_store_id()
+        )
+        self.enqueue(repository, draft)
         clock = FrozenClock(self.now)
         store = self.new_store(root, database, clock)
         worker = RuntimeArtifactWorker(
             repository, store, clock=clock, retry_delay_seconds=30
         )
         with mock.patch.object(
-            store, "audit", side_effect=RuntimeArtifactStoreError("fixture audit failure")
+            store,
+            "audit",
+            side_effect=RuntimeArtifactStoreError(
+                "fixture audit failure",
+                code="FIXTURE_TRANSIENT_AUDIT_FAILURE",
+                failure_class=RuntimeArtifactFailureClass.ROW_TRANSIENT,
+            ),
         ):
             result = worker.run_once()
         self.assertEqual(result.status, RuntimeArtifactWorkerStatus.RETRY_SCHEDULED)
@@ -498,52 +1187,273 @@ class TestRuntimeArtifactStoreAndWorker(RuntimeEvidenceTestCase):
         self.assertEqual(delivered.cursor, 1)
         self.assertEqual(store.audit().record_count, 1)
 
-    def test_poison_payload_is_quarantined_without_blocking_cursor(self) -> None:
+    def test_transient_exhaustion_quarantines_then_continues(self) -> None:
         root = self.temporary_root()
         database = self.new_database(root, migrate=True)
         repository = Repository(str(database))
-        payload = "{}"
-        artifact_id = hashlib.sha256(payload.encode()).hexdigest()
-        transition_id = hashlib.sha256(b"transition").hexdigest()
+        runtime_store_id = repository.runtime_evidence_store_id()
+        blocked_draft = self.draft(runtime_store_id=runtime_store_id)
+        later_draft = self.draft(
+            runtime_store_id=runtime_store_id,
+            signal_id="600519.SH:S2",
+        )
+        blocked_artifact = self.enqueue(repository, blocked_draft)
+        later_artifact = self.enqueue(repository, later_draft)
+        clock = FrozenClock(self.now)
+        store = self.new_store(root, database, clock)
+        worker = RuntimeArtifactWorker(
+            repository,
+            store,
+            clock=clock,
+            retry_delay_seconds=30,
+            max_store_retries=1,
+        )
+        transient = RuntimeArtifactStoreError(
+            "persistent fixture I/O failure",
+            code="FIXTURE_PERSISTENT_IO_FAILURE",
+            failure_class=RuntimeArtifactFailureClass.ROW_TRANSIENT,
+        )
+        with mock.patch.object(store, "append", side_effect=transient):
+            first = worker.run_once()
+            self.assertEqual(
+                first.status,
+                RuntimeArtifactWorkerStatus.RETRY_SCHEDULED,
+            )
+            clock.advance(31)
+            second = worker.run_once()
+        self.assertEqual(second.status, RuntimeArtifactWorkerStatus.QUARANTINED)
+        self.assertEqual(second.error_code, "FIXTURE_PERSISTENT_IO_FAILURE")
+        self.assertEqual(
+            second.failure_class,
+            RuntimeArtifactFailureClass.ROW_TRANSIENT,
+        )
+        self.assertEqual(repository.runtime_outbox_cursor(worker.worker_id), 1)
+
+        delivered = worker.run_once()
+        self.assertEqual(delivered.status, RuntimeArtifactWorkerStatus.DELIVERED)
+        self.assertEqual(delivered.artifact_id, later_artifact.artifact_id)
+        self.assertEqual(delivered.cursor, 2)
         connection = get_connection(str(database))
-        connection.execute(
-            "INSERT INTO runtime_transition_outbox("
-            "append_order,artifact_id,runtime_signal_id,transition_event_id,"
-            "payload_json,payload_sha256,created_at) VALUES(1,?,?,?,?,?,?)",
-            (
-                artifact_id,
-                "600519.SH:S1",
-                transition_id,
-                payload,
-                artifact_id,
-                "2026-09-01T01:02:03.000000Z",
+        states = {
+            str(row[0]): (str(row[1]), int(row[2]))
+            for row in connection.execute(
+                "SELECT artifact_id,status,retry_count FROM runtime_outbox_delivery"
+            ).fetchall()
+        }
+        self.assertEqual(
+            states[blocked_artifact.artifact_id],
+            ("QUARANTINED", 1),
+        )
+        self.assertEqual(states[later_artifact.artifact_id][0], "DELIVERED")
+        self.assertEqual(store.audit().artifact_ids, (later_artifact.artifact_id,))
+        self.assertEqual(worker.run_once().status, RuntimeArtifactWorkerStatus.IDLE)
+
+    def test_poison_row_is_quarantined_and_next_row_delivers(self) -> None:
+        root = self.temporary_root()
+        database = self.new_database(root, migrate=True)
+        repository = Repository(str(database))
+        runtime_store_id = repository.runtime_evidence_store_id()
+        poison = self.enqueue(
+            repository,
+            self.draft(runtime_store_id=runtime_store_id),
+        )
+        later = self.enqueue(
+            repository,
+            self.draft(
+                runtime_store_id=runtime_store_id,
+                signal_id="600519.SH:S2",
             ),
         )
+        connection = get_connection(str(database))
+        trigger_sql = str(
+            connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type='trigger' "
+                "AND name='runtime_transition_outbox_no_update'"
+            ).fetchone()[0]
+        )
+        connection.execute("DROP TRIGGER runtime_transition_outbox_no_update")
         connection.execute(
-            "INSERT INTO runtime_outbox_delivery(artifact_id,status,retry_count) "
-            "VALUES(?,'PENDING',0)",
-            (artifact_id,),
+            "UPDATE runtime_transition_outbox SET payload_json='{}',"
+            "payload_sha256=? WHERE artifact_id=?",
+            (hashlib.sha256(b"{}").hexdigest(), poison.artifact_id),
+        )
+        connection.execute(trigger_sql)
+        connection.commit()
+        clock = FrozenClock(self.now)
+        store = self.new_store(root, database, clock)
+        worker = RuntimeArtifactWorker(repository, store, clock=clock)
+        quarantined = worker.run_once()
+        self.assertEqual(quarantined.status, RuntimeArtifactWorkerStatus.QUARANTINED)
+        self.assertEqual(quarantined.error_code, "OUTBOX_ARTIFACT_CONTRACT_INVALID")
+        self.assertEqual(quarantined.cursor, 1)
+        self.assertEqual(store.audit().record_count, 0)
+        delivered = worker.run_once()
+        self.assertEqual(delivered.status, RuntimeArtifactWorkerStatus.DELIVERED)
+        self.assertEqual(delivered.artifact_id, later.artifact_id)
+        self.assertEqual(delivered.cursor, 2)
+
+    def test_store_integrity_block_stops_current_and_later_rows(self) -> None:
+        root = self.temporary_root()
+        database = self.new_database(root, migrate=True)
+        repository = Repository(str(database))
+        runtime_store_id = repository.runtime_evidence_store_id()
+        current = self.enqueue(
+            repository,
+            self.draft(runtime_store_id=runtime_store_id),
+        )
+        later = self.enqueue(
+            repository,
+            self.draft(runtime_store_id=runtime_store_id, signal_id="600519.SH:S2"),
+        )
+        clock = FrozenClock(self.now)
+        store = self.new_store(root, database, clock)
+        (root / "records" / "rogue.json").write_bytes(b"{}")
+        worker = RuntimeArtifactWorker(repository, store, clock=clock)
+        blocked = worker.run_once()
+        self.assertEqual(blocked.status, RuntimeArtifactWorkerStatus.HARD_BLOCKED)
+        self.assertEqual(blocked.error_code, "ARTIFACT_STORE_INVENTORY_MISMATCH")
+        self.assertIsNotNone(blocked.block_id)
+        self.assertEqual(repository.runtime_outbox_cursor(worker.worker_id), 0)
+        again = worker.run_once()
+        self.assertEqual(again.status, RuntimeArtifactWorkerStatus.HARD_BLOCKED)
+        restarted = RuntimeArtifactWorker(
+            repository,
+            store,
+            worker_id="independent-worker-after-global-block",
+            clock=clock,
+        )
+        restarted_result = restarted.run_once()
+        self.assertEqual(
+            restarted_result.status,
+            RuntimeArtifactWorkerStatus.HARD_BLOCKED,
+        )
+        self.assertEqual(restarted_result.artifact_id, current.artifact_id)
+        self.assertEqual(restarted_result.error_code, blocked.error_code)
+        connection = get_connection(str(database))
+        states = {
+            str(row[0]): str(row[1])
+            for row in connection.execute(
+                "SELECT artifact_id,status FROM runtime_outbox_delivery"
+            ).fetchall()
+        }
+        self.assertEqual(states[current.artifact_id], "LEASED")
+        self.assertEqual(states[later.artifact_id], "PENDING")
+
+    def test_store_schema_tamper_is_a_stable_global_block(self) -> None:
+        root = self.temporary_root()
+        database = self.new_database(root, migrate=True)
+        repository = Repository(str(database))
+        artifact = self.enqueue(
+            repository,
+            self.draft(runtime_store_id=repository.runtime_evidence_store_id()),
+        )
+        clock = FrozenClock(self.now)
+        store = self.new_store(root, database, clock)
+        with closing(sqlite3.connect(store.catalog_path)) as connection:
+            connection.executescript(
+                "DROP TRIGGER runtime_artifacts_no_update;"
+                "CREATE TRIGGER runtime_artifacts_no_update "
+                "BEFORE UPDATE ON runtime_artifacts BEGIN SELECT 1; END;"
+            )
+        worker = RuntimeArtifactWorker(repository, store, clock=clock)
+        first = worker.run_once()
+        second = worker.run_once()
+        self.assertEqual(first.status, RuntimeArtifactWorkerStatus.HARD_BLOCKED)
+        self.assertEqual(first.artifact_id, artifact.artifact_id)
+        self.assertEqual(first.error_code, "ARTIFACT_STORE_SCHEMA_MISMATCH")
+        self.assertEqual(second.status, RuntimeArtifactWorkerStatus.HARD_BLOCKED)
+        self.assertEqual(second.error_code, first.error_code)
+        self.assertEqual(repository.runtime_outbox_cursor(worker.worker_id), 0)
+
+    def test_runtime_database_schema_tamper_blocks_before_store_effect(self) -> None:
+        root = self.temporary_root()
+        database = self.new_database(root, migrate=True)
+        repository = Repository(str(database))
+        self.enqueue(
+            repository,
+            self.draft(runtime_store_id=repository.runtime_evidence_store_id()),
+        )
+        connection = get_connection(str(database))
+        connection.executescript(
+            "DROP TRIGGER runtime_transition_occurrence_no_update;"
+            "CREATE TRIGGER runtime_transition_occurrence_no_update "
+            "BEFORE UPDATE ON runtime_transition_occurrence BEGIN SELECT 1; END;"
         )
         connection.commit()
         clock = FrozenClock(self.now)
         store = self.new_store(root, database, clock)
         worker = RuntimeArtifactWorker(repository, store, clock=clock)
-        result = worker.run_once()
-        self.assertEqual(result.status, RuntimeArtifactWorkerStatus.QUARANTINED)
-        self.assertEqual(result.cursor, 1)
+        first = worker.run_once()
+        second = worker.run_once()
+        self.assertEqual(first.status, RuntimeArtifactWorkerStatus.HARD_BLOCKED)
+        self.assertEqual(first.error_code, "RUNTIME_DATABASE_INTEGRITY")
+        self.assertEqual(second.status, RuntimeArtifactWorkerStatus.HARD_BLOCKED)
+        self.assertEqual(second.error_code, first.error_code)
         self.assertEqual(store.audit().record_count, 0)
-        status = connection.execute(
-            "SELECT status FROM runtime_outbox_delivery WHERE artifact_id=?",
-            (artifact_id,),
-        ).fetchone()[0]
-        self.assertEqual(status, "QUARANTINED")
+
+    def test_store_clock_rollback_is_a_global_block(self) -> None:
+        root = self.temporary_root()
+        database = self.new_database(root, migrate=True)
+        repository = Repository(str(database))
+        runtime_store_id = repository.runtime_evidence_store_id()
+        first_artifact = self.enqueue(
+            repository,
+            self.draft(runtime_store_id=runtime_store_id),
+        )
+        store_clock = FrozenClock(self.now)
+        worker_clock = FrozenClock(self.now)
+        store = self.new_store(root, database, store_clock)
+        worker = RuntimeArtifactWorker(repository, store, clock=worker_clock)
+        self.assertEqual(worker.run_once().artifact_id, first_artifact.artifact_id)
+        second_artifact = self.enqueue(
+            repository,
+            self.draft(runtime_store_id=runtime_store_id, signal_id="600519.SH:S2"),
+        )
+        worker_clock.advance(1)
+        store_clock.value = self.now - timedelta(seconds=1)
+        blocked = worker.run_once()
+        self.assertEqual(blocked.status, RuntimeArtifactWorkerStatus.HARD_BLOCKED)
+        self.assertEqual(blocked.artifact_id, second_artifact.artifact_id)
+        self.assertEqual(blocked.error_code, "ARTIFACT_STORE_CLOCK_ROLLBACK")
+        self.assertEqual(repository.runtime_outbox_cursor(worker.worker_id), 1)
+
+    def test_conflicting_artifact_id_is_a_global_block(self) -> None:
+        root = self.temporary_root()
+        database = self.new_database(root, migrate=True)
+        repository = Repository(str(database))
+        victim = self.enqueue(
+            repository,
+            self.draft(runtime_store_id=repository.runtime_evidence_store_id()),
+        )
+        clock = FrozenClock(self.now)
+        store = self.new_store(root, database, clock)
+        other = self.artifact(signal_id="600519.SH:S9")
+        forged = RuntimeArtifactRecord.create(
+            append_order=1,
+            store_id=store.store_id,
+            artifact=other,
+            stored_at=self.now,
+            previous_record_hash="0" * 64,
+        )
+        victim_path = root / "records" / "records" / victim.artifact_id[:2] / (
+            victim.artifact_id + ".json"
+        )
+        victim_path.parent.mkdir(parents=True)
+        victim_path.write_bytes(forged.to_json_bytes())
+        worker = RuntimeArtifactWorker(repository, store, clock=clock)
+        blocked = worker.run_once()
+        self.assertEqual(blocked.status, RuntimeArtifactWorkerStatus.HARD_BLOCKED)
+        self.assertEqual(blocked.error_code, "ARTIFACT_ID_COLLISION")
+        self.assertEqual(repository.runtime_outbox_cursor(worker.worker_id), 0)
 
     def test_expired_lease_replays_to_exactly_one_observable_artifact(self) -> None:
         root = self.temporary_root()
         database = self.new_database(root, migrate=True)
         repository = Repository(str(database))
-        artifact = self.artifact()
-        self.enqueue(repository, artifact)
+        draft = self.draft(
+            runtime_store_id=repository.runtime_evidence_store_id()
+        )
+        self.enqueue(repository, draft)
         clock = FrozenClock(self.now)
         claimed = repository.claim_runtime_outbox(
             worker_id="crashed-worker", now=clock.now(), lease_seconds=60
@@ -587,8 +1497,9 @@ class TestSignalManagerRuntimeEvidenceIsolation(RuntimeEvidenceTestCase):
         clock = FrozenClock(self.now)
         manager, published = self.manager(database, clock)
         signal, quote, bars, quality = _runtime_inputs(self.now)
-        manager._persist_signal_with_runtime_evidence(
+        outcome = manager._persist_signal_with_runtime_evidence(
             signal=signal,
+            existing=None,
             changed=True,
             quote=quote,
             bars=bars,
@@ -597,9 +1508,118 @@ class TestSignalManagerRuntimeEvidenceIsolation(RuntimeEvidenceTestCase):
         )
         self.assertIn(signal.signal_id, manager.repo.load_signals())
         self.assertEqual(len(manager.repo.load_signal_history(signal.signal_id)), 1)
-        evidence = [payload for topic, payload in published if topic == "runtime_evidence"]
-        self.assertEqual(evidence[0]["status"], "UNAVAILABLE")
-        self.assertFalse(evidence[0]["stage4g_case_opened"])
+        self.assertEqual(outcome.status, "UNAVAILABLE")
+        self.assertEqual(outcome.error_code, "RUNTIME_EVIDENCE_UNAVAILABLE")
+        self.assertEqual(published, [])
+
+    def test_commit_uncertainty_retries_the_same_transition_without_duplication(self) -> None:
+        root = self.temporary_root()
+        database = self.new_database(root, migrate=True)
+        clock = FrozenClock(self.now)
+        manager, published = self.manager(database, clock)
+        signal, quote, bars, quality = _runtime_inputs(self.now)
+        original = manager.repo.persist_signal_decision
+        call_count = 0
+
+        def commit_then_raise_once(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            result = original(*args, **kwargs)
+            if call_count == 1:
+                raise RuntimeOutboxError("ambiguous commit acknowledgement")
+            return result
+
+        with mock.patch.object(
+            manager.repo,
+            "persist_signal_decision",
+            side_effect=commit_then_raise_once,
+        ):
+            first_attempt = manager._persist_signal_with_runtime_evidence(
+                signal=signal,
+                existing=None,
+                changed=True,
+                quote=quote,
+                bars=bars,
+                dq=quality,
+                decision_requested_at=self.now,
+            )
+        self.assertIsNone(first_attempt)
+        self.assertEqual(call_count, 1)
+        persisted = manager._persist_signal_with_runtime_evidence(
+            signal=signal,
+            existing=None,
+            changed=True,
+            quote=quote,
+            bars=bars,
+            dq=quality,
+            decision_requested_at=self.now,
+        )
+        self.assertEqual(persisted.status, "OUTBOX_PENDING")
+        connection = get_connection(str(database))
+        self.assertEqual(connection.execute("SELECT COUNT(*) FROM signals").fetchone()[0], 1)
+        self.assertEqual(
+            connection.execute("SELECT COUNT(*) FROM signal_history").fetchone()[0],
+            1,
+        )
+        self.assertEqual(
+            connection.execute("SELECT COUNT(*) FROM runtime_transition_outbox").fetchone()[0],
+            1,
+        )
+        statuses = [
+            payload["status"]
+            for topic, payload in published
+            if topic == "runtime_evidence"
+        ]
+        self.assertEqual(statuses, ["SIGNAL_PERSISTENCE_FAILED"])
+
+    def test_double_persistence_failure_returns_false_without_ghost_signal(self) -> None:
+        root = self.temporary_root()
+        database = self.new_database(root, migrate=True)
+        clock = FrozenClock(self.now)
+        manager, published = self.manager(database, clock)
+        signal, quote, bars, quality = _runtime_inputs(self.now)
+        with mock.patch.object(
+            manager.repo,
+            "runtime_evidence_store_id",
+            side_effect=RuntimeEvidenceUnavailableError("fixture unavailable"),
+        ), mock.patch.object(
+            manager.repo,
+            "persist_signal_decision",
+            side_effect=SignalPersistenceError("forced persistence failure"),
+        ) as persist:
+            persisted = manager._persist_signal_with_runtime_evidence(
+                signal=signal,
+                existing=None,
+                changed=True,
+                quote=quote,
+                bars=bars,
+                dq=quality,
+                decision_requested_at=self.now,
+            )
+        self.assertIsNone(persisted)
+        self.assertEqual(persist.call_count, 1)
+        self.assertNotIn(signal.signal_id, manager.repo.load_signals())
+        self.assertNotIn(signal.signal_id, manager.store.get_signals())
+        evidence = [
+            payload for topic, payload in published if topic == "runtime_evidence"
+        ]
+        self.assertEqual(evidence[-1]["status"], "SIGNAL_PERSISTENCE_FAILED")
+        self.assertFalse(evidence[-1]["stage4g_case_opened"])
+        next_signal, next_quote, next_bars, next_quality = _runtime_inputs(
+            self.now,
+            signal_id="600519.SH:S2",
+        )
+        next_result = manager._persist_signal_with_runtime_evidence(
+            signal=next_signal,
+            existing=None,
+            changed=True,
+            quote=next_quote,
+            bars=next_bars,
+            dq=next_quality,
+            decision_requested_at=self.now,
+        )
+        self.assertEqual(next_result.status, "OUTBOX_PENDING")
+        self.assertIn(next_signal.signal_id, manager.repo.load_signals())
 
     def test_legacy_naive_signal_is_quarantined_and_never_opens_case(self) -> None:
         root = self.temporary_root()
@@ -608,8 +1628,9 @@ class TestSignalManagerRuntimeEvidenceIsolation(RuntimeEvidenceTestCase):
         manager, published = self.manager(database, clock)
         signal, quote, bars, quality = _runtime_inputs(self.now)
         signal.state_changed_at = self.now.replace(tzinfo=None)
-        manager._persist_signal_with_runtime_evidence(
+        outcome = manager._persist_signal_with_runtime_evidence(
             signal=signal,
+            existing=None,
             changed=True,
             quote=quote,
             bars=bars,
@@ -625,9 +1646,62 @@ class TestSignalManagerRuntimeEvidenceIsolation(RuntimeEvidenceTestCase):
             connection.execute("SELECT COUNT(*) FROM runtime_outbox_quarantine").fetchone()[0],
             1,
         )
+        self.assertEqual(outcome.status, "QUARANTINED")
+        self.assertEqual(outcome.error_code, "LEGACY_NAIVE_RUNTIME_TIME")
+        self.assertEqual(published, [])
+
+    def test_signal_event_failure_does_not_roll_back_durable_decision(self) -> None:
+        root = self.temporary_root()
+        database = self.new_database(root, migrate=True)
+        clock = FrozenClock(self.now)
+        manager, published = self.manager(database, clock)
+        signal, quote, bars, quality = _runtime_inputs(self.now)
+
+        def publish(topic, payload):
+            if topic == "signal":
+                raise RuntimeError("fixture transport failure")
+            published.append((topic, payload))
+
+        manager._bus.publish = publish
+        manager.strategies = []
+        with mock.patch.object(
+            manager.gate,
+            "evaluate",
+            return_value=(quality, T.DataStatus.LIVE),
+        ), mock.patch(
+            "stock_tracker.signals.manager.score_signal",
+            return_value=signal.scores,
+        ), mock.patch.object(
+            manager.engine,
+            "build",
+            return_value=mock.Mock(),
+        ), mock.patch.object(
+            manager.risk_gate,
+            "check",
+            return_value=mock.Mock(allowed=True),
+        ), mock.patch.object(
+            manager.sm,
+            "decide",
+            return_value=signal,
+        ), mock.patch.object(manager, "_publish_monitor_facts"):
+            produced = manager.scan_symbol(
+                signal.symbol,
+                quote,
+                bars,
+                None,
+                None,
+            )
+        self.assertEqual(produced, [signal])
+        self.assertIn(signal.signal_id, manager.repo.load_signals())
+        self.assertIn(signal.signal_id, manager.store.get_signals())
+        connection = get_connection(str(database))
+        self.assertEqual(connection.execute("SELECT COUNT(*) FROM signal_history").fetchone()[0], 1)
+        self.assertEqual(
+            connection.execute("SELECT COUNT(*) FROM runtime_transition_outbox").fetchone()[0],
+            1,
+        )
         evidence = [payload for topic, payload in published if topic == "runtime_evidence"]
-        self.assertEqual(evidence[0]["status"], "QUARANTINED")
-        self.assertEqual(evidence[0]["error_code"], "LEGACY_NAIVE_RUNTIME_TIME")
+        self.assertEqual(evidence[0]["status"], "OUTBOX_PENDING")
         self.assertFalse(evidence[0]["stage4g_case_opened"])
 
 

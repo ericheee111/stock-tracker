@@ -3,19 +3,20 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import secrets
 import unicodedata
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Any, Protocol
 
+from stock_tracker.core import config as C
 from stock_tracker.core import types as T
 from stock_tracker.core.config import ConfigBundle
 
-RUNTIME_DECISION_ARTIFACT_SCHEMA = "stage4g1-runtime-decision-artifact-v1"
-_TRANSITION_OCCURRENCE_SCHEMA = "stage4g1-runtime-transition-occurrence-v1"
+RUNTIME_DECISION_ARTIFACT_SCHEMA = "stage4g1-runtime-decision-artifact-v3"
+_DECISION_CONTENT_SCHEMA = "stage4g1-runtime-decision-content-v1"
+_TRANSITION_OCCURRENCE_SCHEMA = "stage4g1-runtime-transition-occurrence-v3"
+_SIGNAL_SNAPSHOT_SCHEMA = "stage4g1-runtime-signal-snapshot-v1"
 _DATA_SNAPSHOT_SCHEMA = "stage4g1-runtime-decision-inputs-v1"
 _POLICY_SNAPSHOT_SCHEMA = "stage4g1-runtime-policy-snapshot-v1"
 _IDENTITY_SNAPSHOT_SCHEMA = "stage4g1-runtime-instrument-identity-v1"
@@ -23,13 +24,55 @@ _CLASSIFICATION_SNAPSHOT_SCHEMA = "stage4g1-runtime-classification-v1"
 _SHA256_LENGTH = 64
 _MAX_JSON_BYTES = 16 * 1024 * 1024
 _MAX_REASON_COUNT = 256
+_MAX_BAR_COUNT = 5000
 _SIGNAL_STATES = frozenset(item.value for item in T.SignalState)
 _DATA_STATUSES = frozenset(item.value for item in T.DataStatus)
 _QUALITY_STATUSES = frozenset(item.value for item in T.QualityStatus)
+_SNAPSHOT_DATACLASS_TYPES = frozenset(
+    {
+        T.Signal,
+        T.ScoreSet,
+        T.Quote,
+        T.Bar,
+        T.DataQuality,
+        C.ConfigBundle,
+        C.AppConfig,
+        C.ServerConfig,
+        C.RuntimeConfig,
+        C.LoggingConfig,
+        C.CollectorConfig,
+        C.StoreConfig,
+        C.MarketsConfig,
+        C.MarketConfig,
+        C.StrategiesConfig,
+        C.StrategyConfig,
+        C.ProviderConfig,
+        C.RiskConfig,
+    }
+)
+_SNAPSHOT_ENUM_TYPES = frozenset(
+    {
+        T.Market,
+        T.DataStatus,
+        T.QualityStatus,
+        T.SignalState,
+    }
+)
+_SIGNAL_FIELD_NAMES = {item.name for item in fields(T.Signal)}
+_SCORE_FIELD_NAMES = {item.name for item in fields(T.ScoreSet)}
+_QUOTE_FIELD_NAMES = {item.name for item in fields(T.Quote)}
+_BAR_FIELD_NAMES = {item.name for item in fields(T.Bar)}
+_DATA_QUALITY_FIELD_NAMES = {item.name for item in fields(T.DataQuality)}
 _EXPECTED_IDENTITY_FIELDS = {
     "schema",
+    "runtime_store_id",
     "runtime_signal_id",
     "transition_event_id",
+    "decision_content_id",
+    "occurrence_dedup_id",
+    "upstream_occurrence_id",
+    "signal_version_id",
+    "expected_previous_signal_version_id",
     "symbol",
     "market",
     "strategy_id",
@@ -58,6 +101,22 @@ _EXPECTED_IDENTITY_FIELDS = {
     "auto_trade",
     "trusted_outcome_admission",
     "investment_performance_claim",
+    "signal_snapshot",
+    "previous_signal_snapshot",
+    "data_snapshot",
+    "policy_snapshot",
+    "identity_snapshot",
+    "classification_snapshot",
+}
+_DRAFT_IDENTITY_FIELDS = _EXPECTED_IDENTITY_FIELDS - {"transition_event_id"}
+_DECISION_CONTENT_FIELDS = _EXPECTED_IDENTITY_FIELDS - {
+    "schema",
+    "runtime_store_id",
+    "transition_event_id",
+    "decision_content_id",
+    "occurrence_dedup_id",
+    "upstream_occurrence_id",
+    "observed_at_utc",
 }
 
 
@@ -174,9 +233,9 @@ def _require_sha256(value: object, name: str) -> str:
     return text
 
 
-def _require_mapping(value: object, name: str) -> Mapping[str, Any]:
-    if not isinstance(value, Mapping) or any(type(key) is not str for key in value):
-        raise RuntimeEvidenceContractError(f"{name} must be an object with string keys")
+def _require_mapping(value: object, name: str) -> dict[str, Any]:
+    if type(value) is not dict or any(type(key) is not str for key in value):
+        raise RuntimeEvidenceContractError(f"{name} must be an exact object with string keys")
     return value
 
 
@@ -254,31 +313,258 @@ def _explicit_datetime(value: object) -> dict[str, Any]:
     }
 
 
-def _strict_snapshot_value(value: Any) -> Any:
+def _strict_snapshot_value(
+    value: Any,
+    *,
+    allow_legacy_naive_datetime: bool = False,
+) -> Any:
     if value is None or type(value) in (str, bool, int):
         return value
     if type(value) is float:
         if not math.isfinite(value):
             raise RuntimeEvidenceContractError("snapshot contains non-finite number")
         return value
-    if isinstance(value, datetime):
+    if type(value) is datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            if not allow_legacy_naive_datetime:
+                raise RuntimeEvidenceContractError(
+                    "snapshot contains a legacy naive datetime",
+                    code="LEGACY_NAIVE_RUNTIME_TIME",
+                )
+            return {
+                "value": value.isoformat(timespec="microseconds"),
+                "timezone_aware": False,
+            }
         return _explicit_datetime(value)
-    if isinstance(value, Enum):
+    value_type = type(value)
+    if value_type in _SNAPSHOT_ENUM_TYPES:
         return value.value
-    if is_dataclass(value):
+    if value_type in _SNAPSHOT_DATACLASS_TYPES:
         return {
-            item.name: _strict_snapshot_value(getattr(value, item.name))
-            for item in fields(value)
+            item.name: _strict_snapshot_value(
+                getattr(value, item.name),
+                allow_legacy_naive_datetime=allow_legacy_naive_datetime,
+            )
+            for item in fields(value_type)
         }
-    if isinstance(value, Mapping):
+    if type(value) is dict:
         if any(type(key) is not str for key in value):
             raise RuntimeEvidenceContractError("snapshot mapping keys must be strings")
-        return {key: _strict_snapshot_value(item) for key, item in value.items()}
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [_strict_snapshot_value(item) for item in value]
+        return {
+            key: _strict_snapshot_value(
+                item,
+                allow_legacy_naive_datetime=allow_legacy_naive_datetime,
+            )
+            for key, item in value.items()
+        }
+    if type(value) in (list, tuple):
+        return [
+            _strict_snapshot_value(
+                item,
+                allow_legacy_naive_datetime=allow_legacy_naive_datetime,
+            )
+            for item in value
+        ]
     raise RuntimeEvidenceContractError(
         f"snapshot contains unsupported type {type(value).__name__}"
     )
+
+
+def _snapshot_document(value: object, name: str) -> dict[str, Any]:
+    document = _require_mapping(value, name)
+    normalized = _strict_snapshot_value(dict(document))
+    if type(normalized) is not dict:
+        raise RuntimeEvidenceContractError(f"{name} must be a snapshot object")
+    return normalized
+
+
+def _signal_snapshot(
+    signal: T.Signal,
+    *,
+    allow_legacy_naive_datetime: bool,
+) -> dict[str, Any]:
+    if type(signal) is not T.Signal:
+        raise RuntimeEvidenceContractError("signal must be the exact runtime Signal type")
+    snapshot = _strict_snapshot_value(
+        signal,
+        allow_legacy_naive_datetime=allow_legacy_naive_datetime,
+    )
+    if type(snapshot) is not dict:
+        raise RuntimeEvidenceContractError("runtime signal snapshot is invalid")
+    return {"schema": _SIGNAL_SNAPSHOT_SCHEMA, "signal": snapshot}
+
+
+def runtime_signal_version_id(
+    signal: T.Signal | None,
+    *,
+    allow_legacy_naive_datetime: bool = True,
+) -> str | None:
+    if signal is None:
+        return None
+    return _hash_document(
+        _signal_snapshot(
+            signal,
+            allow_legacy_naive_datetime=allow_legacy_naive_datetime,
+        )
+    )
+
+
+def _snapshot_datetime_document(value: object, name: str) -> dict[str, Any]:
+    document = _require_mapping(value, name)
+    _require_fields(document, {"value", "timezone_aware"}, name)
+    if _require_bool(document["timezone_aware"], f"{name}.timezone_aware") is not True:
+        raise RuntimeEvidenceContractError(
+            f"{name} must be timezone-aware",
+            code="LEGACY_NAIVE_RUNTIME_TIME",
+        )
+    parsed = _datetime_from_text(document["value"], f"{name}.value")
+    return {"value": _datetime_text(parsed, name), "timezone_aware": True}
+
+
+def _snapshot_datetime_value(value: object, name: str) -> datetime:
+    document = _snapshot_datetime_document(value, name)
+    return _datetime_from_text(document["value"], f"{name}.value")
+
+
+def _validate_signal_snapshot_document(
+    value: object,
+    name: str,
+) -> dict[str, Any]:
+    snapshot = _snapshot_document(value, name)
+    _require_fields(snapshot, {"schema", "signal"}, name)
+    if snapshot["schema"] != _SIGNAL_SNAPSHOT_SCHEMA:
+        raise RuntimeEvidenceContractError(f"{name} schema is invalid")
+    signal = _snapshot_document(snapshot["signal"], f"{name}.signal")
+    _require_fields(signal, _SIGNAL_FIELD_NAMES, f"{name}.signal")
+    signal["state_changed_at"] = _snapshot_datetime_document(
+        signal["state_changed_at"],
+        f"{name}.signal.state_changed_at",
+    )
+    scores = signal["scores"]
+    if scores is not None:
+        normalized_scores = _snapshot_document(scores, f"{name}.signal.scores")
+        _require_fields(
+            normalized_scores,
+            _SCORE_FIELD_NAMES,
+            f"{name}.signal.scores",
+        )
+        signal["scores"] = normalized_scores
+    return {"schema": _SIGNAL_SNAPSHOT_SCHEMA, "signal": signal}
+
+
+def _validate_data_snapshot_document(value: object) -> dict[str, Any]:
+    snapshot = _snapshot_document(value, "data_snapshot")
+    _require_fields(
+        snapshot,
+        {"schema", "quote", "bars", "data_quality"},
+        "data_snapshot",
+    )
+    if snapshot["schema"] != _DATA_SNAPSHOT_SCHEMA:
+        raise RuntimeEvidenceContractError("data_snapshot schema is invalid")
+    quote = _snapshot_document(snapshot["quote"], "data_snapshot.quote")
+    _require_fields(quote, _QUOTE_FIELD_NAMES, "data_snapshot.quote")
+    for field_name in ("timestamp", "received_at", "computed_at", "displayed_at"):
+        quote[field_name] = _snapshot_datetime_document(
+            quote[field_name],
+            f"data_snapshot.quote.{field_name}",
+        )
+    bars = snapshot["bars"]
+    if type(bars) is not list or len(bars) > _MAX_BAR_COUNT:
+        raise RuntimeEvidenceContractError("data_snapshot.bars must be a bounded array")
+    normalized_bars: list[dict[str, Any]] = []
+    for index, value_item in enumerate(bars):
+        bar = _snapshot_document(value_item, f"data_snapshot.bars[{index}]")
+        _require_fields(bar, _BAR_FIELD_NAMES, f"data_snapshot.bars[{index}]")
+        bar["timestamp"] = _snapshot_datetime_document(
+            bar["timestamp"],
+            f"data_snapshot.bars[{index}].timestamp",
+        )
+        normalized_bars.append(bar)
+    quality = _snapshot_document(snapshot["data_quality"], "data_snapshot.data_quality")
+    _require_fields(
+        quality,
+        _DATA_QUALITY_FIELD_NAMES,
+        "data_snapshot.data_quality",
+    )
+    return {
+        "schema": _DATA_SNAPSHOT_SCHEMA,
+        "quote": quote,
+        "bars": normalized_bars,
+        "data_quality": quality,
+    }
+
+
+def _validate_policy_snapshot_document(value: object) -> dict[str, Any]:
+    snapshot = _snapshot_document(value, "policy_snapshot")
+    _require_fields(
+        snapshot,
+        {"schema", "strategy", "risk", "market", "price_limit_version"},
+        "policy_snapshot",
+    )
+    if snapshot["schema"] != _POLICY_SNAPSHOT_SCHEMA:
+        raise RuntimeEvidenceContractError("policy_snapshot schema is invalid")
+    strategy = _snapshot_document(snapshot["strategy"], "policy_snapshot.strategy")
+    _require_fields(strategy, {"strategy_id", "config"}, "policy_snapshot.strategy")
+    if strategy["config"] is not None:
+        strategy["config"] = _snapshot_document(
+            strategy["config"],
+            "policy_snapshot.strategy.config",
+        )
+    return {
+        "schema": _POLICY_SNAPSHOT_SCHEMA,
+        "strategy": strategy,
+        "risk": _snapshot_document(snapshot["risk"], "policy_snapshot.risk"),
+        "market": _snapshot_document(snapshot["market"], "policy_snapshot.market"),
+        "price_limit_version": _require_text(
+            snapshot["price_limit_version"],
+            "policy_snapshot.price_limit_version",
+            allow_empty=True,
+        ),
+    }
+
+
+def _validate_identity_snapshot_document(value: object) -> dict[str, Any]:
+    snapshot = _snapshot_document(value, "identity_snapshot")
+    _require_fields(
+        snapshot,
+        {"schema", "symbol", "market", "metadata"},
+        "identity_snapshot",
+    )
+    if snapshot["schema"] != _IDENTITY_SNAPSHOT_SCHEMA:
+        raise RuntimeEvidenceContractError("identity_snapshot schema is invalid")
+    return {
+        "schema": _IDENTITY_SNAPSHOT_SCHEMA,
+        "symbol": _require_text(snapshot["symbol"], "identity_snapshot.symbol"),
+        "market": _require_text(snapshot["market"], "identity_snapshot.market"),
+        "metadata": _snapshot_document(
+            snapshot["metadata"],
+            "identity_snapshot.metadata",
+        ),
+    }
+
+
+def _validate_classification_snapshot_document(value: object) -> dict[str, Any]:
+    snapshot = _snapshot_document(value, "classification_snapshot")
+    _require_fields(
+        snapshot,
+        {"schema", "market_regime", "sector_stage"},
+        "classification_snapshot",
+    )
+    if snapshot["schema"] != _CLASSIFICATION_SNAPSHOT_SCHEMA:
+        raise RuntimeEvidenceContractError("classification_snapshot schema is invalid")
+    return {
+        "schema": _CLASSIFICATION_SNAPSHOT_SCHEMA,
+        "market_regime": _require_text(
+            snapshot["market_regime"],
+            "classification_snapshot.market_regime",
+            allow_empty=True,
+        ),
+        "sector_stage": _require_text(
+            snapshot["sector_stage"],
+            "classification_snapshot.sector_stage",
+            allow_empty=True,
+        ),
+    }
 
 
 def _validate_reasons(value: object, name: str) -> list[str]:
@@ -291,10 +577,38 @@ def _validate_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
     _require_fields(identity, _EXPECTED_IDENTITY_FIELDS, "artifact identity")
     if identity["schema"] != RUNTIME_DECISION_ARTIFACT_SCHEMA:
         raise RuntimeEvidenceContractError("runtime artifact schema is invalid")
+    runtime_store_id = _require_sha256(
+        identity["runtime_store_id"],
+        "runtime_store_id",
+    )
     runtime_signal_id = _require_text(identity["runtime_signal_id"], "runtime_signal_id")
     transition_event_id = _require_sha256(
         identity["transition_event_id"], "transition_event_id"
     )
+    decision_content_id = _require_sha256(
+        identity["decision_content_id"],
+        "decision_content_id",
+    )
+    occurrence_dedup_id = _require_sha256(
+        identity["occurrence_dedup_id"],
+        "occurrence_dedup_id",
+    )
+    upstream_occurrence_id = _require_optional_text(
+        identity["upstream_occurrence_id"],
+        "upstream_occurrence_id",
+    )
+    signal_version_id = _require_sha256(
+        identity["signal_version_id"],
+        "signal_version_id",
+    )
+    expected_previous_signal_version_id = identity[
+        "expected_previous_signal_version_id"
+    ]
+    if expected_previous_signal_version_id is not None:
+        expected_previous_signal_version_id = _require_sha256(
+            expected_previous_signal_version_id,
+            "expected_previous_signal_version_id",
+        )
     market = _require_text(identity["market"], "market", maximum=8)
     try:
         market_enum = T.Market(market)
@@ -326,6 +640,103 @@ def _validate_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
     observed_at = _datetime_from_text(identity["observed_at_utc"], "observed_at_utc")
     if state_changed_at > observed_at or requested_at > observed_at:
         raise RuntimeEvidenceContractError("artifact decision times exceed observed_at")
+    if state_changed_at != requested_at:
+        raise RuntimeEvidenceContractError(
+            "transition state_changed_at must equal decision_requested_at"
+        )
+
+    signal_snapshot = _validate_signal_snapshot_document(
+        identity["signal_snapshot"],
+        "signal_snapshot",
+    )
+    previous_signal_snapshot_value = identity["previous_signal_snapshot"]
+    previous_signal_snapshot = (
+        None
+        if previous_signal_snapshot_value is None
+        else _validate_signal_snapshot_document(
+            previous_signal_snapshot_value,
+            "previous_signal_snapshot",
+        )
+    )
+    data_snapshot = _validate_data_snapshot_document(identity["data_snapshot"])
+    policy_snapshot = _validate_policy_snapshot_document(identity["policy_snapshot"])
+    identity_snapshot = _validate_identity_snapshot_document(
+        identity["identity_snapshot"]
+    )
+    classification_snapshot = _validate_classification_snapshot_document(
+        identity["classification_snapshot"]
+    )
+    if _hash_document(signal_snapshot) != signal_version_id:
+        raise RuntimeEvidenceContractError("signal_version_id mismatch")
+    if previous_signal_snapshot is None:
+        if expected_previous_signal_version_id is not None:
+            raise RuntimeEvidenceContractError(
+                "previous signal version requires a previous signal snapshot"
+            )
+    elif _hash_document(previous_signal_snapshot) != expected_previous_signal_version_id:
+        raise RuntimeEvidenceContractError(
+            "expected_previous_signal_version_id mismatch"
+        )
+
+    signal_document = signal_snapshot["signal"]
+    if (
+        signal_document["signal_id"] != runtime_signal_id
+        or signal_document["symbol"] != symbol
+        or signal_document["market"] != market
+        or signal_document["strategy_id"] != strategy_id
+        or signal_document["state"] != state
+        or signal_document["previous_state"] != previous_state
+        or signal_document["state_changed_at"]
+        != {"value": _datetime_text(state_changed_at, "state_changed_at_utc"), "timezone_aware": True}
+    ):
+        raise RuntimeEvidenceContractError(
+            "signal snapshot disagrees with the runtime artifact envelope"
+        )
+    if previous_signal_snapshot is None:
+        if previous_state is not None:
+            raise RuntimeEvidenceContractError(
+                "previous_state requires a previous signal snapshot"
+            )
+    else:
+        previous_document = previous_signal_snapshot["signal"]
+        previous_state_changed_at = _snapshot_datetime_value(
+            previous_document["state_changed_at"],
+            "previous_signal_snapshot.signal.state_changed_at",
+        )
+        if (
+            previous_document["signal_id"] != runtime_signal_id
+            or previous_document["symbol"] != symbol
+            or previous_document["market"] != market
+            or previous_document["strategy_id"] != strategy_id
+            or previous_document["state"] != previous_state
+            or (previous_state == state and upstream_occurrence_id is None)
+            or previous_state_changed_at > requested_at
+        ):
+            raise RuntimeEvidenceContractError(
+                "previous signal snapshot disagrees with the transition envelope"
+            )
+
+    if _hash_document(data_snapshot) != _require_sha256(
+        identity["data_snapshot_id"],
+        "data_snapshot_id",
+    ):
+        raise RuntimeEvidenceContractError("data_snapshot_id mismatch")
+    if _hash_document(policy_snapshot) != _require_sha256(
+        identity["policy_id"],
+        "policy_id",
+    ):
+        raise RuntimeEvidenceContractError("policy_id mismatch")
+    if _hash_document(identity_snapshot) != _require_sha256(
+        identity["identity_fact_id"],
+        "identity_fact_id",
+    ):
+        raise RuntimeEvidenceContractError("identity_fact_id mismatch")
+    classification_snapshot_id = _hash_document(classification_snapshot)
+    if classification_snapshot_id != _require_sha256(
+        identity["classification_id"],
+        "classification_id",
+    ):
+        raise RuntimeEvidenceContractError("classification_id mismatch")
 
     entry_plan = _require_mapping(identity["entry_plan"], "entry_plan")
     _require_fields(
@@ -410,15 +821,102 @@ def _validate_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
     identity_fact_id = _require_sha256(identity["identity_fact_id"], "identity_fact_id")
     data_snapshot_id = _require_sha256(identity["data_snapshot_id"], "data_snapshot_id")
     policy_id = _require_sha256(identity["policy_id"], "policy_id")
-    classification_id = identity["classification_id"]
-    if classification_id is not None:
-        classification_id = _require_sha256(classification_id, "classification_id")
+    classification_id = _require_sha256(
+        identity["classification_id"],
+        "classification_id",
+    )
     market_regime = _require_text(
         identity["market_regime"], "market_regime", maximum=128, allow_empty=True
     )
     sector_stage = _require_text(
         identity["sector_stage"], "sector_stage", maximum=128, allow_empty=True
     )
+    if instrument_id != f"UNRESOLVED_RUNTIME_IDENTITY:{identity_fact_id}":
+        raise RuntimeEvidenceContractError(
+            "instrument_id must remain bound to the unresolved identity snapshot"
+        )
+    if (
+        identity_snapshot["symbol"] != symbol
+        or identity_snapshot["market"] != market
+        or classification_snapshot["market_regime"] != market_regime
+        or classification_snapshot["sector_stage"] != sector_stage
+    ):
+        raise RuntimeEvidenceContractError(
+            "identity or classification snapshot disagrees with the envelope"
+        )
+    if policy_snapshot["strategy"]["strategy_id"] != strategy_id:
+        raise RuntimeEvidenceContractError(
+            "policy strategy snapshot disagrees with strategy_id"
+        )
+    expected_strategy_version = (
+        f"runtime-strategy-config-v1:{_hash_document(policy_snapshot['strategy'])}"
+    )
+    if strategy_version != expected_strategy_version:
+        raise RuntimeEvidenceContractError("strategy_version mismatch")
+    if (
+        signal_document["entry_low"] != normalized_plan["entry_low"]
+        or signal_document["entry_high"] != normalized_plan["entry_high"]
+        or signal_document["trigger_price"] != normalized_plan["trigger_price"]
+        or signal_document["invalidation_price"]
+        != normalized_plan["invalidation_price"]
+        or signal_document["target_1"] != normalized_plan["target_1"]
+        or signal_document["target_2"] != normalized_plan["target_2"]
+        or signal_document["reward_risk"] != normalized_plan["reward_risk"]
+        or signal_document["scores"] != normalized_scores
+        or signal_document["data_status"] != data_status
+        or signal_document["market_regime"] != market_regime
+        or signal_document["sector_stage"] != sector_stage
+    ):
+        raise RuntimeEvidenceContractError(
+            "signal snapshot content disagrees with the artifact decision fields"
+        )
+    quote_snapshot = data_snapshot["quote"]
+    quote_source_time = _snapshot_datetime_value(
+        quote_snapshot["timestamp"],
+        "data_snapshot.quote.timestamp",
+    )
+    quote_received_at = _snapshot_datetime_value(
+        quote_snapshot["received_at"],
+        "data_snapshot.quote.received_at",
+    )
+    quote_computed_at = _snapshot_datetime_value(
+        quote_snapshot["computed_at"],
+        "data_snapshot.quote.computed_at",
+    )
+    quote_displayed_at = _snapshot_datetime_value(
+        quote_snapshot["displayed_at"],
+        "data_snapshot.quote.displayed_at",
+    )
+    bar_times = tuple(
+        _snapshot_datetime_value(
+            bar["timestamp"],
+            f"data_snapshot.bars[{index}].timestamp",
+        )
+        for index, bar in enumerate(data_snapshot["bars"])
+    )
+    if (
+        quote_snapshot["symbol"] != symbol
+        or quote_snapshot["market"] != market
+        or quote_snapshot["data_status"] != data_status
+        or data_snapshot["data_quality"] != normalized_quality
+        or any(
+            bar["symbol"] != symbol or bar["market"] != market
+            for bar in data_snapshot["bars"]
+        )
+    ):
+        raise RuntimeEvidenceContractError(
+            "data snapshot disagrees with the artifact instrument or quality fields"
+        )
+    if (
+        quote_source_time > requested_at
+        or quote_received_at > requested_at
+        or quote_computed_at > requested_at
+        or quote_displayed_at > observed_at
+        or any(value > requested_at for value in bar_times)
+    ):
+        raise RuntimeEvidenceContractError(
+            "runtime decision snapshot contains facts unavailable at decision time"
+        )
     execution_mode = _require_text(
         identity["execution_mode"], "execution_mode", maximum=64
     )
@@ -465,10 +963,16 @@ def _validate_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
     ):
         raise RuntimeEvidenceContractError("performance claim must remain false")
 
-    return {
+    normalized = {
         "schema": RUNTIME_DECISION_ARTIFACT_SCHEMA,
+        "runtime_store_id": runtime_store_id,
         "runtime_signal_id": runtime_signal_id,
         "transition_event_id": transition_event_id,
+        "decision_content_id": decision_content_id,
+        "occurrence_dedup_id": occurrence_dedup_id,
+        "upstream_occurrence_id": upstream_occurrence_id,
+        "signal_version_id": signal_version_id,
+        "expected_previous_signal_version_id": expected_previous_signal_version_id,
         "symbol": symbol,
         "market": market,
         "strategy_id": strategy_id,
@@ -497,7 +1001,87 @@ def _validate_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
         "auto_trade": False,
         "trusted_outcome_admission": False,
         "investment_performance_claim": False,
+        "signal_snapshot": signal_snapshot,
+        "previous_signal_snapshot": previous_signal_snapshot,
+        "data_snapshot": data_snapshot,
+        "policy_snapshot": policy_snapshot,
+        "identity_snapshot": identity_snapshot,
+        "classification_snapshot": classification_snapshot,
     }
+    expected_decision_content_id = _hash_document(
+        {
+            "schema": _DECISION_CONTENT_SCHEMA,
+            **{
+                name: normalized[name]
+                for name in sorted(_DECISION_CONTENT_FIELDS)
+            },
+        }
+    )
+    if decision_content_id != expected_decision_content_id:
+        raise RuntimeEvidenceContractError("decision_content_id mismatch")
+    expected_occurrence_dedup_id = _hash_document(
+        {
+            "schema": _TRANSITION_OCCURRENCE_SCHEMA,
+            "runtime_store_id": runtime_store_id,
+            "runtime_signal_id": runtime_signal_id,
+            "from_state": previous_state,
+            "to_state": state,
+            "state_changed_at_utc": normalized["state_changed_at_utc"],
+            "decision_requested_at_utc": normalized["decision_requested_at_utc"],
+            "decision_content_id": decision_content_id,
+            "upstream_occurrence_id": upstream_occurrence_id,
+        }
+    )
+    if occurrence_dedup_id != expected_occurrence_dedup_id:
+        raise RuntimeEvidenceContractError("occurrence_dedup_id mismatch")
+    return normalized
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeDecisionDraft:
+    _identity_json: str
+    decision_content_id: str
+    occurrence_dedup_id: str
+
+    def __post_init__(self) -> None:
+        identity = _strict_json_loads(self._identity_json.encode("utf-8"))
+        _require_fields(identity, _DRAFT_IDENTITY_FIELDS, "runtime decision draft")
+        artifact = RuntimeDecisionArtifact.create(
+            {**identity, "transition_event_id": "0" * _SHA256_LENGTH}
+        )
+        normalized = artifact.identity_dict()
+        normalized.pop("transition_event_id")
+        if _canonical_json_bytes(normalized).decode("utf-8") != self._identity_json:
+            raise RuntimeEvidenceContractError("runtime decision draft is not canonical")
+        if self.decision_content_id != normalized["decision_content_id"]:
+            raise RuntimeEvidenceContractError("draft decision_content_id mismatch")
+        if self.occurrence_dedup_id != normalized["occurrence_dedup_id"]:
+            raise RuntimeEvidenceContractError("draft occurrence_dedup_id mismatch")
+
+    @classmethod
+    def create(cls, identity: Mapping[str, Any]) -> RuntimeDecisionDraft:
+        document = _require_mapping(identity, "runtime decision draft")
+        _require_fields(document, _DRAFT_IDENTITY_FIELDS, "runtime decision draft")
+        artifact = RuntimeDecisionArtifact.create(
+            {**document, "transition_event_id": "0" * _SHA256_LENGTH}
+        )
+        normalized = artifact.identity_dict()
+        normalized.pop("transition_event_id")
+        identity_json = _canonical_json_bytes(normalized).decode("utf-8")
+        return cls(
+            identity_json,
+            str(normalized["decision_content_id"]),
+            str(normalized["occurrence_dedup_id"]),
+        )
+
+    def identity_dict(self) -> dict[str, Any]:
+        return dict(_strict_json_loads(self._identity_json.encode("utf-8")))
+
+    def to_artifact(self, *, transition_event_id: str) -> RuntimeDecisionArtifact:
+        return build_runtime_decision_artifact(
+            draft=self,
+            transition_event_id=transition_event_id,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -571,6 +1155,14 @@ class RuntimeDecisionArtifact:
     def outcome_case_status(self) -> str:
         return str(self.identity_dict()["outcome_case_status"])
 
+    @property
+    def decision_content_id(self) -> str:
+        return str(self.identity_dict()["decision_content_id"])
+
+    @property
+    def occurrence_dedup_id(self) -> str:
+        return str(self.identity_dict()["occurrence_dedup_id"])
+
 
 def _strategy_snapshot(bundle: ConfigBundle, strategy_id: str) -> dict[str, Any]:
     mapping = {
@@ -588,23 +1180,34 @@ def _strategy_snapshot(bundle: ConfigBundle, strategy_id: str) -> dict[str, Any]
     }
 
 
-def build_runtime_decision_artifact(
+def _runtime_snapshot_bundle(
     *,
     signal: T.Signal,
+    previous_signal: T.Signal | None,
     quote: T.Quote,
     bars: Sequence[T.Bar],
     data_quality: T.DataQuality,
     bundle: ConfigBundle,
-    decision_requested_at: datetime,
-    observed_at: datetime,
-    instrument_metadata: Mapping[str, Any] | None = None,
-) -> RuntimeDecisionArtifact:
+    instrument_metadata: dict[str, Any],
+) -> dict[str, Any]:
     if type(signal) is not T.Signal or type(signal.scores) is not T.ScoreSet:
-        raise RuntimeEvidenceContractError("signal must carry the exact runtime ScoreSet")
+        raise RuntimeEvidenceContractError(
+            "signal must carry the exact runtime Signal and ScoreSet types"
+        )
+    if previous_signal is not None and type(previous_signal) is not T.Signal:
+        raise RuntimeEvidenceContractError(
+            "previous_signal must be the exact runtime Signal type or None"
+        )
     if type(quote) is not T.Quote or type(data_quality) is not T.DataQuality:
-        raise RuntimeEvidenceContractError("quote and data_quality must be exact runtime types")
+        raise RuntimeEvidenceContractError(
+            "quote and data_quality must be exact runtime types"
+        )
     if type(bundle) is not ConfigBundle:
         raise RuntimeEvidenceContractError("bundle must be ConfigBundle")
+    if type(bars) not in (list, tuple) or len(bars) > _MAX_BAR_COUNT:
+        raise RuntimeEvidenceContractError("bars must be a bounded exact list or tuple")
+    if type(instrument_metadata) is not dict:
+        raise RuntimeEvidenceContractError("instrument_metadata must be an exact dict")
     if (
         type(signal.market) is not T.Market
         or type(signal.state) is not T.SignalState
@@ -617,38 +1220,42 @@ def build_runtime_decision_artifact(
         or type(quote.data_status) is not T.DataStatus
         or type(data_quality.status) is not T.QualityStatus
     ):
-        raise RuntimeEvidenceContractError("runtime decision enums must use exact types")
-    if signal.symbol != quote.symbol or signal.market is not quote.market:
-        raise RuntimeEvidenceContractError("signal and quote instrument identity mismatch")
-    if signal.data_status is not quote.data_status:
-        raise RuntimeEvidenceContractError("signal and quote data status mismatch")
-    if not isinstance(bars, Sequence) or isinstance(bars, (str, bytes, bytearray)):
-        raise RuntimeEvidenceContractError("bars must be a sequence")
+        raise RuntimeEvidenceContractError(
+            "runtime decision enums must use exact project types"
+        )
     if any(
         type(bar) is not T.Bar
-        or bar.symbol != signal.symbol
         or type(bar.market) is not T.Market
+        or bar.symbol != signal.symbol
         or bar.market is not signal.market
         for bar in bars
     ):
         raise RuntimeEvidenceContractError("bar instrument identity mismatch")
-    requested = require_utc_clock_value(decision_requested_at, "decision_requested_at")
-    observed = require_utc_clock_value(observed_at, "observed_at")
-    state_changed = require_utc_clock_value(signal.state_changed_at, "state_changed_at")
-    if requested > observed or state_changed > observed:
-        raise RuntimeEvidenceContractError("runtime decision time exceeds observation")
-    metadata = {} if instrument_metadata is None else dict(
-        _require_mapping(instrument_metadata, "instrument_metadata")
-    )
+    if signal.symbol != quote.symbol or signal.market is not quote.market:
+        raise RuntimeEvidenceContractError("signal and quote instrument identity mismatch")
+    if signal.data_status is not quote.data_status:
+        raise RuntimeEvidenceContractError("signal and quote data status mismatch")
+    if previous_signal is None:
+        if signal.previous_state is not None:
+            raise RuntimeEvidenceContractError(
+                "new runtime decision cannot claim a previous signal state"
+            )
+    elif (
+        previous_signal.signal_id != signal.signal_id
+        or previous_signal.symbol != signal.symbol
+        or previous_signal.market is not signal.market
+        or signal.previous_state is not previous_signal.state
+    ):
+        raise RuntimeEvidenceContractError(
+            "previous runtime signal disagrees with the decision transition"
+        )
     strategy_snapshot = _strategy_snapshot(bundle, signal.strategy_id)
-    strategy_version = f"runtime-strategy-config-v1:{_hash_document(strategy_snapshot)}"
     identity_snapshot = {
         "schema": _IDENTITY_SNAPSHOT_SCHEMA,
         "symbol": signal.symbol,
         "market": signal.market.value,
-        "metadata": _strict_snapshot_value(metadata),
+        "metadata": _strict_snapshot_value(instrument_metadata),
     }
-    identity_fact_id = _hash_document(identity_snapshot)
     data_snapshot = {
         "schema": _DATA_SNAPSHOT_SCHEMA,
         "quote": _strict_snapshot_value(quote),
@@ -673,61 +1280,141 @@ def build_runtime_decision_artifact(
         "market_regime": signal.market_regime,
         "sector_stage": signal.sector_stage,
     }
-    transition_event_id = _hash_document(
-        {
-            "schema": _TRANSITION_OCCURRENCE_SCHEMA,
-            "system_nonce": secrets.token_hex(32),
-            "runtime_signal_id": signal.signal_id,
-            "state": signal.state.value,
-            "decision_requested_at_utc": _datetime_text(requested, "decision_requested_at"),
-        }
+    return {
+        "signal_snapshot": _signal_snapshot(
+            signal,
+            allow_legacy_naive_datetime=False,
+        ),
+        "previous_signal_snapshot": (
+            None
+            if previous_signal is None
+            else _signal_snapshot(
+                previous_signal,
+                allow_legacy_naive_datetime=False,
+            )
+        ),
+        "data_snapshot": data_snapshot,
+        "policy_snapshot": policy_snapshot,
+        "identity_snapshot": identity_snapshot,
+        "classification_snapshot": classification_snapshot,
+    }
+
+
+def build_runtime_decision_draft(
+    *,
+    runtime_store_id: str,
+    signal: T.Signal,
+    previous_signal: T.Signal | None,
+    quote: T.Quote,
+    bars: Sequence[T.Bar],
+    data_quality: T.DataQuality,
+    bundle: ConfigBundle,
+    decision_requested_at: datetime,
+    observed_at: datetime,
+    instrument_metadata: dict[str, Any] | None = None,
+    upstream_occurrence_id: str | None = None,
+) -> RuntimeDecisionDraft:
+    runtime_store = _require_sha256(runtime_store_id, "runtime_store_id")
+    requested = require_utc_clock_value(decision_requested_at, "decision_requested_at")
+    observed = require_utc_clock_value(observed_at, "observed_at")
+    if requested > observed:
+        raise RuntimeEvidenceContractError("runtime decision time exceeds observation")
+    metadata = {} if instrument_metadata is None else instrument_metadata
+    if type(metadata) is not dict:
+        raise RuntimeEvidenceContractError("instrument_metadata must be an exact dict")
+    upstream = _require_optional_text(
+        upstream_occurrence_id,
+        "upstream_occurrence_id",
     )
-    scores = signal.scores
+    first_snapshots = _runtime_snapshot_bundle(
+        signal=signal,
+        previous_signal=previous_signal,
+        quote=quote,
+        bars=bars,
+        data_quality=data_quality,
+        bundle=bundle,
+        instrument_metadata=metadata,
+    )
+    second_snapshots = _runtime_snapshot_bundle(
+        signal=signal,
+        previous_signal=previous_signal,
+        quote=quote,
+        bars=bars,
+        data_quality=data_quality,
+        bundle=bundle,
+        instrument_metadata=metadata,
+    )
+    if first_snapshots != second_snapshots:
+        raise RuntimeEvidenceContractError(
+            "runtime decision inputs changed while snapshotting",
+            code="MUTABLE_RUNTIME_DECISION_INPUT",
+        )
+    signal_snapshot = first_snapshots["signal_snapshot"]
+    previous_signal_snapshot = first_snapshots["previous_signal_snapshot"]
+    data_snapshot = first_snapshots["data_snapshot"]
+    policy_snapshot = first_snapshots["policy_snapshot"]
+    identity_snapshot = first_snapshots["identity_snapshot"]
+    classification_snapshot = first_snapshots["classification_snapshot"]
+    signal_document = signal_snapshot["signal"]
+    state_changed = _datetime_from_text(
+        signal_document["state_changed_at"]["value"],
+        "state_changed_at",
+    )
+    if state_changed > observed:
+        raise RuntimeEvidenceContractError("runtime decision time exceeds observation")
+    signal_version_id = _hash_document(signal_snapshot)
+    expected_previous_signal_version_id = (
+        None
+        if previous_signal_snapshot is None
+        else _hash_document(previous_signal_snapshot)
+    )
+    identity_fact_id = _hash_document(identity_snapshot)
+    data_snapshot_id = _hash_document(data_snapshot)
+    policy_id = _hash_document(policy_snapshot)
+    classification_id = _hash_document(classification_snapshot)
+    strategy_snapshot = policy_snapshot["strategy"]
+    strategy_version = f"runtime-strategy-config-v1:{_hash_document(strategy_snapshot)}"
+    scores = signal_document["scores"]
+    if type(scores) is not dict:
+        raise RuntimeEvidenceContractError("runtime signal snapshot has no score evidence")
     identity = {
         "schema": RUNTIME_DECISION_ARTIFACT_SCHEMA,
-        "runtime_signal_id": signal.signal_id,
-        "transition_event_id": transition_event_id,
-        "symbol": signal.symbol,
-        "market": signal.market.value,
-        "strategy_id": signal.strategy_id,
+        "runtime_store_id": runtime_store,
+        "runtime_signal_id": signal_document["signal_id"],
+        "decision_content_id": "0" * _SHA256_LENGTH,
+        "occurrence_dedup_id": "0" * _SHA256_LENGTH,
+        "upstream_occurrence_id": upstream,
+        "signal_version_id": signal_version_id,
+        "expected_previous_signal_version_id": expected_previous_signal_version_id,
+        "symbol": signal_document["symbol"],
+        "market": signal_document["market"],
+        "strategy_id": signal_document["strategy_id"],
         "strategy_version": strategy_version,
         "model_id": None,
-        "state": signal.state.value,
-        "previous_state": None if signal.previous_state is None else signal.previous_state.value,
+        "state": signal_document["state"],
+        "previous_state": signal_document["previous_state"],
         "state_changed_at_utc": _datetime_text(state_changed, "state_changed_at"),
         "decision_requested_at_utc": _datetime_text(requested, "decision_requested_at"),
         "observed_at_utc": _datetime_text(observed, "observed_at"),
         "entry_plan": {
-            "entry_low": signal.entry_low,
-            "entry_high": signal.entry_high,
-            "trigger_price": signal.trigger_price,
-            "invalidation_price": signal.invalidation_price,
-            "target_1": signal.target_1,
-            "target_2": signal.target_2,
-            "reward_risk": signal.reward_risk,
+            "entry_low": signal_document["entry_low"],
+            "entry_high": signal_document["entry_high"],
+            "trigger_price": signal_document["trigger_price"],
+            "invalidation_price": signal_document["invalidation_price"],
+            "target_1": signal_document["target_1"],
+            "target_2": signal_document["target_2"],
+            "reward_risk": signal_document["reward_risk"],
         },
-        "scores": {
-            "opportunity": scores.opportunity,
-            "timing": scores.timing,
-            "risk": scores.risk,
-            "confidence": scores.confidence,
-            "success_probability": scores.success_probability,
-            "positive_reasons": list(scores.positive_reasons),
-            "negative_reasons": list(scores.negative_reasons),
-        },
-        "data_status": signal.data_status.value,
-        "data_quality": {
-            "status": data_quality.status.value,
-            "score": data_quality.score,
-            "reasons": list(data_quality.reasons),
-        },
+        "scores": scores,
+        "data_status": signal_document["data_status"],
+        "data_quality": data_snapshot["data_quality"],
         "instrument_id": f"UNRESOLVED_RUNTIME_IDENTITY:{identity_fact_id}",
         "identity_fact_id": identity_fact_id,
-        "data_snapshot_id": _hash_document(data_snapshot),
-        "policy_id": _hash_document(policy_snapshot),
-        "classification_id": _hash_document(classification_snapshot),
-        "market_regime": signal.market_regime,
-        "sector_stage": signal.sector_stage,
+        "data_snapshot_id": data_snapshot_id,
+        "policy_id": policy_id,
+        "classification_id": classification_id,
+        "market_regime": signal_document["market_regime"],
+        "sector_stage": signal_document["sector_stage"],
         "execution_mode": "OBSERVATIONAL_ONLY",
         "execution_rules": {
             "minimum_exit_session_offset": None,
@@ -748,16 +1435,62 @@ def build_runtime_decision_artifact(
         "auto_trade": False,
         "trusted_outcome_admission": False,
         "investment_performance_claim": False,
+        "signal_snapshot": signal_snapshot,
+        "previous_signal_snapshot": previous_signal_snapshot,
+        "data_snapshot": data_snapshot,
+        "policy_snapshot": policy_snapshot,
+        "identity_snapshot": identity_snapshot,
+        "classification_snapshot": classification_snapshot,
     }
-    return RuntimeDecisionArtifact.create(identity)
+    identity["decision_content_id"] = _hash_document(
+        {
+            "schema": _DECISION_CONTENT_SCHEMA,
+            **{
+                name: identity[name]
+                for name in sorted(_DECISION_CONTENT_FIELDS)
+            },
+        }
+    )
+    identity["occurrence_dedup_id"] = _hash_document(
+        {
+            "schema": _TRANSITION_OCCURRENCE_SCHEMA,
+            "runtime_store_id": runtime_store,
+            "runtime_signal_id": signal_document["signal_id"],
+            "from_state": signal_document["previous_state"],
+            "to_state": signal_document["state"],
+            "state_changed_at_utc": identity["state_changed_at_utc"],
+            "decision_requested_at_utc": identity["decision_requested_at_utc"],
+            "decision_content_id": identity["decision_content_id"],
+            "upstream_occurrence_id": upstream,
+        }
+    )
+    return RuntimeDecisionDraft.create(identity)
+
+
+def build_runtime_decision_artifact(
+    *,
+    draft: RuntimeDecisionDraft,
+    transition_event_id: str,
+) -> RuntimeDecisionArtifact:
+    if type(draft) is not RuntimeDecisionDraft:
+        raise RuntimeEvidenceContractError(
+            "draft must be the exact RuntimeDecisionDraft type"
+        )
+    transition = _require_sha256(transition_event_id, "transition_event_id")
+    return RuntimeDecisionArtifact.create(
+        {**draft.identity_dict(), "transition_event_id": transition}
+    )
 
 
 __all__ = [
     "RUNTIME_DECISION_ARTIFACT_SCHEMA",
     "RuntimeDecisionArtifact",
+    "RuntimeDecisionDraft",
     "RuntimeEvidenceContractError",
     "SystemUtcClock",
     "UtcClock",
     "build_runtime_decision_artifact",
+    "build_runtime_decision_draft",
     "require_utc_clock_value",
+    "runtime_signal_version_id",
 ]
