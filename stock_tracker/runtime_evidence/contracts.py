@@ -13,15 +13,16 @@ from stock_tracker.core import config as C
 from stock_tracker.core import types as T
 from stock_tracker.core.config import ConfigBundle
 
-RUNTIME_DECISION_ARTIFACT_SCHEMA = "stage4g1-runtime-decision-artifact-v3"
-_DECISION_CONTENT_SCHEMA = "stage4g1-runtime-decision-content-v1"
-_TRANSITION_OCCURRENCE_SCHEMA = "stage4g1-runtime-transition-occurrence-v3"
+RUNTIME_DECISION_ARTIFACT_SCHEMA = "stage4g1-runtime-decision-artifact-v4"
+_DECISION_CONTENT_SCHEMA = "stage4g1-runtime-decision-content-v2"
+_TRANSITION_OCCURRENCE_SCHEMA = "stage4g1-runtime-transition-occurrence-v4"
 _SIGNAL_SNAPSHOT_SCHEMA = "stage4g1-runtime-signal-snapshot-v1"
 _DATA_SNAPSHOT_SCHEMA = "stage4g1-runtime-decision-inputs-v1"
 _POLICY_SNAPSHOT_SCHEMA = "stage4g1-runtime-policy-snapshot-v1"
 _IDENTITY_SNAPSHOT_SCHEMA = "stage4g1-runtime-instrument-identity-v1"
 _CLASSIFICATION_SNAPSHOT_SCHEMA = "stage4g1-runtime-classification-v1"
 _SHA256_LENGTH = 64
+_ZERO_SHA256 = "0" * _SHA256_LENGTH
 _MAX_JSON_BYTES = 16 * 1024 * 1024
 _MAX_REASON_COUNT = 256
 _MAX_BAR_COUNT = 5000
@@ -83,6 +84,11 @@ _EXPECTED_IDENTITY_FIELDS = {
     "state_changed_at_utc",
     "decision_requested_at_utc",
     "observed_at_utc",
+    "pit_evidence_status",
+    "bar_known_at_authority",
+    "single_active_runtime_store",
+    "fork_detection",
+    "external_checkpoint",
     "entry_plan",
     "scores",
     "data_status",
@@ -573,7 +579,11 @@ def _validate_reasons(value: object, name: str) -> list[str]:
     return [_require_text(item, name, maximum=1024) for item in value]
 
 
-def _validate_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
+def _validate_identity(
+    identity: Mapping[str, Any],
+    *,
+    allow_placeholder_transition: bool = False,
+) -> dict[str, Any]:
     _require_fields(identity, _EXPECTED_IDENTITY_FIELDS, "artifact identity")
     if identity["schema"] != RUNTIME_DECISION_ARTIFACT_SCHEMA:
         raise RuntimeEvidenceContractError("runtime artifact schema is invalid")
@@ -585,6 +595,10 @@ def _validate_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
     transition_event_id = _require_sha256(
         identity["transition_event_id"], "transition_event_id"
     )
+    if transition_event_id == _ZERO_SHA256 and not allow_placeholder_transition:
+        raise RuntimeEvidenceContractError(
+            "transition_event_id must be a persisted non-placeholder identity"
+        )
     decision_content_id = _require_sha256(
         identity["decision_content_id"],
         "decision_content_id",
@@ -597,6 +611,11 @@ def _validate_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
         identity["upstream_occurrence_id"],
         "upstream_occurrence_id",
     )
+    if upstream_occurrence_id is not None:
+        raise RuntimeEvidenceContractError(
+            "upstream occurrence authority is not configured in Checkpoint A",
+            code="UPSTREAM_OCCURRENCE_AUTHORITY_NOT_CONFIGURED",
+        )
     signal_version_id = _require_sha256(
         identity["signal_version_id"],
         "signal_version_id",
@@ -644,6 +663,32 @@ def _validate_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
         raise RuntimeEvidenceContractError(
             "transition state_changed_at must equal decision_requested_at"
         )
+    pit_evidence_status = _require_text(
+        identity["pit_evidence_status"], "pit_evidence_status"
+    )
+    if pit_evidence_status != "RUNTIME_MEMORY_ONLY":
+        raise RuntimeEvidenceContractError(
+            "Checkpoint A PIT evidence must remain runtime-memory-only"
+        )
+    bar_known_at_authority = _require_text(
+        identity["bar_known_at_authority"], "bar_known_at_authority"
+    )
+    if bar_known_at_authority != "NOT_AVAILABLE":
+        raise RuntimeEvidenceContractError(
+            "Checkpoint A has no authoritative Bar known_at"
+        )
+    if _require_bool(
+        identity["single_active_runtime_store"], "single_active_runtime_store"
+    ) is not True:
+        raise RuntimeEvidenceContractError("single active Runtime Store is required")
+    fork_detection = _require_text(identity["fork_detection"], "fork_detection")
+    if fork_detection != "LOCAL_APPEND_CHAIN_ONLY":
+        raise RuntimeEvidenceContractError("fork detection boundary is invalid")
+    external_checkpoint = _require_text(
+        identity["external_checkpoint"], "external_checkpoint"
+    )
+    if external_checkpoint != "NOT_IMPLEMENTED":
+        raise RuntimeEvidenceContractError("external checkpoint is not implemented")
 
     signal_snapshot = _validate_signal_snapshot_document(
         identity["signal_snapshot"],
@@ -666,6 +711,28 @@ def _validate_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
     classification_snapshot = _validate_classification_snapshot_document(
         identity["classification_snapshot"]
     )
+    quote_document = data_snapshot["quote"]
+    for field_name in ("timestamp", "received_at", "computed_at"):
+        if _snapshot_datetime_value(
+            quote_document[field_name],
+            f"data_snapshot.quote.{field_name}",
+        ) > requested_at:
+            raise RuntimeEvidenceContractError(
+                f"quote {field_name} exceeds decision_requested_at"
+            )
+    if _snapshot_datetime_value(
+        quote_document["displayed_at"],
+        "data_snapshot.quote.displayed_at",
+    ) > observed_at:
+        raise RuntimeEvidenceContractError("quote displayed_at exceeds observed_at")
+    for index, bar_document in enumerate(data_snapshot["bars"]):
+        if _snapshot_datetime_value(
+            bar_document["timestamp"],
+            f"data_snapshot.bars[{index}].timestamp",
+        ) > requested_at:
+            raise RuntimeEvidenceContractError(
+                "bar timestamp exceeds decision_requested_at"
+            )
     if _hash_document(signal_snapshot) != signal_version_id:
         raise RuntimeEvidenceContractError("signal_version_id mismatch")
     if previous_signal_snapshot is None:
@@ -709,7 +776,7 @@ def _validate_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
             or previous_document["market"] != market
             or previous_document["strategy_id"] != strategy_id
             or previous_document["state"] != previous_state
-            or (previous_state == state and upstream_occurrence_id is None)
+            or previous_state == state
             or previous_state_changed_at > requested_at
         ):
             raise RuntimeEvidenceContractError(
@@ -941,6 +1008,7 @@ def _validate_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
         )
     incomplete_reasons = identity["incomplete_reasons"]
     expected_incomplete = [
+        "BAR_KNOWN_AT_AUTHORITY_PENDING",
         "COST_SCHEDULE_ID_PENDING",
         "EXECUTION_POLICY_ID_PENDING",
         "INSTRUMENT_IDENTITY_AUTHORITY_PENDING",
@@ -983,6 +1051,11 @@ def _validate_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
         "state_changed_at_utc": _datetime_text(state_changed_at, "state_changed_at_utc"),
         "decision_requested_at_utc": _datetime_text(requested_at, "decision_requested_at_utc"),
         "observed_at_utc": _datetime_text(observed_at, "observed_at_utc"),
+        "pit_evidence_status": pit_evidence_status,
+        "bar_known_at_authority": bar_known_at_authority,
+        "single_active_runtime_store": True,
+        "fork_detection": fork_detection,
+        "external_checkpoint": external_checkpoint,
         "entry_plan": normalized_plan,
         "scores": normalized_scores,
         "data_status": data_status,
@@ -1037,6 +1110,17 @@ def _validate_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _normalize_draft_identity(identity: Mapping[str, Any]) -> dict[str, Any]:
+    document = _require_mapping(identity, "runtime decision draft")
+    _require_fields(document, _DRAFT_IDENTITY_FIELDS, "runtime decision draft")
+    normalized = _validate_identity(
+        {**document, "transition_event_id": _ZERO_SHA256},
+        allow_placeholder_transition=True,
+    )
+    normalized.pop("transition_event_id")
+    return normalized
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeDecisionDraft:
     _identity_json: str
@@ -1045,12 +1129,7 @@ class RuntimeDecisionDraft:
 
     def __post_init__(self) -> None:
         identity = _strict_json_loads(self._identity_json.encode("utf-8"))
-        _require_fields(identity, _DRAFT_IDENTITY_FIELDS, "runtime decision draft")
-        artifact = RuntimeDecisionArtifact.create(
-            {**identity, "transition_event_id": "0" * _SHA256_LENGTH}
-        )
-        normalized = artifact.identity_dict()
-        normalized.pop("transition_event_id")
+        normalized = _normalize_draft_identity(identity)
         if _canonical_json_bytes(normalized).decode("utf-8") != self._identity_json:
             raise RuntimeEvidenceContractError("runtime decision draft is not canonical")
         if self.decision_content_id != normalized["decision_content_id"]:
@@ -1060,13 +1139,7 @@ class RuntimeDecisionDraft:
 
     @classmethod
     def create(cls, identity: Mapping[str, Any]) -> RuntimeDecisionDraft:
-        document = _require_mapping(identity, "runtime decision draft")
-        _require_fields(document, _DRAFT_IDENTITY_FIELDS, "runtime decision draft")
-        artifact = RuntimeDecisionArtifact.create(
-            {**document, "transition_event_id": "0" * _SHA256_LENGTH}
-        )
-        normalized = artifact.identity_dict()
-        normalized.pop("transition_event_id")
+        normalized = _normalize_draft_identity(identity)
         identity_json = _canonical_json_bytes(normalized).decode("utf-8")
         return cls(
             identity_json,
@@ -1322,10 +1395,12 @@ def build_runtime_decision_draft(
     metadata = {} if instrument_metadata is None else instrument_metadata
     if type(metadata) is not dict:
         raise RuntimeEvidenceContractError("instrument_metadata must be an exact dict")
-    upstream = _require_optional_text(
-        upstream_occurrence_id,
-        "upstream_occurrence_id",
-    )
+    if upstream_occurrence_id is not None:
+        raise RuntimeEvidenceContractError(
+            "upstream occurrence authority is not configured in Checkpoint A",
+            code="UPSTREAM_OCCURRENCE_AUTHORITY_NOT_CONFIGURED",
+        )
+    upstream = None
     first_snapshots = _runtime_snapshot_bundle(
         signal=signal,
         previous_signal=previous_signal,
@@ -1396,6 +1471,11 @@ def build_runtime_decision_draft(
         "state_changed_at_utc": _datetime_text(state_changed, "state_changed_at"),
         "decision_requested_at_utc": _datetime_text(requested, "decision_requested_at"),
         "observed_at_utc": _datetime_text(observed, "observed_at"),
+        "pit_evidence_status": "RUNTIME_MEMORY_ONLY",
+        "bar_known_at_authority": "NOT_AVAILABLE",
+        "single_active_runtime_store": True,
+        "fork_detection": "LOCAL_APPEND_CHAIN_ONLY",
+        "external_checkpoint": "NOT_IMPLEMENTED",
         "entry_plan": {
             "entry_low": signal_document["entry_low"],
             "entry_high": signal_document["entry_high"],
@@ -1425,6 +1505,7 @@ def build_runtime_decision_draft(
         },
         "outcome_case_status": "OUTCOME_EVIDENCE_PENDING",
         "incomplete_reasons": [
+            "BAR_KNOWN_AT_AUTHORITY_PENDING",
             "COST_SCHEDULE_ID_PENDING",
             "EXECUTION_POLICY_ID_PENDING",
             "INSTRUMENT_IDENTITY_AUTHORITY_PENDING",

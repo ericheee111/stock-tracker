@@ -165,6 +165,8 @@ class RuntimeArtifactWorker:
                 "error_code": error_code,
                 "retry_count": retry_count,
                 "retry_policy_id": self.retry_policy.policy_id,
+                "payload_sha256": lease.payload_sha256,
+                "occurrence_dedup_id": lease.occurrence_dedup_id,
             },
         )
         return RuntimeArtifactWorkerResult(
@@ -201,6 +203,8 @@ class RuntimeArtifactWorker:
         self,
         lease: RuntimeOutboxLease,
         exc: RuntimeArtifactStoreError | OSError | sqlite3.Error,
+        *,
+        artifact_durable: bool,
     ) -> RuntimeArtifactWorkerResult:
         observed_at = require_utc_clock_value(
             self.clock.now(),
@@ -209,11 +213,17 @@ class RuntimeArtifactWorker:
         if type(exc) is RuntimeArtifactStoreError:
             error_code = exc.code
             failure_class = exc.failure_class
+            safe_to_quarantine = exc.safe_to_quarantine
         else:
             error_code = "ARTIFACT_STORE_IO_FAILURE"
             failure_class = RuntimeArtifactFailureClass.ROW_TRANSIENT
+            safe_to_quarantine = False
         next_retry_count = lease.retry_count + 1
-        if failure_class is RuntimeArtifactFailureClass.ROW_PERMANENT:
+        if (
+            failure_class is RuntimeArtifactFailureClass.ROW_PERMANENT
+            and not artifact_durable
+            and safe_to_quarantine
+        ):
             return self._quarantine_row(
                 lease,
                 observed_at,
@@ -222,7 +232,10 @@ class RuntimeArtifactWorker:
                 retry_count=next_retry_count,
                 failure_class=failure_class,
             )
-        if failure_class is RuntimeArtifactFailureClass.ROW_TRANSIENT and next_retry_count <= self.retry_policy.max_attempts:
+        if (
+            failure_class is RuntimeArtifactFailureClass.ROW_TRANSIENT
+            and next_retry_count <= self.retry_policy.max_attempts
+        ):
             self.repository.mark_runtime_outbox_retry(
                 lease,
                 error_code=error_code,
@@ -238,23 +251,37 @@ class RuntimeArtifactWorker:
                 error_code=error_code,
                 retry_policy_id=self.retry_policy.policy_id,
             )
-        if failure_class is RuntimeArtifactFailureClass.ROW_TRANSIENT:
-            return self._quarantine_row(
-                lease,
-                observed_at,
-                reason_code="TRANSIENT_RETRY_EXHAUSTED",
-                error_code=error_code,
-                retry_count=next_retry_count,
-                failure_class=failure_class,
+        block_code = (
+            "POST_APPEND_AUDIT_RETRY_EXHAUSTED"
+            if artifact_durable
+            and failure_class is RuntimeArtifactFailureClass.ROW_TRANSIENT
+            else (
+                "ARTIFACT_STORE_TRANSIENT_RETRY_EXHAUSTED"
+                if failure_class is RuntimeArtifactFailureClass.ROW_TRANSIENT
+                else error_code
             )
-        block_id = self.repository.mark_runtime_worker_integrity_blocked(
-            lease,
-            error_code=error_code,
-            blocked_at=observed_at,
         )
+        # Set the in-process circuit breaker before attempting to persist the
+        # append-only block.  A damaged Runtime DB must not make this worker
+        # continue writing to an untrusted Artifact Store.
+        self._local_integrity_block_code = block_code
+        block_id: str | None = None
+        try:
+            block_id = self.repository.mark_runtime_artifact_integrity_blocked(
+                lease,
+                error_code=block_code,
+                blocked_at=observed_at,
+            )
+        except (
+            RuntimeMigrationError,
+            RuntimeDatabaseIntegrityError,
+            RuntimeOutboxError,
+            sqlite3.Error,
+        ):
+            block_id = None
         return self._hard_block_result(
             artifact_id=lease.artifact_id,
-            error_code=error_code,
+            error_code=block_code,
             retry_count=next_retry_count,
             block_id=block_id,
         )
@@ -269,6 +296,7 @@ class RuntimeArtifactWorker:
         try:
             lease = self.repository.claim_runtime_outbox(
                 worker_id=self.worker_id,
+                artifact_store_id=self.artifact_store.store_id,
                 now=claimed_at,
                 lease_seconds=self.lease_seconds,
             )
@@ -276,8 +304,14 @@ class RuntimeArtifactWorker:
             return self._hard_block_result(
                 artifact_id=exc.artifact_id,
                 error_code=exc.block_code,
+                block_id=exc.block_id,
             )
-        except (RuntimeMigrationError, RuntimeDatabaseIntegrityError, sqlite3.Error) as exc:
+        except (
+            RuntimeMigrationError,
+            RuntimeDatabaseIntegrityError,
+            RuntimeOutboxError,
+            sqlite3.Error,
+        ) as exc:
             return self._hard_block_result(
                 artifact_id=None,
                 error_code=getattr(exc, "code", "RUNTIME_DATABASE_INTEGRITY"),
@@ -297,9 +331,20 @@ class RuntimeArtifactWorker:
             )
         try:
             append_result = self.artifact_store.append(artifact)
+        except (RuntimeArtifactStoreError, OSError, sqlite3.Error) as exc:
+            return self._store_failure_result(
+                lease,
+                exc,
+                artifact_durable=False,
+            )
+        try:
             audit_report = self.artifact_store.audit()
         except (RuntimeArtifactStoreError, OSError, sqlite3.Error) as exc:
-            return self._store_failure_result(lease, exc)
+            return self._store_failure_result(
+                lease,
+                exc,
+                artifact_durable=True,
+            )
         delivered_at = require_utc_clock_value(self.clock.now(), "delivered_at")
         try:
             cursor = self.repository.mark_runtime_outbox_delivered(
@@ -308,11 +353,32 @@ class RuntimeArtifactWorker:
                 audit_report=audit_report,
                 delivered_at=delivered_at,
             )
-        except (RuntimeMigrationError, RuntimeDatabaseIntegrityError, sqlite3.Error) as exc:
+        except (
+            RuntimeMigrationError,
+            RuntimeDatabaseIntegrityError,
+            RuntimeOutboxError,
+            sqlite3.Error,
+        ) as exc:
+            error_code = getattr(exc, "code", "RUNTIME_DATABASE_INTEGRITY")
+            block_id: str | None = None
+            try:
+                block_id = self.repository.mark_runtime_artifact_integrity_blocked(
+                    lease,
+                    error_code=error_code,
+                    blocked_at=delivered_at,
+                )
+            except (
+                RuntimeMigrationError,
+                RuntimeDatabaseIntegrityError,
+                RuntimeOutboxError,
+                sqlite3.Error,
+            ):
+                block_id = None
             return self._hard_block_result(
                 artifact_id=lease.artifact_id,
-                error_code=getattr(exc, "code", "RUNTIME_DATABASE_INTEGRITY"),
+                error_code=error_code,
                 retry_count=lease.retry_count,
+                block_id=block_id,
             )
         return RuntimeArtifactWorkerResult(
             status=RuntimeArtifactWorkerStatus.DELIVERED,

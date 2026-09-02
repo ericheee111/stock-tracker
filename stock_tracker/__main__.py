@@ -44,7 +44,12 @@ from .runtime_evidence.store import RuntimeArtifactStore, RuntimeArtifactStoreEr
 from .runtime_evidence.worker import RuntimeArtifactWorker, RuntimeArtifactWorkerService
 from .signals.manager import SignalManager
 from .storage.db import get_connection
-from .storage.repository import Repository
+from .storage.repository import (
+    Repository,
+    RuntimeDatabaseIntegrityError,
+    RuntimeEvidenceUnavailableError,
+    SignalPersistenceError,
+)
 from .storage.runtime_migrations import (
     RuntimeMigrationError,
     runtime_evidence_schema_ready,
@@ -105,15 +110,24 @@ def _build_runtime_artifact_service(
             )
             return None
         data_root = Path(root_dir).resolve() / "data"
+        runtime_store_id = repository.runtime_evidence_store_id()
         artifact_store = RuntimeArtifactStore(
             data_root / "runtime-decision-artifacts",
             data_root / "runtime-decision-artifacts.db",
+            source_runtime_store_id=runtime_store_id,
             production_database=db_path,
         )
         return RuntimeArtifactWorkerService(
             RuntimeArtifactWorker(repository, artifact_store), logger
         )
-    except (OSError, RuntimeArtifactStoreError, RuntimeMigrationError):
+    except (
+        OSError,
+        RuntimeArtifactStoreError,
+        RuntimeMigrationError,
+        RuntimeDatabaseIntegrityError,
+        RuntimeEvidenceUnavailableError,
+        SignalPersistenceError,
+    ):
         logger.exception(
             "Stage 4G.1 Runtime Artifact Store 不可用，正常交易建议继续服务"
         )

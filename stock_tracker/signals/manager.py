@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -77,6 +78,14 @@ class SignalManager:
         self.sm = SignalStateMachine()
         self.strategies: list[Strategy] = self._build_strategies()
         self._bus = get_bus()
+        self._observational_errors: deque[str] = deque(maxlen=256)
+
+    def _record_observational_error(self, code: str) -> None:
+        self._observational_errors.append(code)
+
+    @property
+    def observational_errors(self) -> tuple[str, ...]:
+        return tuple(self._observational_errors)
 
     def _publish_runtime_evidence(
         self,
@@ -100,6 +109,9 @@ class SignalManager:
                 },
             )
         except Exception:  # noqa: BLE001 - observational status must not break decisions
+            self._record_observational_error(
+                "RUNTIME_EVIDENCE_EVENT_PUBLISH_FAILED"
+            )
             return
 
     def _persist_signal_with_runtime_evidence(
@@ -401,8 +413,12 @@ class SignalManager:
                 dq=dq,
             )
         except Exception:  # noqa: BLE001 - observational telemetry boundary
+            self._record_observational_error("MONITOR_FACT_BUILD_FAILED")
             return
-        self._bus.publish("monitor_facts", payload)
+        try:
+            self._bus.publish("monitor_facts", payload)
+        except Exception:  # noqa: BLE001 - observational transport boundary
+            self._record_observational_error("MONITOR_EVENT_PUBLISH_FAILED")
 
     # ---- 单标的扫描 ----
     def scan_symbol(self, symbol: str, quote: T.Quote, bars: list[T.Bar],
@@ -482,8 +498,8 @@ class SignalManager:
             self.store.upsert_signal(sig)
             try:
                 self._bus.publish("signal", to_jsonable(sig))
-            except Exception:  # noqa: BLE001, S110 - durable state survives transport
-                pass
+            except Exception:  # noqa: BLE001 - durable state survives transport
+                self._record_observational_error("SIGNAL_EVENT_PUBLISH_FAILED")
             self._publish_runtime_evidence(
                 signal_id=sig.signal_id,
                 status=persistence.status,

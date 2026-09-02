@@ -10,7 +10,6 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
-from typing import Optional
 
 _SCHEMA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schema.sql")
 _local = threading.local()
@@ -28,7 +27,7 @@ def _init(db_path: str) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")
-    conn.execute("PRAGMA foreign_keys=OFF;")
+    conn.execute("PRAGMA foreign_keys=ON;")
     with _lock:
         if db_path not in _initialized_paths:
             conn.executescript(_read_schema())
@@ -53,10 +52,11 @@ def get_connection(db_path: str) -> sqlite3.Connection:
 
 def close_all() -> None:
     """关闭当前线程连接（进程退出时调用）。"""
-    if hasattr(_local, "conn"):
+    connection = getattr(_local, "conn", None)
+    if connection is not None:
         try:
-            _local.conn.close()
-        except Exception:
+            connection.close()
+        except sqlite3.Error:
             pass
-        _local.conn = None
-        _local.path = None
+    _local.conn = None
+    _local.path = None

@@ -70,10 +70,16 @@ class RuntimeOutboxConflict(RuntimeOutboxError):
 
 
 class RuntimeWorkerIntegrityBlocked(RuntimeDatabaseIntegrityError):
-    def __init__(self, artifact_id: str, block_code: str) -> None:
+    def __init__(
+        self,
+        artifact_id: str | None,
+        block_code: str,
+        block_id: str | None = None,
+    ) -> None:
         super().__init__(block_code)
         self.artifact_id = artifact_id
         self.block_code = block_code
+        self.block_id = block_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +98,8 @@ class RuntimeOutboxLease:
     transition_event_id: str
     decision_content_id: str
     occurrence_dedup_id: str
+    delivery_binding_id: str
+    artifact_store_id: str
     payload_json: str
     payload_sha256: str
     retry_count: int
@@ -116,6 +124,16 @@ class RuntimeOutboxLease:
         _require_runtime_id(
             self.occurrence_dedup_id,
             "lease occurrence_dedup_id",
+            sha256=True,
+        )
+        _require_runtime_id(
+            self.delivery_binding_id,
+            "lease delivery_binding_id",
+            sha256=True,
+        )
+        _require_runtime_id(
+            self.artifact_store_id,
+            "lease artifact_store_id",
             sha256=True,
         )
         if type(self.payload_json) is not str:
@@ -173,6 +191,142 @@ def _runtime_canonical_json(value: dict[str, Any]) -> str:
 
 def _runtime_sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _signal_history_sha256_from_row(row: sqlite3.Row) -> str:
+    if type(row["signal_id"]) is not str or not row["signal_id"]:
+        raise RuntimeOutboxError("signal history signal_id is invalid")
+    from_state = row["from_state"]
+    if from_state is not None and type(from_state) is not str:
+        raise RuntimeOutboxError("signal history from_state is invalid")
+    if type(row["to_state"]) is not str or not row["to_state"]:
+        raise RuntimeOutboxError("signal history to_state is invalid")
+    if type(row["reason"]) is not str:
+        raise RuntimeOutboxError("signal history reason is invalid")
+    try:
+        at = require_utc_clock_value(
+            datetime.fromisoformat(str(row["at"])),
+            "signal history time",
+        )
+        what_changed = json.loads(str(row["what_changed"]))
+    except (ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeOutboxError("signal history payload is invalid") from exc
+    if type(what_changed) is not list or any(
+        type(item) is not str for item in what_changed
+    ):
+        raise RuntimeOutboxError("signal history what_changed is invalid")
+    return _runtime_sha256_text(
+        _runtime_canonical_json(
+            {
+                "schema": "stage4g1-runtime-signal-history-binding-v1",
+                "signal_id": row["signal_id"],
+                "from_state": from_state,
+                "to_state": row["to_state"],
+                "at": _runtime_utc_text(at, "signal history time"),
+                "reason": row["reason"],
+                "what_changed": what_changed,
+            }
+        )
+    )
+
+
+def _runtime_occurrence_hash(
+    *,
+    runtime_store_id: str,
+    occurrence_append_order: int,
+    previous_occurrence_hash: str,
+    occurrence_dedup_id: str,
+    decision_content_id: str,
+    artifact_id: str,
+    transition_event_id: str,
+    signal_history_id: int,
+    signal_history_sha256: str,
+    created_at: datetime,
+) -> str:
+    return _runtime_sha256_text(
+        _runtime_canonical_json(
+            {
+                "schema": "stage4g1-runtime-occurrence-append-chain-v1",
+                "runtime_store_id": _require_runtime_id(
+                    runtime_store_id, "runtime_store_id", sha256=True
+                ),
+                "occurrence_append_order": occurrence_append_order,
+                "previous_occurrence_hash": _require_runtime_id(
+                    previous_occurrence_hash,
+                    "previous_occurrence_hash",
+                    sha256=True,
+                ),
+                "occurrence_dedup_id": _require_runtime_id(
+                    occurrence_dedup_id, "occurrence_dedup_id", sha256=True
+                ),
+                "decision_content_id": _require_runtime_id(
+                    decision_content_id, "decision_content_id", sha256=True
+                ),
+                "artifact_id": _require_runtime_id(
+                    artifact_id, "artifact_id", sha256=True
+                ),
+                "transition_event_id": _require_runtime_id(
+                    transition_event_id, "transition_event_id", sha256=True
+                ),
+                "signal_history_id": signal_history_id,
+                "signal_history_sha256": _require_runtime_id(
+                    signal_history_sha256, "signal_history_sha256", sha256=True
+                ),
+                "created_at": _runtime_utc_text(created_at, "occurrence created_at"),
+            }
+        )
+    )
+
+
+def _runtime_delivery_binding_id(
+    runtime_store_id: str,
+    artifact_store_id: str,
+) -> str:
+    return _runtime_sha256_text(
+        _runtime_canonical_json(
+            {
+                "schema": "stage4g1-runtime-artifact-delivery-binding-v1",
+                "runtime_store_id": _require_runtime_id(
+                    runtime_store_id, "runtime_store_id", sha256=True
+                ),
+                "artifact_store_id": _require_runtime_id(
+                    artifact_store_id, "artifact_store_id", sha256=True
+                ),
+            }
+        )
+    )
+
+
+def _runtime_integrity_event_id(
+    *,
+    event_order: int,
+    delivery_binding_id: str,
+    artifact_id: str | None,
+    worker_id: str,
+    block_code: str,
+    blocked_at: datetime,
+) -> str:
+    return _runtime_sha256_text(
+        _runtime_canonical_json(
+            {
+                "schema": "stage4g1-runtime-artifact-integrity-event-v1",
+                "event_order": event_order,
+                "delivery_binding_id": _require_runtime_id(
+                    delivery_binding_id, "delivery_binding_id", sha256=True
+                ),
+                "artifact_id": (
+                    None
+                    if artifact_id is None
+                    else _require_runtime_id(
+                        artifact_id, "artifact_id", sha256=True
+                    )
+                ),
+                "worker_id": _require_runtime_id(worker_id, "worker_id"),
+                "block_code": _require_runtime_id(block_code, "block_code"),
+                "blocked_at": _runtime_utc_text(blocked_at, "blocked_at"),
+            }
+        )
+    )
 
 
 def _require_runtime_id(value: object, name: str, *, sha256: bool = False) -> str:
@@ -691,12 +845,20 @@ class Repository:
         try:
             conn.execute("BEGIN IMMEDIATE")
             store_id = self._runtime_store_id_connection(conn)
-            self._audit_runtime_outbox_state_connection(conn)
+            # Startup must tolerate a row-level poison payload so the worker can
+            # subsequently quarantine it.  Structural relations are still
+            # audited before the Artifact Store is opened.
+            self._audit_runtime_outbox_structure_connection(conn)
             conn.rollback()
             return store_id
         except (RuntimeEvidenceUnavailableError, RuntimeDatabaseIntegrityError):
             conn.rollback()
             raise
+        except RuntimeOutboxError as exc:
+            conn.rollback()
+            raise RuntimeDatabaseIntegrityError(
+                "runtime evidence structure audit failed"
+            ) from exc
         except sqlite3.Error as exc:
             conn.rollback()
             raise SignalPersistenceError(
@@ -711,28 +873,181 @@ class Repository:
         return int(row[0])
 
     @staticmethod
-    def _audit_runtime_outbox_state_connection(conn: sqlite3.Connection) -> None:
-        runtime_store_id = audit_runtime_evidence_schema(conn)
-        delivery_rows = conn.execute(
-            "SELECT * FROM runtime_outbox_delivery ORDER BY artifact_id"
-        ).fetchall()
-        status_by_artifact: dict[str, str] = {}
-        for row in delivery_rows:
-            artifact_id = _require_runtime_id(
-                row["artifact_id"], "delivery artifact_id", sha256=True
+    def _audit_runtime_outbox_structure_connection(
+        conn: sqlite3.Connection,
+    ) -> None:
+        audit_runtime_evidence_schema(conn)
+        foreign_keys = conn.execute("PRAGMA foreign_keys").fetchone()
+        if foreign_keys is None or int(foreign_keys[0]) != 1:
+            raise RuntimeOutboxError(
+                "runtime evidence connections must enforce foreign keys",
+                code="RUNTIME_FOREIGN_KEYS_DISABLED",
             )
+        violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            raise RuntimeOutboxError(
+                "runtime evidence foreign key relation is invalid",
+                code="RUNTIME_FOREIGN_KEY_VIOLATION",
+            )
+        rows = conn.execute(
+            "SELECT o.append_order,o.artifact_id,o.runtime_signal_id,"
+            "o.transition_event_id,o.payload_json,o.payload_sha256,o.created_at,"
+            "c.occurrence_order,c.occurrence_dedup_id,c.decision_content_id,"
+            "c.transition_event_id AS occurrence_transition_event_id,"
+            "c.signal_history_id,c.signal_history_sha256,"
+            "c.occurrence_append_order,c.previous_occurrence_hash,"
+            "c.occurrence_hash,c.created_at AS occurrence_created_at,"
+            "d.status,d.lease_owner,d.lease_expires_at,d.retry_count,"
+            "d.next_retry_at,d.last_error_code,d.delivered_record_hash,"
+            "d.delivered_artifact_store_id,d.delivered_append_order,"
+            "d.delivered_audit_id,d.delivered_at "
+            "FROM runtime_transition_outbox o "
+            "LEFT JOIN runtime_transition_occurrence c ON c.artifact_id=o.artifact_id "
+            "LEFT JOIN runtime_outbox_delivery d ON d.artifact_id=o.artifact_id "
+            "ORDER BY o.append_order"
+        ).fetchall()
+        counts = conn.execute(
+            "SELECT "
+            "(SELECT COUNT(*) FROM runtime_transition_outbox),"
+            "(SELECT COUNT(*) FROM runtime_transition_occurrence),"
+            "(SELECT COUNT(*) FROM runtime_outbox_delivery)"
+        ).fetchone()
+        if counts is None or len({int(counts[0]), int(counts[1]), int(counts[2])}) != 1:
+            raise RuntimeOutboxError(
+                "runtime outbox relation cardinality is incomplete",
+                code="RUNTIME_OUTBOX_RELATION_INCOMPLETE",
+            )
+        previous_created_at: datetime | None = None
+        previous_occurrence_hash = "0" * 64
+        status_by_artifact: dict[str, str] = {}
+        runtime_store_id = audit_runtime_evidence_schema(conn)
+        for expected_order, row in enumerate(rows, start=1):
+            if (
+                int(row["append_order"]) != expected_order
+                or row["occurrence_order"] is None
+                or int(row["occurrence_order"]) != expected_order
+                or row["occurrence_append_order"] is None
+                or int(row["occurrence_append_order"]) != expected_order
+                or row["status"] is None
+            ):
+                raise RuntimeOutboxError(
+                    "runtime outbox structural order is invalid",
+                    code="RUNTIME_OUTBOX_RELATION_INCOMPLETE",
+                )
+            artifact_id = _require_runtime_id(
+                row["artifact_id"], "artifact_id", sha256=True
+            )
+            _require_runtime_id(row["runtime_signal_id"], "runtime_signal_id")
+            transition_event_id = _require_runtime_id(
+                row["transition_event_id"], "transition_event_id", sha256=True
+            )
+            if transition_event_id != _require_runtime_id(
+                row["occurrence_transition_event_id"],
+                "occurrence transition_event_id",
+                sha256=True,
+            ):
+                raise RuntimeOutboxError(
+                    "runtime occurrence transition identity is inconsistent",
+                    code="RUNTIME_OUTBOX_RELATION_INCOMPLETE",
+                )
+            _require_runtime_id(
+                row["occurrence_dedup_id"], "occurrence_dedup_id", sha256=True
+            )
+            _require_runtime_id(
+                row["decision_content_id"], "decision_content_id", sha256=True
+            )
+            payload = str(row["payload_json"])
+            if _runtime_sha256_text(payload) != _require_runtime_id(
+                row["payload_sha256"], "payload_sha256", sha256=True
+            ):
+                raise RuntimeOutboxError(
+                    "runtime outbox payload SHA mismatch",
+                    code="RUNTIME_OUTBOX_PAYLOAD_SHA_MISMATCH",
+                )
+            created_at = _runtime_utc_from_text(row["created_at"], "outbox created_at")
+            occurrence_created_at = _runtime_utc_from_text(
+                row["occurrence_created_at"], "occurrence created_at"
+            )
+            if occurrence_created_at != created_at:
+                raise RuntimeOutboxError(
+                    "runtime occurrence and outbox creation times differ",
+                    code="RUNTIME_OUTBOX_RELATION_INCOMPLETE",
+                )
+            if previous_created_at is not None and created_at < previous_created_at:
+                raise RuntimeOutboxError(
+                    "runtime outbox clock moved backward",
+                    code="RUNTIME_CLOCK_ROLLBACK",
+                )
+            previous_created_at = created_at
+            history_id = row["signal_history_id"]
+            if type(history_id) is not int or history_id < 1:
+                raise RuntimeOutboxError(
+                    "runtime occurrence signal history identity is invalid",
+                    code="RUNTIME_OUTBOX_RELATION_INCOMPLETE",
+                )
+            history = conn.execute(
+                "SELECT * FROM signal_history WHERE id=?", (history_id,)
+            ).fetchone()
+            if history is None:
+                raise RuntimeOutboxError(
+                    "runtime occurrence signal history is missing",
+                    code="RUNTIME_OUTBOX_RELATION_INCOMPLETE",
+                )
+            history_sha = _require_runtime_id(
+                row["signal_history_sha256"],
+                "signal_history_sha256",
+                sha256=True,
+            )
+            if _signal_history_sha256_from_row(history) != history_sha:
+                raise RuntimeOutboxError(
+                    "runtime occurrence signal history SHA mismatch",
+                    code="RUNTIME_SIGNAL_HISTORY_TAMPERED",
+                )
+            persisted_previous_hash = _require_runtime_id(
+                row["previous_occurrence_hash"],
+                "previous_occurrence_hash",
+                sha256=True,
+            )
+            if persisted_previous_hash != previous_occurrence_hash:
+                raise RuntimeOutboxError(
+                    "runtime occurrence append chain is broken",
+                    code="RUNTIME_OCCURRENCE_CHAIN_BROKEN",
+                )
+            expected_occurrence_hash = _runtime_occurrence_hash(
+                runtime_store_id=runtime_store_id,
+                occurrence_append_order=expected_order,
+                previous_occurrence_hash=previous_occurrence_hash,
+                occurrence_dedup_id=str(row["occurrence_dedup_id"]),
+                decision_content_id=str(row["decision_content_id"]),
+                artifact_id=artifact_id,
+                transition_event_id=transition_event_id,
+                signal_history_id=history_id,
+                signal_history_sha256=history_sha,
+                created_at=occurrence_created_at,
+            )
+            occurrence_hash = _require_runtime_id(
+                row["occurrence_hash"], "occurrence_hash", sha256=True
+            )
+            if occurrence_hash != expected_occurrence_hash:
+                raise RuntimeOutboxError(
+                    "runtime occurrence hash is invalid",
+                    code="RUNTIME_OCCURRENCE_CHAIN_BROKEN",
+                )
+            previous_occurrence_hash = occurrence_hash
             status = str(row["status"])
             status_by_artifact[artifact_id] = status
-            retry_count = row["retry_count"]
-            if type(retry_count) is not int or retry_count < 0:
-                raise RuntimeOutboxError("runtime retry_count is invalid")
             lease_owner = row["lease_owner"]
             lease_expiry = row["lease_expires_at"]
+            retry_count = row["retry_count"]
             next_retry = row["next_retry_at"]
             last_error = row["last_error_code"]
             record_hash = row["delivered_record_hash"]
+            artifact_store_id = row["delivered_artifact_store_id"]
+            delivered_append_order = row["delivered_append_order"]
             audit_id = row["delivered_audit_id"]
             delivered_at = row["delivered_at"]
+            if type(retry_count) is not int or retry_count < 0:
+                raise RuntimeOutboxError("runtime retry_count is invalid")
             if lease_owner is not None:
                 _require_runtime_id(lease_owner, "lease_owner")
             if lease_expiry is not None:
@@ -743,14 +1058,30 @@ class Repository:
                 _require_runtime_id(last_error, "last_error_code")
             if record_hash is not None:
                 _require_runtime_id(record_hash, "delivered_record_hash", sha256=True)
+            if artifact_store_id is not None:
+                _require_runtime_id(
+                    artifact_store_id,
+                    "delivered_artifact_store_id",
+                    sha256=True,
+                )
+            if delivered_append_order is not None and (
+                type(delivered_append_order) is not int
+                or delivered_append_order < 1
+            ):
+                raise RuntimeOutboxError("delivered_append_order is invalid")
             if audit_id is not None:
                 _require_runtime_id(audit_id, "delivered_audit_id", sha256=True)
-            if delivered_at is not None:
-                _runtime_utc_from_text(delivered_at, "delivered_at")
+            delivered_time = (
+                None
+                if delivered_at is None
+                else _runtime_utc_from_text(delivered_at, "delivered_at")
+            )
             valid = {
                 "PENDING": lease_owner is None
                 and lease_expiry is None
                 and record_hash is None
+                and artifact_store_id is None
+                and delivered_append_order is None
                 and audit_id is None
                 and delivered_at is None,
                 "LEASED": lease_owner is not None
@@ -758,6 +1089,8 @@ class Repository:
                 and next_retry is None
                 and last_error is None
                 and record_hash is None
+                and artifact_store_id is None
+                and delivered_append_order is None
                 and audit_id is None
                 and delivered_at is None,
                 "DELIVERED": lease_owner is None
@@ -765,18 +1098,148 @@ class Repository:
                 and next_retry is None
                 and last_error is None
                 and record_hash is not None
+                and artifact_store_id is not None
+                and delivered_append_order is not None
                 and audit_id is not None
-                and delivered_at is not None,
+                and delivered_time is not None
+                and delivered_time >= created_at,
                 "QUARANTINED": lease_owner is None
                 and lease_expiry is None
                 and next_retry is None
                 and last_error is not None
                 and record_hash is None
+                and artifact_store_id is None
+                and delivered_append_order is None
                 and audit_id is None
                 and delivered_at is None,
             }.get(status, False)
             if not valid:
                 raise RuntimeOutboxError("runtime delivery state is inconsistent")
+        maximum_order = len(rows)
+        for cursor_row in conn.execute(
+            "SELECT worker_id,last_contiguous_order,updated_at FROM runtime_outbox_cursor"
+        ).fetchall():
+            _require_runtime_id(cursor_row["worker_id"], "cursor worker_id")
+            last_order = cursor_row["last_contiguous_order"]
+            if type(last_order) is not int or not 0 <= last_order <= maximum_order:
+                raise RuntimeOutboxError("runtime cursor is outside outbox bounds")
+            _runtime_utc_from_text(cursor_row["updated_at"], "cursor updated_at")
+            terminal_count = sum(
+                status_by_artifact[str(item["artifact_id"])]
+                in {"DELIVERED", "QUARANTINED"}
+                for item in rows[:last_order]
+            )
+            if terminal_count != last_order:
+                raise RuntimeOutboxError("runtime cursor skipped non-terminal delivery")
+        if int(
+            conn.execute(
+                "SELECT COUNT(*) FROM runtime_worker_integrity_block"
+            ).fetchone()[0]
+        ):
+            raise RuntimeOutboxError(
+                "legacy worker-scoped integrity blocks are forbidden in v3",
+                code="LEGACY_WORKER_INTEGRITY_BLOCK_PRESENT",
+            )
+        binding_rows = conn.execute(
+            "SELECT * FROM runtime_artifact_delivery_binding ORDER BY binding_order"
+        ).fetchall()
+        if len(binding_rows) > 1:
+            raise RuntimeOutboxError("runtime delivery binding is not singular")
+        binding_id: str | None = None
+        bound_artifact_store_id: str | None = None
+        if binding_rows:
+            binding = binding_rows[0]
+            if int(binding["binding_order"]) != 1:
+                raise RuntimeOutboxError("runtime delivery binding order is invalid")
+            binding_id = _require_runtime_id(
+                binding["delivery_binding_id"],
+                "delivery_binding_id",
+                sha256=True,
+            )
+            if _require_runtime_id(
+                binding["runtime_store_id"],
+                "binding runtime_store_id",
+                sha256=True,
+            ) != runtime_store_id:
+                raise RuntimeOutboxError("runtime delivery binding store changed")
+            bound_artifact_store_id = _require_runtime_id(
+                binding["artifact_store_id"],
+                "artifact_store_id",
+                sha256=True,
+            )
+            if binding_id != _runtime_delivery_binding_id(
+                runtime_store_id,
+                bound_artifact_store_id,
+            ):
+                raise RuntimeOutboxError("runtime delivery binding identity mismatch")
+            _runtime_utc_from_text(binding["bound_at"], "binding bound_at")
+        delivered_store_ids = {
+            str(row["delivered_artifact_store_id"])
+            for row in rows
+            if row["delivered_artifact_store_id"] is not None
+        }
+        if delivered_store_ids and (
+            bound_artifact_store_id is None
+            or delivered_store_ids != {bound_artifact_store_id}
+        ):
+            raise RuntimeOutboxError("delivered rows disagree with the lane binding")
+        events = conn.execute(
+            "SELECT * FROM runtime_artifact_integrity_event ORDER BY event_order"
+        ).fetchall()
+        if events and binding_id is None:
+            raise RuntimeOutboxError("runtime integrity event has no delivery binding")
+        for expected_order, event in enumerate(events, start=1):
+            if int(event["event_order"]) != expected_order:
+                raise RuntimeOutboxError("runtime integrity event order is invalid")
+            event_binding_id = _require_runtime_id(
+                event["delivery_binding_id"],
+                "integrity event delivery_binding_id",
+                sha256=True,
+            )
+            if event_binding_id != binding_id:
+                raise RuntimeOutboxError("runtime integrity event binding mismatch")
+            artifact_value = event["artifact_id"]
+            event_artifact_id = (
+                None
+                if artifact_value is None
+                else _require_runtime_id(
+                    artifact_value,
+                    "integrity event artifact_id",
+                    sha256=True,
+                )
+            )
+            if event_artifact_id is not None and event_artifact_id not in status_by_artifact:
+                raise RuntimeOutboxError("runtime integrity event artifact is missing")
+            worker_id = _require_runtime_id(event["worker_id"], "integrity worker_id")
+            block_code = _require_runtime_id(event["block_code"], "block_code")
+            blocked_at = _runtime_utc_from_text(event["blocked_at"], "blocked_at")
+            if _require_runtime_id(
+                event["integrity_event_id"],
+                "integrity_event_id",
+                sha256=True,
+            ) != _runtime_integrity_event_id(
+                event_order=expected_order,
+                delivery_binding_id=event_binding_id,
+                artifact_id=event_artifact_id,
+                worker_id=worker_id,
+                block_code=block_code,
+                blocked_at=blocked_at,
+            ):
+                raise RuntimeOutboxError("runtime integrity event identity mismatch")
+
+    @staticmethod
+    def _audit_runtime_outbox_state_connection(conn: sqlite3.Connection) -> None:
+        Repository._audit_runtime_outbox_structure_connection(conn)
+        runtime_store_id = audit_runtime_evidence_schema(conn)
+        delivery_rows = conn.execute(
+            "SELECT artifact_id,status FROM runtime_outbox_delivery ORDER BY artifact_id"
+        ).fetchall()
+        status_by_artifact = {
+            _require_runtime_id(
+                row["artifact_id"], "delivery artifact_id", sha256=True
+            ): str(row["status"])
+            for row in delivery_rows
+        }
 
         outbox = conn.execute(
             "SELECT o.*,c.occurrence_order,c.occurrence_dedup_id,"
@@ -939,12 +1402,25 @@ class Repository:
                     )
                 append_order = append_order_value
                 linked = conn.execute(
-                    "SELECT 1 FROM runtime_transition_outbox WHERE artifact_id=? "
-                    "AND append_order=? AND runtime_signal_id=?",
+                    "SELECT o.payload_sha256,c.occurrence_dedup_id "
+                    "FROM runtime_transition_outbox o "
+                    "JOIN runtime_transition_occurrence c "
+                    "ON c.artifact_id=o.artifact_id "
+                    "WHERE o.artifact_id=? AND o.append_order=? "
+                    "AND o.runtime_signal_id=?",
                     (artifact_id, append_order, runtime_signal_id),
                 ).fetchone()
                 if linked is None:
                     raise RuntimeOutboxError("runtime quarantine outbox reference is invalid")
+                if (
+                    metadata.get("payload_sha256")
+                    != str(linked["payload_sha256"])
+                    or metadata.get("occurrence_dedup_id")
+                    != str(linked["occurrence_dedup_id"])
+                ):
+                    raise RuntimeOutboxError(
+                        "runtime quarantine metadata does not bind the quarantined row"
+                    )
             identity = _runtime_canonical_json(
                 {
                     "schema": "stage4g1-runtime-outbox-quarantine-identity-v1",
@@ -963,45 +1439,6 @@ class Repository:
             )
             if _runtime_sha256_text(identity) != quarantine_id:
                 raise RuntimeOutboxError("runtime quarantine identity mismatch")
-        block_rows = conn.execute(
-            "SELECT * FROM runtime_worker_integrity_block ORDER BY block_order"
-        ).fetchall()
-        for expected_order, row in enumerate(block_rows, start=1):
-            if int(row["block_order"]) != expected_order:
-                raise RuntimeOutboxError("runtime worker block order is not contiguous")
-            block_id = _require_runtime_id(row["block_id"], "block_id", sha256=True)
-            worker_id = _require_runtime_id(row["worker_id"], "blocked worker_id")
-            artifact_id = _require_runtime_id(row["artifact_id"], "blocked artifact_id", sha256=True)
-            block_code = _require_runtime_id(row["block_code"], "block_code")
-            blocked_at = _runtime_utc_from_text(row["blocked_at"], "blocked_at")
-            expected_block_id = _runtime_sha256_text(
-                _runtime_canonical_json(
-                    {
-                        "schema": "stage4g1-runtime-worker-integrity-block-v1",
-                        "runtime_store_id": runtime_store_id,
-                        "block_order": expected_order,
-                        "worker_id": worker_id,
-                        "artifact_id": artifact_id,
-                        "block_code": block_code,
-                        "blocked_at": _runtime_utc_text(blocked_at, "blocked_at"),
-                    }
-                )
-            )
-            if block_id != expected_block_id:
-                raise RuntimeOutboxError("runtime worker block identity mismatch")
-            linked = conn.execute(
-                "SELECT append_order FROM runtime_transition_outbox WHERE artifact_id=?",
-                (artifact_id,),
-            ).fetchone()
-            if linked is None:
-                raise RuntimeOutboxError("runtime worker block artifact is missing")
-            cursor = conn.execute(
-                "SELECT last_contiguous_order FROM runtime_outbox_cursor WHERE worker_id=?",
-                (worker_id,),
-            ).fetchone()
-            if cursor is not None and int(cursor[0]) >= int(linked[0]):
-                raise RuntimeOutboxError("runtime worker block cursor advanced")
-
     @classmethod
     def _append_runtime_quarantine_connection(
         cls,
@@ -1173,24 +1610,39 @@ class Repository:
                     "persisted transition_event_id",
                     sha256=True,
                 )
-                candidate = build_runtime_decision_artifact(
-                    draft=decision_draft,
-                    transition_event_id=persisted_transition_id,
-                )
-                payload_json = candidate.to_json_bytes().decode("utf-8")
+                try:
+                    persisted_artifact = RuntimeDecisionArtifact.from_json_bytes(
+                        str(existing_occurrence["payload_json"]).encode("utf-8")
+                    )
+                except RuntimeEvidenceContractError as exc:
+                    raise RuntimeOutboxError(
+                        "persisted runtime occurrence artifact is invalid"
+                    ) from exc
+                persisted_identity = persisted_artifact.identity_dict()
                 if (
-                    str(existing_occurrence["artifact_id"]) != candidate.artifact_id
-                    or str(existing_occurrence["payload_json"]) != payload_json
+                    str(existing_occurrence["artifact_id"])
+                    != persisted_artifact.artifact_id
                     or str(existing_occurrence["payload_sha256"])
-                    != _runtime_sha256_text(payload_json)
+                    != _runtime_sha256_text(
+                        persisted_artifact.to_json_bytes().decode("utf-8")
+                    )
+                    or persisted_identity["transition_event_id"]
+                    != persisted_transition_id
+                    or persisted_identity["decision_content_id"]
+                    != decision_draft.decision_content_id
+                    or persisted_identity["occurrence_dedup_id"]
+                    != decision_draft.occurrence_dedup_id
                 ):
                     raise RuntimeOutboxConflict(
                         "runtime occurrence dedup identity has payload drift"
                     )
+                # observed_at belongs to the first durable capture.  A later
+                # retry reuses that immutable artifact instead of rebuilding a
+                # second payload for the same occurrence.
                 conn.rollback()
                 return RuntimeSignalPersistence(
                     f"OUTBOX_{existing_occurrence['status']}",
-                    candidate.artifact_id,
+                    persisted_artifact.artifact_id,
                     int(existing_occurrence["append_order"]),
                     None,
                 )
@@ -1255,6 +1707,8 @@ class Repository:
             if decision_draft is not None and draft_identity is not None:
                 if history_id is None:
                     raise RuntimeOutboxError("runtime occurrence requires signal history")
+                if runtime_store_id is None:
+                    raise RuntimeOutboxError("runtime occurrence requires store identity")
                 transition_event_id = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
                 artifact = build_runtime_decision_artifact(
                     draft=decision_draft,
@@ -1266,6 +1720,32 @@ class Repository:
                     "SELECT COALESCE(MAX(append_order),0)+1 FROM runtime_transition_outbox"
                 ).fetchone()
                 append_order = int(row[0])
+                history_row = conn.execute(
+                    "SELECT * FROM signal_history WHERE id=?",
+                    (history_id,),
+                ).fetchone()
+                if history_row is None:
+                    raise RuntimeOutboxError("runtime signal history disappeared")
+                signal_history_sha256 = _signal_history_sha256_from_row(history_row)
+                previous_row = conn.execute(
+                    "SELECT occurrence_hash FROM runtime_transition_occurrence "
+                    "ORDER BY occurrence_append_order DESC LIMIT 1"
+                ).fetchone()
+                previous_occurrence_hash = (
+                    "0" * 64 if previous_row is None else str(previous_row[0])
+                )
+                occurrence_hash = _runtime_occurrence_hash(
+                    runtime_store_id=runtime_store_id,
+                    occurrence_append_order=append_order,
+                    previous_occurrence_hash=previous_occurrence_hash,
+                    occurrence_dedup_id=decision_draft.occurrence_dedup_id,
+                    decision_content_id=decision_draft.decision_content_id,
+                    artifact_id=artifact.artifact_id,
+                    transition_event_id=transition_event_id,
+                    signal_history_id=history_id,
+                    signal_history_sha256=signal_history_sha256,
+                    created_at=observed,
+                )
                 conn.execute(
                     "INSERT INTO runtime_transition_outbox("
                     "append_order,artifact_id,runtime_signal_id,transition_event_id,"
@@ -1283,8 +1763,10 @@ class Repository:
                 conn.execute(
                     "INSERT INTO runtime_transition_occurrence("
                     "occurrence_order,occurrence_dedup_id,decision_content_id,artifact_id,"
-                    "transition_event_id,upstream_occurrence_id,signal_history_id,created_at) "
-                    "VALUES(?,?,?,?,?,?,?,?)",
+                    "transition_event_id,upstream_occurrence_id,signal_history_id,created_at,"
+                    "signal_history_sha256,occurrence_append_order,"
+                    "previous_occurrence_hash,occurrence_hash) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         append_order,
                         decision_draft.occurrence_dedup_id,
@@ -1294,6 +1776,10 @@ class Repository:
                         draft_identity["upstream_occurrence_id"],
                         history_id,
                         _runtime_utc_text(observed, "created_at"),
+                        signal_history_sha256,
+                        append_order,
+                        previous_occurrence_hash,
+                        occurrence_hash,
                     ),
                 )
                 conn.execute(
@@ -1410,7 +1896,8 @@ class Repository:
             "UNION ALL SELECT delivered_at FROM runtime_outbox_delivery "
             "UNION ALL SELECT updated_at FROM runtime_outbox_cursor "
             "UNION ALL SELECT quarantined_at FROM runtime_outbox_quarantine "
-            "UNION ALL SELECT blocked_at FROM runtime_worker_integrity_block"
+            "UNION ALL SELECT bound_at FROM runtime_artifact_delivery_binding "
+            "UNION ALL SELECT blocked_at FROM runtime_artifact_integrity_event"
             ") WHERE value IS NOT NULL"
         ).fetchone()[0]
         if timestamps is not None and observed < _runtime_utc_from_text(
@@ -1459,23 +1946,153 @@ class Repository:
         conn: sqlite3.Connection,
     ) -> None:
         blocked = conn.execute(
-            "SELECT artifact_id,block_code FROM runtime_worker_integrity_block "
-            "ORDER BY block_order LIMIT 1"
+            "SELECT integrity_event_id,artifact_id,block_code "
+            "FROM runtime_artifact_integrity_event ORDER BY event_order LIMIT 1"
         ).fetchone()
         if blocked is not None:
             raise RuntimeWorkerIntegrityBlocked(
-                str(blocked["artifact_id"]),
+                None if blocked["artifact_id"] is None else str(blocked["artifact_id"]),
                 str(blocked["block_code"]),
+                str(blocked["integrity_event_id"]),
             )
+
+    @staticmethod
+    def _append_runtime_artifact_integrity_event_connection(
+        conn: sqlite3.Connection,
+        *,
+        delivery_binding_id: str,
+        worker_id: str,
+        error_code: str,
+        blocked_at: datetime,
+        artifact_id: str | None,
+    ) -> str:
+        existing = conn.execute(
+            "SELECT integrity_event_id FROM runtime_artifact_integrity_event "
+            "ORDER BY event_order LIMIT 1"
+        ).fetchone()
+        if existing is not None:
+            return str(existing["integrity_event_id"])
+        event_order = 1
+        event_id = _runtime_integrity_event_id(
+            event_order=event_order,
+            delivery_binding_id=delivery_binding_id,
+            artifact_id=artifact_id,
+            worker_id=worker_id,
+            block_code=error_code,
+            blocked_at=blocked_at,
+        )
+        conn.execute(
+            "INSERT INTO runtime_artifact_integrity_event("
+            "event_order,integrity_event_id,delivery_binding_id,artifact_id,"
+            "worker_id,block_code,blocked_at) VALUES(?,?,?,?,?,?,?)",
+            (
+                event_order,
+                event_id,
+                delivery_binding_id,
+                artifact_id,
+                worker_id,
+                error_code,
+                _runtime_utc_text(blocked_at, "blocked_at"),
+            ),
+        )
+        return event_id
+
+    @classmethod
+    def _ensure_runtime_artifact_delivery_binding_connection(
+        cls,
+        conn: sqlite3.Connection,
+        *,
+        artifact_store_id: str,
+        worker_id: str,
+        bound_at: datetime,
+    ) -> str:
+        runtime_store_id = cls._runtime_store_id_connection(conn)
+        artifact_store = _require_runtime_id(
+            artifact_store_id, "artifact_store_id", sha256=True
+        )
+        worker = _require_runtime_id(worker_id, "worker_id")
+        row = conn.execute(
+            "SELECT * FROM runtime_artifact_delivery_binding "
+            "ORDER BY binding_order LIMIT 1"
+        ).fetchone()
+        expected_id = _runtime_delivery_binding_id(runtime_store_id, artifact_store)
+        if row is None:
+            conn.execute(
+                "INSERT INTO runtime_artifact_delivery_binding("
+                "binding_order,delivery_binding_id,runtime_store_id,artifact_store_id,bound_at) "
+                "VALUES(1,?,?,?,?)",
+                (
+                    expected_id,
+                    runtime_store_id,
+                    artifact_store,
+                    _runtime_utc_text(bound_at, "bound_at"),
+                ),
+            )
+            return expected_id
+        binding_id = _require_runtime_id(
+            row["delivery_binding_id"], "delivery_binding_id", sha256=True
+        )
+        persisted_runtime_store_id = _require_runtime_id(
+            row["runtime_store_id"], "binding runtime_store_id", sha256=True
+        )
+        persisted_artifact_store_id = _require_runtime_id(
+            row["artifact_store_id"], "binding artifact_store_id", sha256=True
+        )
+        if (
+            persisted_runtime_store_id != runtime_store_id
+            or binding_id
+            != _runtime_delivery_binding_id(
+                persisted_runtime_store_id,
+                persisted_artifact_store_id,
+            )
+        ):
+            raise RuntimeOutboxError("runtime artifact delivery binding is corrupt")
+        if persisted_artifact_store_id != artifact_store:
+            block_code = "ARTIFACT_STORE_BINDING_MISMATCH"
+            block_id = cls._append_runtime_artifact_integrity_event_connection(
+                conn,
+                delivery_binding_id=binding_id,
+                worker_id=worker,
+                error_code=block_code,
+                blocked_at=bound_at,
+                artifact_id=None,
+            )
+            raise RuntimeWorkerIntegrityBlocked(None, block_code, block_id)
+        return binding_id
+
+    @staticmethod
+    def _assert_runtime_lease_binding_connection(
+        conn: sqlite3.Connection,
+        lease: RuntimeOutboxLease,
+    ) -> None:
+        row = conn.execute(
+            "SELECT runtime_store_id,artifact_store_id "
+            "FROM runtime_artifact_delivery_binding WHERE delivery_binding_id=?",
+            (lease.delivery_binding_id,),
+        ).fetchone()
+        if row is None or str(row["artifact_store_id"]) != lease.artifact_store_id:
+            raise RuntimeOutboxError(
+                "runtime lease delivery binding changed",
+                code="ARTIFACT_STORE_BINDING_MISMATCH",
+            )
+        if _runtime_delivery_binding_id(
+            str(row["runtime_store_id"]),
+            str(row["artifact_store_id"]),
+        ) != lease.delivery_binding_id:
+            raise RuntimeOutboxError("runtime lease delivery binding is invalid")
 
     def claim_runtime_outbox(
         self,
         *,
         worker_id: str,
+        artifact_store_id: str,
         now: datetime,
         lease_seconds: int,
     ) -> RuntimeOutboxLease | None:
         worker = _require_runtime_id(worker_id, "worker_id")
+        artifact_store = _require_runtime_id(
+            artifact_store_id, "artifact_store_id", sha256=True
+        )
         observed = require_utc_clock_value(now, "lease_time")
         if type(lease_seconds) is not int or lease_seconds < 1 or lease_seconds > 3600:
             raise RuntimeOutboxError("lease_seconds must be an integer in [1, 3600]")
@@ -1485,9 +2102,15 @@ class Repository:
         conn = get_connection(self.db_path)
         conn.execute("BEGIN IMMEDIATE")
         try:
-            audit_runtime_evidence_schema(conn)
+            self._audit_runtime_outbox_structure_connection(conn)
             self._assert_runtime_clock_not_before_state(conn, observed)
             self._assert_runtime_worker_not_globally_blocked(conn)
+            delivery_binding_id = self._ensure_runtime_artifact_delivery_binding_connection(
+                conn,
+                artifact_store_id=artifact_store,
+                worker_id=worker,
+                bound_at=observed,
+            )
             row = conn.execute(
                 "SELECT o.append_order,o.artifact_id,o.runtime_signal_id,"
                 "o.transition_event_id,c.decision_content_id,c.occurrence_dedup_id,"
@@ -1521,12 +2144,17 @@ class Repository:
                 transition_event_id=str(row["transition_event_id"]),
                 decision_content_id=str(row["decision_content_id"]),
                 occurrence_dedup_id=str(row["occurrence_dedup_id"]),
+                delivery_binding_id=delivery_binding_id,
+                artifact_store_id=artifact_store,
                 payload_json=str(row["payload_json"]),
                 payload_sha256=str(row["payload_sha256"]),
                 retry_count=int(row["retry_count"]),
                 lease_owner=worker,
                 lease_expires_at=expires,
             )
+        except RuntimeWorkerIntegrityBlocked:
+            conn.commit()
+            raise
         except Exception:
             conn.rollback()
             raise
@@ -1548,7 +2176,10 @@ class Repository:
         record = append_result.record
         if record.artifact.artifact_id != lease.artifact_id:
             raise RuntimeOutboxError("artifact append result does not match lease")
-        if audit_report.store_id != record.store_id:
+        if (
+            audit_report.store_id != record.store_id
+            or record.store_id != lease.artifact_store_id
+        ):
             raise RuntimeOutboxError("artifact audit store identity mismatch")
         audited = dict(zip(audit_report.artifact_ids, audit_report.record_hashes, strict=True))
         if audited.get(lease.artifact_id) != record.record_hash:
@@ -1559,18 +2190,31 @@ class Repository:
         conn = get_connection(self.db_path)
         conn.execute("BEGIN IMMEDIATE")
         try:
-            audit_runtime_evidence_schema(conn)
+            runtime_store_id = audit_runtime_evidence_schema(conn)
+            if (
+                audit_report.source_runtime_store_id != runtime_store_id
+                or record.artifact.identity_dict()["runtime_store_id"]
+                != runtime_store_id
+            ):
+                raise RuntimeOutboxError(
+                    "artifact delivery is bound to a different runtime evidence store",
+                    code="ARTIFACT_STORE_RUNTIME_BINDING_MISMATCH",
+                )
             self._assert_runtime_worker_not_globally_blocked(conn)
+            self._assert_runtime_lease_binding_connection(conn, lease)
             self._audit_runtime_outbox_state_connection(conn)
             self._assert_runtime_clock_not_before_state(conn, delivered)
             result = conn.execute(
                 "UPDATE runtime_outbox_delivery SET status='DELIVERED',lease_owner=NULL,"
                 "lease_expires_at=NULL,next_retry_at=NULL,last_error_code=NULL,"
-                "delivered_record_hash=?,delivered_audit_id=?,delivered_at=? "
+                "delivered_artifact_store_id=?,delivered_record_hash=?,"
+                "delivered_append_order=?,delivered_audit_id=?,delivered_at=? "
                 "WHERE artifact_id=? AND status='LEASED' AND lease_owner=? "
                 "AND lease_expires_at=? AND retry_count=?",
                 (
+                    lease.artifact_store_id,
                     _require_runtime_id(record.record_hash, "record_hash", sha256=True),
+                    record.append_order,
                     _require_runtime_id(audit_report.audit_id, "audit_id", sha256=True),
                     _runtime_utc_text(delivered, "delivered_at"),
                     lease.artifact_id,
@@ -1611,6 +2255,7 @@ class Repository:
         try:
             audit_runtime_evidence_schema(conn)
             self._assert_runtime_worker_not_globally_blocked(conn)
+            self._assert_runtime_lease_binding_connection(conn, lease)
             self._audit_runtime_outbox_state_connection(conn)
             self._assert_runtime_clock_not_before_state(conn, observed)
             result = conn.execute(
@@ -1636,7 +2281,7 @@ class Repository:
             conn.rollback()
             raise
 
-    def mark_runtime_worker_integrity_blocked(
+    def mark_runtime_artifact_integrity_blocked(
         self,
         lease: RuntimeOutboxLease,
         *,
@@ -1650,21 +2295,16 @@ class Repository:
         conn = get_connection(self.db_path)
         conn.execute("BEGIN IMMEDIATE")
         try:
-            runtime_store_id = audit_runtime_evidence_schema(conn)
+            audit_runtime_evidence_schema(conn)
             self._assert_runtime_clock_not_before_state(conn, observed)
             existing = conn.execute(
-                "SELECT block_id,artifact_id,block_code FROM runtime_worker_integrity_block "
-                "WHERE worker_id=?",
-                (lease.lease_owner,),
+                "SELECT integrity_event_id FROM runtime_artifact_integrity_event "
+                "ORDER BY event_order LIMIT 1"
             ).fetchone()
             if existing is not None:
-                if (
-                    str(existing["artifact_id"]) != lease.artifact_id
-                    or str(existing["block_code"]) != error
-                ):
-                    raise RuntimeOutboxError("runtime worker block identity conflict")
                 conn.rollback()
-                return str(existing["block_id"])
+                return str(existing["integrity_event_id"])
+            self._assert_runtime_lease_binding_connection(conn, lease)
             leased = conn.execute(
                 "SELECT 1 FROM runtime_outbox_delivery WHERE artifact_id=? "
                 "AND status='LEASED' AND lease_owner=? AND lease_expires_at=? "
@@ -1678,35 +2318,13 @@ class Repository:
             )
             if leased is None:
                 raise RuntimeOutboxError("runtime outbox blocked lease was lost")
-            block_order = int(
-                conn.execute(
-                    "SELECT COALESCE(MAX(block_order),0)+1 FROM runtime_worker_integrity_block"
-                ).fetchone()[0]
-            )
-            identity = _runtime_canonical_json(
-                {
-                    "schema": "stage4g1-runtime-worker-integrity-block-v1",
-                    "runtime_store_id": runtime_store_id,
-                    "block_order": block_order,
-                    "worker_id": lease.lease_owner,
-                    "artifact_id": lease.artifact_id,
-                    "block_code": error,
-                    "blocked_at": _runtime_utc_text(observed, "blocked_at"),
-                }
-            )
-            block_id = _runtime_sha256_text(identity)
-            conn.execute(
-                "INSERT INTO runtime_worker_integrity_block("
-                "block_order,block_id,worker_id,artifact_id,block_code,blocked_at) "
-                "VALUES(?,?,?,?,?,?)",
-                (
-                    block_order,
-                    block_id,
-                    lease.lease_owner,
-                    lease.artifact_id,
-                    error,
-                    _runtime_utc_text(observed, "blocked_at"),
-                ),
+            block_id = self._append_runtime_artifact_integrity_event_connection(
+                conn,
+                delivery_binding_id=lease.delivery_binding_id,
+                worker_id=lease.lease_owner,
+                error_code=error,
+                blocked_at=observed,
+                artifact_id=lease.artifact_id,
             )
             self._audit_runtime_outbox_state_connection(conn)
             conn.commit()
@@ -1731,6 +2349,7 @@ class Repository:
         try:
             audit_runtime_evidence_schema(conn)
             self._assert_runtime_worker_not_globally_blocked(conn)
+            self._assert_runtime_lease_binding_connection(conn, lease)
             self._assert_runtime_clock_not_before_state(conn, observed)
             quarantine_id = self._append_runtime_quarantine_connection(
                 conn,
@@ -1744,7 +2363,8 @@ class Repository:
             result = conn.execute(
                 "UPDATE runtime_outbox_delivery SET status='QUARANTINED',"
                 "lease_owner=NULL,lease_expires_at=NULL,next_retry_at=NULL,"
-                "last_error_code=?,delivered_record_hash=NULL,"
+                "last_error_code=?,delivered_artifact_store_id=NULL,"
+                "delivered_record_hash=NULL,delivered_append_order=NULL,"
                 "delivered_audit_id=NULL,delivered_at=NULL "
                 "WHERE artifact_id=? AND status='LEASED' AND lease_owner=? "
                 "AND lease_expires_at=? AND retry_count=?",
