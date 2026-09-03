@@ -1,14 +1,15 @@
 # Stage 4G.1 Checkpoint B1–B3 — Audited Market Path Pipeline Design
 
-状态：`DESIGN_FROZEN / B1_READ_CONTRACT_IMPLEMENTED / STORE_MIGRATION_AND_WORKER_WIRING_PENDING`
+状态：`DESIGN_FROZEN / B0_B1_R1_PURE_CONTRACTS_COMMITTED / STORE_MIGRATION_AND_WORKER_WIRING_PENDING`
 
-日期：2026-09-02
+日期：2026-09-03
 
 依赖：
 
 - Checkpoint A3：`3e6ad3f73c78f5d4ddd8f0537250ba5b275bd0f2`
-- A4 Source Runtime/Artifact Store Binding 修复：当前工作树，尚未提交
-- B0 Evidence Vocabulary / Pure Resolver：当前工作树，尚未提交
+- A4 Source Runtime/Artifact Store Binding：`728835c493642488044df68700f8dfbf35fde5df`
+- B0 R1 Path Causality / Authority：`7a49222c73ca0a9800b2aec8d2c07450e195cbca`
+- B1 R1 Scalable Source Snapshot：`ffb0441a21b9ff60b28ae2adeb393517c8301cab`
 
 合同与最终 Review：ChatGPT GPT-5.6 Pro
 
@@ -99,7 +100,7 @@ append_order
 event_id
 session_id
 source / feed_mode
-symbol / market / event_type / trading_day
+symbol / market / event_type / trading_day / session_label_policy_id
 source_time / received_at / durable_known_at
 callback_seq / provider_seq
 partition_key
@@ -138,6 +139,7 @@ partition_key == market/day/symbol
 payload_json strict canonical JSON
 payload_sha256 == SHA256(payload_json bytes)
 record_file safe relative path
+record_file 使用受限 POSIX key；拒绝 drive/UNC/backslash/absolute/dot-segment/ADS/reserved-device/trailing-dot-space/control
 record_hash 可重建
 ```
 
@@ -154,46 +156,57 @@ Audit 必须绑定：
 ```text
 source_store_id
 source_schema_id
+sequence_policy_id
 high_water_append_order
+record_count
 audited_at
 catalog_schema_fingerprint
-ordered global record hashes
-canonical partition heads
+global_chain_head
+partition_count / partition_head_root
+finding_count / finding_set_digest
+chunk_count / chunk_manifest_root
 first/last global record hash
 audit_id
 ```
 
-`high_water_append_order=N` 必须对应从 `1..N` 的完整全局前缀；不能把 filtered query 的最后一条 append order 冒充完整 high-water。
+`high_water_append_order=N` 必须对应从 `1..N` 的完整全局前缀；不能把 filtered query 的最后一条 append order 冒充完整 high-water。Audit 使用 streaming/chunk commitments，不能保存百万项 `record_hashes` tuple，也不能把完整历史塞进受 16 MiB 限制的单个 canonical JSON。
+
+`sequence_policy_id` 冻结 callback/provider/out-of-order/source-time-regression 算法。Audit 必须从完整前缀确定性重算 Findings，并要求 Store 提供的 Findings 与 expected set 完全一致、唯一且 canonical；漏报、伪造、重复、错误 kind/sequence 全部失败关闭。`audit_id` 必须绑定 finding-set digest。
 
 ### 3.3 `MarketEventStoreSnapshot`
 
-Snapshot 必须证明：
+Snapshot 是 compact Audit identity，不携带全量 Record tuple。其创建必须证明：
 
 - Record append order 从 1 连续到 high-water；
 - global previous hash 连续；
 - 每个 partition previous hash 连续；
 - Store ID 一致；
 - `durable_known_at <= audited_at`；
-- Event ID 和 immutable record path 唯一；
+- Event ID 和 immutable record path 的唯一性由 audited catalog exact unique indexes 证明；
 - Partition head count/first/last 与 Record 一致；
-- Sequence Finding 指向同一 audited prefix 内的确切 Event/append order；
-- Snapshot 的 Audit record hashes 与 Records 完全一致。
+- Sequence Findings 是按冻结 policy 从同一完整前缀重算的 exact set；
+- chunk manifest/global chain/partition root/finding root 与同一 request-time prefix 一致。
 
 ### 3.4 `MarketEventSelection`
 
-Selection 是 Full Snapshot 的过滤视图，不是新的事实源。它必须绑定：
+Selection 是 Full Snapshot 的有界过滤视图，不是新的事实源。它只能由 exact Snapshot/ReadPort 生成，并必须绑定：
 
 ```text
 source_store_id
+snapshot_id
 snapshot_audit_id
 snapshot_high_water_append_order
+snapshot_finding_set_digest
 symbol / market
 source-time window
 ordered source record IDs/hashes
+relevant finding IDs/digest
+strict record limit
+membership/range proof digest
 selection_id
 ```
 
-Selection 不得包含 high-water 后的记录，不得跨 Store、symbol 或时间窗口。调用方必须显式提供 `market`，因此即使 audited prefix 中该 symbol 为零事件，也可以生成绑定同一 audit/high-water 的空 Selection；空 Selection 只证明“该 audited prefix/filter 没有 Event”，不自动等于 `NO_TRADE` 或 `SUSPENDED`。
+Selection 不得包含 high-water 后的记录，不得跨 Store、symbol 或时间窗口。ReadPort 必须在同一 SQLite snapshot/Store lock 中冻结 high-water 并生成 proof；任意调用方直接构造的空 Selection 不能自证 Audit。调用方必须显式提供 `market`，因此即使 audited prefix 中该 symbol 为零事件，也可以生成绑定同一 audit/high-water/range proof 的空 Selection；空 Selection只证明“该 audited prefix/filter 没有 Event”，不自动等于 `NO_TRADE` 或 `SUSPENDED`。
 
 ## 4. Market Event Store v4
 
@@ -391,11 +404,11 @@ Crash window：
 3. 确定 requested/current high-water；
 4. 完整审计 `1..high-water`；
 5. 验证不存在未解决 crash orphan；
-6. 构造 `MarketEventSourceRecord`；
-7. 计算 `MarketEventStoreAudit`；
-8. 在同一 SQLite snapshot内完成结果；
+6. 流式扫描 `MarketEventSourceRecord`，计算 global/partition/finding/chunk commitments；
+7. 计算 compact `MarketEventStoreAudit`；
+8. 对 query 只保留 bounded Records、relevant Findings 和 membership/range proof；
 9. rollback只读事务；
-10. 返回 immutable `MarketEventStoreSnapshot`。
+10. 返回 immutable compact `MarketEventStoreSnapshot` 或由其验证的 `MarketEventSelection`。
 
 不得先查询 high-water，释放锁后再逐条读取；否则并发 append 会混合两个事实版本。
 

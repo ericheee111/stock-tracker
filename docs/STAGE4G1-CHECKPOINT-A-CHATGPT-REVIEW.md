@@ -1,8 +1,8 @@
 # Stage 4G.1 Checkpoint A — ChatGPT Adversarial Review
 
-状态：`A3_CONDITIONALLY_ACCEPTED / A4_B0_B1_COMPLEX_CORE_IMPLEMENTED_UNCOMMITTED / CODEX_SCOPED_COMMIT_AND_FINAL_RERUN_PENDING`
+状态：`A4_COMMITTED_AND_PASSED / B0_B1_R1_CANDIDATE_COMMITTED / WORKBUDDY_R1_REVIEW_PENDING`
 
-日期：2026-09-02
+日期：2026-09-03
 
 ## 1. 审查对象
 
@@ -117,9 +117,9 @@ legal occurrence can be quarantined and cursor can advance
 - delivery binding 必须同时证明源 Runtime 与目标 Artifact Store；
 - Store Identity mismatch 必须是全局 Integrity Block。
 
-## 5. 已直接实现的 A4 修复
+## 5. 已提交的 A4 修复
 
-当前工作树已包含、但尚未提交：
+A4 修复已由 scoped commit `728835c493642488044df68700f8dfbf35fde5df` 固化：
 
 ```text
 RuntimeOutboxLease.runtime_store_id
@@ -161,44 +161,41 @@ Ran 56 tests
 OK
 ```
 
-B0 纯合同新增 33 个测试；B1 audited source snapshot 纯合同新增 16 个测试。A4+B0+B1 合并专项为：
+B0/B1 R1 进一步关闭 entry-boundary causality、multi-authority PIT、projection lineage、market-local session date、finding completeness 和 scalable snapshot commitment。当前 A4+B0+B1 合并专项为：
 
 ```text
 py -3.14 -m unittest \
   tests.test_runtime_evidence \
   tests.test_runtime_path_contracts \
   tests.test_market_source_snapshot_contracts -q
-Ran 106 tests
+Ran 125 tests
 OK
 ```
 
-A4+B0+B1 后完整 Runtime 稳定复跑：
+A4+B0+B1 R1 后完整 Runtime 稳定复跑：
 
 ```text
 py -3.14 -m unittest discover -s tests -p "test_*.py" -q
-Ran 628 tests
+Ran 647 tests
 OK (skipped=1)
 ```
 
-完整 Runtime 运行仍可能在 stderr 记录本地测试客户端主动断开的 `ConnectionAbortedError`，但进程退出码为 0、628 项断言全部通过；该日志不代表业务失败。早前精确 XTP Sidecar HTTP 用例也已单独复跑通过。
+完整 Runtime 运行仍可能在 stderr 记录本地测试客户端主动断开的 `ConnectionAbortedError`，但进程退出码为 0、647 项断言全部通过；该日志不代表业务失败。
 
-完整 Quant 在未 staging 的工作树中会出现预期 source-distribution 失败：新 B0/B1 文档、模块和测试尚未被 Git tracking。Codex 必须在 scoped staging 后重跑；不得通过删除 source-distribution 门禁绕过。
+完整 Quant 当前为 724 项通过；`tests_quant.test_source_distribution + tests_quant.test_no_tracked_bytecode` 为 2 项通过。B0 R1 commit 为 `7a49222c73ca0a9800b2aec8d2c07450e195cbca`，B1 R1 commit 为 `ffb0441a21b9ff60b28ae2adeb393517c8301cab`。
 
 ## 6. A3/A4/B0/B1 当前门禁
 
-A3 不再需要架构性推倒重来。A4 修复经专项验证后，剩余工作属于：
+A3/A4 不再需要架构性推倒重来。当前剩余工作属于：
 
-- Codex 复核当前未提交 A4/B0/B1 pure-contract diff；
-- 运行完整 Runtime/Quant/adjacent/CLI/QA 门禁；
-- 更新 `STAGE4G1-CHECKPOINT-A-VALIDATION.md`；
-- 分别创建 scoped A4 与 B0/B1-contract commits；
-- WorkBuddy 在中性 Runner 做机械复跑；
-- ChatGPT 对精确 commit/tree 做最终 Review。
+- Codex 完成 B0/B1 R1 文档与精确 final-tree 证据；
+- WorkBuddy 对同一 commit/tree 做独立机械复跑；
+- 只有 WorkBuddy 明确通过后才能进入 B2 storage/worker wiring。
 
 在这些完成前：
 
 ```text
-CHECKPOINT_A_FINAL_PASS = false
+A4_SOURCE_RUNTIME_BINDING_PASS = true
 CHECKPOINT_B_STORAGE_WIRING_ALLOWED = false
 PUSH_ALLOWED = false
 ```
@@ -226,12 +223,12 @@ B0 的纯合同设计与实现可以并行完成，因为它不写 Store、不�
 A3_ARCHITECTURE = SUBSTANTIALLY_CORRECT
 A3_STABLE_FULL_SUITE_REGRESSION = NOT_FOUND
 A3_RUNNER_PROTOCOL = NEEDS_CORRECTION
-A3_SOURCE_RUNTIME_BINDING = BLOCKING_GAP_FOUND
-A4_SOURCE_RUNTIME_BINDING_FIX = IMPLEMENTED_UNCOMMITTED
-B0_EVIDENCE_AND_PATH_CORE = IMPLEMENTED_UNCOMMITTED
-B1_AUDITED_SOURCE_SNAPSHOT_CORE = IMPLEMENTED_UNCOMMITTED
-A4_B0_B1_FOCUSED_TEST = 106/106 PASS
-A4_B0_B1_FULL_RUNTIME = 628 PASS / 1 EXPECTED SKIP
-A4_B0_B1_FULL_QUANT = PENDING_SCOPED_STAGING_AND_RERUN
-FINAL_CHECKPOINT_A_PASS = PENDING_SCOPED_COMMIT_AND_FINAL_REVIEW
+A3_SOURCE_RUNTIME_BINDING = GAP_CLOSED_BY_A4
+A4_SOURCE_RUNTIME_BINDING_FIX = COMMITTED_AND_PASSED
+B0_EVIDENCE_AND_PATH_CORE_R1 = COMMITTED_CANDIDATE
+B1_AUDITED_SOURCE_SNAPSHOT_CORE_R1 = COMMITTED_CANDIDATE
+A4_B0_B1_FOCUSED_TEST = 125/125 PASS
+A4_B0_B1_FULL_RUNTIME = 647 PASS / 1 EXPECTED SKIP
+A4_B0_B1_FULL_QUANT = 724/724 PASS
+B0_B1_R1_WORKBUDDY_REVIEW = PENDING
 ```

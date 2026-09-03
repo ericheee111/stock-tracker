@@ -1,4 +1,4 @@
-# Stage 4G.1 Checkpoint A4 / B0 / B1 Validation
+# Stage 4G.1 Checkpoint A4 / B0 / B1 R1 Validation
 
 ## Scope and identity
 
@@ -9,6 +9,8 @@
 - A4 tree: `2f32dfe900823d0fbeb2be6f04ab1bdbb763dc61`
 - B0/B1 pure-contract commit: `1297f9e36611935d327965104fdab5e93c6b647f`
 - B0/B1 tree: `447c4569797f8d28206111c3a473803cce80cb85`
+- B0 R1 causality/authority commit: `7a49222c73ca0a9800b2aec8d2c07450e195cbca`
+- B1 R1 scalable snapshot commit: `ffb0441a21b9ff60b28ae2adeb393517c8301cab`
 - Validation interpreter: `Python 3.14.6`
 - The docs-only validation commit is reported after creation because a commit
   cannot contain its own future object ID without becoming self-referential.
@@ -72,6 +74,28 @@ Artifacts use schema `stage4g1-runtime-decision-artifact-v4`, require
 closed. `upstream_occurrence_id` is fixed to null because Checkpoint A has no
 trusted upstream occurrence authority.
 
+## B0/B1 R1 adversarial closure
+
+B0 schema v2 separates Calendar, Security Status, Coverage, and Market Event
+evidence. Session facts carry typed `RuntimeAuthorityFactReference` values and
+the frozen prefix binds each authority kind to its exact store, audit, and
+revision high-water. Point bars require immutable projection lineage with source
+snapshot/audit, finding digest, coverage Fact, interval, and ordered input record
+IDs/hashes. Ticks at exactly `entry_filled_at` are blocked as
+`ENTRY_BOUNDARY_ORDER_AMBIGUITY`; no caller-supplied flag can create ordering
+authority. Market-local day labels use the shared versioned A/HK/US timezone
+policy, including US DST.
+
+B1 source schemas v2 recompute callback, provider, out-of-order, and source-time
+regression Findings from the complete prefix under a frozen sequence policy.
+The supplied Finding stream must equal that expected canonical stream exactly.
+Audit identity binds the finding-set digest and compact global, partition, and
+chunk commitments; neither Audit nor Snapshot retains a full-history record
+tuple. A bounded Selection is generated only from an exact Snapshot prefix and
+binds `snapshot_id`, audit/high-water, finding digests/IDs, record IDs/hashes,
+strict limit, and range-proof digest. Market Event Store v4 and B2 wiring remain
+out of scope.
+
 ## Legacy migration matrix
 
 | Source state | Result |
@@ -117,15 +141,15 @@ Every final gate below completed with exit code 0.
 | interpreter | `py -3.14 --version` | `Python 3.14.6` |
 | A4 focused | `py -3.14 -m unittest tests.test_runtime_evidence -q` | 57 passed |
 | A4 targeted Ruff | `py -3.14 -m ruff check stock_tracker/runtime_evidence/store.py stock_tracker/runtime_evidence/worker.py stock_tracker/storage/repository.py tests/test_runtime_evidence.py` | passed |
-| B0/B1 focused | `py -3.14 -m unittest tests.test_runtime_path_contracts tests.test_market_source_snapshot_contracts -q` | 49 passed |
-| staged combined | `py -3.14 -m unittest tests.test_runtime_evidence tests.test_runtime_path_contracts tests.test_market_source_snapshot_contracts -q` | 106 passed |
+| B0/B1 focused | `py -3.14 -m unittest tests.test_runtime_path_contracts tests.test_market_source_snapshot_contracts -q` | 68 passed |
+| staged combined | `py -3.14 -m unittest tests.test_runtime_evidence tests.test_runtime_path_contracts tests.test_market_source_snapshot_contracts -q` | 125 passed |
 | staged distribution | `py -3.14 -m unittest tests_quant.test_source_distribution -q` | 2 passed |
 | staged diff | `git diff --cached --check` | passed before B0/B1 commit |
 | Stage 4G/4F adjacent | `py -3.14 -m unittest tests_quant.test_outcome_collection tests_quant.test_outcome_ledger_codec tests_quant.test_outcome_ledger_store tests_quant.test_outcome_ledger_cli tests_quant.test_outcome_ledger_scoreboard tests_quant.test_outcomes -q` | 114 passed |
-| full Runtime | `py -3.14 -m unittest discover -s tests -p "test_*.py" -q` | 628 passed, 1 expected skip |
+| full Runtime | `py -3.14 -m unittest discover -s tests -p "test_*.py" -q` | 647 passed, 1 expected skip |
 | full Quant | `py -3.14 -m unittest discover -s tests_quant -p "test_*.py" -q` | 724 passed |
 | distribution/no bytecode | `py -3.14 -m unittest tests_quant.test_source_distribution tests_quant.test_no_tracked_bytecode -q` | 2 passed in a real Git checkout |
-| targeted Ruff | `py -3.14 -m ruff check stock_tracker/runtime_evidence stock_tracker/storage/repository.py tests/test_runtime_evidence.py tests/test_runtime_path_contracts.py tests/test_market_source_snapshot_contracts.py tests_quant/test_source_distribution.py` | passed |
+| targeted Ruff | `py -3.14 -m ruff check stock_tracker/core/market_time.py stock_tracker/runtime_evidence stock_tracker/storage/repository.py tests/test_runtime_evidence.py tests/test_runtime_path_contracts.py tests/test_market_source_snapshot_contracts.py tests_quant/test_source_distribution.py` | passed |
 | compile | `py -3.14 -X pycache_prefix="$(mktemp -d -t stage4g1-pycache.XXXXXX)" -m compileall -q stock_tracker tests tests_quant scripts` | passed; bytecode stayed outside the checkout |
 | dependencies | `py -3.14 -m pip check` | no broken requirements |
 | Quant smoke | `py -3.14 scripts/run_quant_contract_smoke.py` | `passed=true`; `synthetic_fixture_only=true`; no investment-performance claim |
@@ -144,16 +168,18 @@ Every final gate below completed with exit code 0.
 | Broker/XTP write scan | `git diff --unified=0 082a6dac310388ec10c8a432427a40e275bcd7ae..HEAD -- stock_tracker scripts` with Trader/Order/Cancel/Algo/Account/Position write-call signatures | no findings |
 | auto-trade audit | `git grep -n -I 'auto_trade' HEAD -- stock_tracker scripts` | Stage 4G.1 contracts reject true and emit false; no true declaration found |
 
-Debugging intentionally produced two non-final exit-1 checks before the final
-green gates: the new incomplete-horizon regression first reproduced `OPEN`
-instead of required `BLOCKED`, and the first B0/B1 Ruff pass exposed the now
-unused `RuntimePathPendingCode` import. The resolver branch and import were then
-fixed; the same regression, the 49-test suite, and targeted Ruff all passed.
+R1 debugging intentionally began with three non-final red regressions: an omitted
+callback gap Finding was accepted, a drive-qualified storage key was accepted,
+and an exact-entry target tick resolved instead of blocking. The implementation
+then closed those roots and the expanded 125-test focused suite passed. The
+corrected horizon rule is now explicit: a horizon `COMPLETE_PREFIX` remains
+`OPEN/HORIZON_NOT_REACHED`; gap/out-of-order/sparse/missing coverage blocks; only
+`COMPLETE_SESSION` without an earlier barrier reaches `TIMEOUT`.
 
 The Runtime suite emitted three full Windows local test-server
 `ConnectionAbortedError: [WinError 10053]` traces and four temporary `HTTPError`
 cleanup `ResourceWarning` lines. They were visible stderr noise, not suppressed;
-the suite still completed 628 tests with one expected skip and exit code 0.
+the suite still completed 647 tests with one expected skip and exit code 0.
 Quant CLI negative tests emitted expected argument/error text, and the full Quant
 suite emitted four `ResourceWarning` lines for unclosed temporary migration test
 connections; it completed 724 tests with exit code 0. These warnings are accepted

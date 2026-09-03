@@ -1,8 +1,8 @@
 # Stage 4G.1 Checkpoint B0 — Evidence Vocabulary and Path Resolution Contract
 
-状态：`CONTRACT_FROZEN / PURE_CORE_IMPLEMENTED / STORAGE_AND_WORKER_WIRING_PENDING`
+状态：`CONTRACT_FROZEN / R1_PURE_CORE_COMMITTED / STORAGE_AND_WORKER_WIRING_PENDING`
 
-日期：2026-09-02
+日期：2026-09-03
 
 前置实现：Stage 4G.1 Checkpoint A3 `3e6ad3f73c78f5d4ddd8f0537250ba5b275bd0f2`
 
@@ -92,6 +92,7 @@ NOT_APPLICABLE
 ```
 
 - `COMPLETE_PREFIX` 必须绑定 `coverage_through`，只证明截至该时刻的无缺口前缀，不表示 Session 已结束。
+- horizon Session 为 `COMPLETE_PREFIX` 时必须保持 `OPEN/HORIZON_NOT_REACHED`，不得误报 `BLOCKED` 或 `TIMEOUT`。
 - `COMPLETE_SESSION` 必须绑定完整 Session 的 `coverage_through`。
 - `INCOMPLETE_*` 是可审计 blocker，不得当作“没有触及障碍”。
 - `NOT_APPLICABLE` 只能用于 `MARKET_CLOSED`。
@@ -107,8 +108,9 @@ MINUTE_BAR
 DAILY_BAR
 ```
 
-- `TICK` 必须满足 `interval_start == interval_end` 且 `high == low == close`。
-- Bar 必须有非零时间区间。
+- `TICK` 必须满足 `source_time == interval_start == interval_end` 且 `high == low == close`。
+- Bar 必须有非零时间区间，且 `source_time == interval_end`。
+- Bar 必须绑定 immutable projection lineage：projection policy、source snapshot/audit、高水位、finding-set digest、coverage Fact 和有序输入 Record IDs/hashes。
 - 粗粒度 Bar 同时触及 target 和 stop 时为 `INTRABAR_AMBIGUITY`。
 - 不允许事后选择更有利的障碍顺序。
 
@@ -127,9 +129,9 @@ BLOCKED
 - `OPEN`：已知前缀完整，但尚未达到 horizon，也未出现障碍。
 - `BLOCKED`：存在缺失、歧义、身份或覆盖缺口，当前证据无法证明任何终局。
 
-## 4. Source Reference 合同
+## 4. Source 与 Authority Reference 合同
 
-每个 Session 或 Path Point 必须绑定：
+每个 Path Point 必须绑定 exact Market Event Source Reference：
 
 ```text
 source_store_id
@@ -155,7 +157,9 @@ source_append_order > 0
 record_hash/raw_payload_sha256 使用 lowercase SHA-256
 ```
 
-`source_time` 与 `received_at` 之间不在 B0 中假定绝对先后，因为外部 Provider 时钟可能存在偏差；是否允许偏差必须由 B1 的版本化 clock policy 决定。终局判断只使用可证明的 `durable_known_at`。
+`source_time` 与 `received_at` 之间不假定绝对先后；但 Observation 必须按 frozen projection policy 把 `source_time` 对齐到 point/interval end。
+
+Session 不再用一个泛化 Source Reference 冒充多种 Authority，而是分别绑定 `calendar_reference`、`security_status_reference` 和 `coverage_reference`。每个 `RuntimeAuthorityFactReference` 包含 authority kind、store/audit、fact/schema、effective session date、`known_at/usable_from`、source、revision 和 policy ID；prefix 必须把每个 Reference 对到同类的 exact authority snapshot binding，且 `known_at <= frozen_at`、`usable_from <= frozen_at`。
 
 B1 必须为 Market Event Store 增加稳定、可审计的 `source_store_id`。当前 Market Event Store 没有可用的稳定 Store Identity，因此在 B1 完成前不能声明 Operational Path Collection 已接线。
 
@@ -167,11 +171,10 @@ B1 必须为 Market Event Store 增加稳定、可审计的 `source_store_id`。
 case_id
 symbol / market
 collection_store_id
-source_store_id
+market_source_snapshot binding
+canonical authority_snapshot_bindings
 frozen_at
-source_high_water_append_order
 collection_high_water_append_order
-source_audit_id
 collection_audit_id
 ordered facts
 prefix_id
@@ -183,16 +186,16 @@ prefix_id
 collection_append_order
 collection_fact_id
 collection_observed_at
-source_reference_id
+point source_reference_id or session authority_reference_ids
 session_evidence_id or path_observation_id
 ```
 
 规则：
 
-1. `source durable_known_at <= collection_observed_at <= frozen_at`。
-2. source/collection append order 不得超过冻结时 high-water mark。
+1. Point 的 `source durable_known_at <= collection_observed_at <= frozen_at`；Session 的 Authority `known_at/usable_from <= collection_observed_at <= frozen_at`。
+2. Market source append order 和 Authority revision 不得超过各自 frozen snapshot high-water mark。
 3. prefix 中的 collection append order 必须唯一且严格递增。
-4. `prefix_id` 包含 ordered facts、两个 high-water mark 和两个 audit ID。
+4. `prefix_id` 包含 ordered facts、Market Source Snapshot、canonical Authority Snapshot bindings、Collection high-water 与 audit ID。
 5. Resolver 只允许读取该 prefix。
 6. 请求后才 durable append 的事件，即使 market timestamp 更早，也不能回填解释旧请求。
 7. 新数据只能形成新的 prefix 和新的 resolution，不得修改旧 prefix。
@@ -221,6 +224,7 @@ target_price
 stop_price
 horizon_sessions
 terminal_policy_id
+session_label_policy_id
 window_id
 ```
 
@@ -234,6 +238,7 @@ stop_price < entry_price < target_price
 
 - Entry Session 中，Point 的 `interval_end < entry_filled_at`：`POINT_BEFORE_ENTRY_WINDOW`。
 - Entry Session 中，粗粒度 Point 横跨 `entry_filled_at`：`WINDOW_BOUNDARY_OVERLAP`。
+- Entry Session 中，`TICK.timestamp == entry_filled_at`：`ENTRY_BOUNDARY_ORDER_AMBIGUITY`；没有独立 causal ordering authority 时必须失败关闭。
 - 横跨边界的 Daily/Minute Bar 不能用完整 high/low 证明 Entry 后障碍。
 - 需要更细粒度事件才能解除 blocker。
 - horizon 只按 `OPEN` Session 的 `open_session_index` 计数。
@@ -305,6 +310,7 @@ SESSION_OUT_OF_ORDER
 SESSION_SPARSE
 MISSING_DATA
 INTRABAR_AMBIGUITY
+ENTRY_BOUNDARY_ORDER_AMBIGUITY
 HORIZON_SESSION_INCOMPLETE
 ```
 
@@ -400,6 +406,7 @@ completion = ZERO_FILL | PARTIAL | COMPLETE
 
 - Fragment 必须属于同一个 intent 和 side。
 - execution ID 不得重复。
+- 一个 `source_fact_id` 只允许生成一个 execution fragment；拆分记录必须由上游提供不同的 immutable source Fact。
 - 成交量不得超过 requested quantity。
 - `execution_stream_complete=true` 必须绑定 audit ID。
 - `PARTIAL` 不得进入当前 Stage 4G v3 finalization。
@@ -441,8 +448,9 @@ B1 必须：
    - source store identity；
    - high-water append order；
    - audit ID；
-   - ordered source records；
-   - record/raw hashes；
+   - compact prefix commitment，不在单个 JSON/tuple 中物化 `1..N` 全量记录；
+   - bounded Selection 与 exact snapshot/range proof；
+   - record/raw hashes 和 relevant finding IDs/digest；
    - parser/schema identity；
    - source/received/durable-known times。
 3. 不直接把 `MinuteBarRecord` 当作完整 Session coverage。
@@ -478,7 +486,7 @@ read audited source snapshot
 B3 使用 `RuntimeFrozenPathPrefix`：
 
 - 在 Exit Request 时冻结 prefix；
-- 保存 `prefix_id`、两个 audit ID 和两个 high-water mark；
+- 保存 `prefix_id`、Market Source Snapshot binding、canonical Authority Snapshot bindings 和 Collection audit/high-water；
 - 调用纯 `resolve_runtime_path`；
 - 只把 TARGET/STOP/TIMEOUT candidate 交给 Stage 4G request API；
 - BLOCKED/OPEN 不得伪造 exit；
@@ -498,6 +506,7 @@ B0 当前纯合同测试至少覆盖：
 - market closed horizon semantics；
 - calendar gap；
 - Entry boundary overlap；
+- exact-entry tick causality ambiguity；
 - non-traded session with price point；
 - overlapping bars；
 - prefix frozen-at/high-water identity；
@@ -505,6 +514,7 @@ B0 当前纯合同测试至少覆盖：
 - source known-at；
 - partial/complete aggregation；
 - duplicate execution；
+- duplicate execution source Fact；
 - multi-leg rejection；
 - ENTRY_EXPIRED；
 - USER_CANCELLED authentication；
@@ -561,4 +571,4 @@ stock_tracker/runtime_evidence/store.py
 tests/test_runtime_evidence.py
 ```
 
-这些修改当前尚未形成新的 scoped commit。Codex 必须在同一工作树中复核、补测试、更新验证记录并创建 A4/B0 checkpoint commit；不得覆盖或弱化本合同。
+R1 已由同一 Codex 长会话形成 scoped commits；Market Event Store v4、B2 Worker、Paper/Manual 和 Trusted Admission 仍未开始，不能由这些纯合同推断为已接线。
