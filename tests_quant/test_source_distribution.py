@@ -24,6 +24,8 @@ class TestSourceDistribution(unittest.TestCase):
         critical = (
             ".gitattributes",
             "docs/STAGE4G1-CHECKPOINT-A-IMPLEMENTATION.md",
+            "docs/STAGE4G1-CHECKPOINT-B0-EVIDENCE-VOCABULARY-AND-PATH-CONTRACT.md",
+            "docs/STAGE4G1-CHECKPOINT-B1-B3-MARKET-PATH-PIPELINE-DESIGN.md",
             "scripts/capture_quant_bars.py",
             "scripts/capture_hithink_bars.py",
             "scripts/capture_a_share_corporate_actions.py",
@@ -66,6 +68,8 @@ class TestSourceDistribution(unittest.TestCase):
             "stock_tracker/quant/storage/outcome_ledger.py",
             "stock_tracker/runtime_evidence/__init__.py",
             "stock_tracker/runtime_evidence/contracts.py",
+            "stock_tracker/runtime_evidence/path_contracts.py",
+            "stock_tracker/runtime_evidence/source_snapshot_contracts.py",
             "stock_tracker/runtime_evidence/store.py",
             "stock_tracker/runtime_evidence/worker.py",
             "stock_tracker/storage/migrations_runtime/0001_runtime_evidence_outbox.sql",
@@ -115,7 +119,9 @@ class TestSourceDistribution(unittest.TestCase):
             "tests/test_free_stockdb_provider.py",
             "tests/test_hithink_finance_provider.py",
             "tests/test_provider_research_request.py",
+            "tests/test_market_source_snapshot_contracts.py",
             "tests/test_runtime_evidence.py",
+            "tests/test_runtime_path_contracts.py",
         )
         for relative_path in critical:
             with self.subTest(path=relative_path):

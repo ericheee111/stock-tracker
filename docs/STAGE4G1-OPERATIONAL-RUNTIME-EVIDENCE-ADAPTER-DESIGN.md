@@ -365,30 +365,52 @@ hash chain != external signature
 - worker at-least-once 物化 append-only Runtime Decision Artifact，并在 durable write + audit 后推进 cursor；
 - `artifact_id == runtime_episode_fact_id`，完成同一 occurrence 幂等与新 occurrence 区分的端到端测试。
 
-### 4G.1-B — Paper Adapter
+### 4G.1-B0 — Evidence Vocabulary / Pure Path Resolver
 
-- 绑定 execution policy/market rules；
-- 自动生成 diagnostic entry/path/exit；
-- 故障和 restart recovery。
+- 冻结 `MARKET_CLOSED / TRADED / SUSPENDED / NO_TRADE / MISSING_DATA` 的互斥语义；
+- 冻结 request-time known prefix、observation window、first-touch 和 horizon 计数；
+- 冻结 no-entry、partial-fill aggregation 和 native multi-leg unsupported 边界。
 
-### 4G.1-C — Manual Live Candidate Adapter
+### 4G.1-B1 — Audited Market Event Store Reader
 
-- 授权本地输入；
-- opaque evidence attachment；
-- 不回显 secret；
-- candidate-only finalization。
+- 为 Market Event Store 建立稳定 Store Identity；
+- 只读冻结 high-water snapshot、audit ID、record/raw hashes 和 known-at；
+- 显式映射 calendar/security status/gap/completeness；
+- 不写 Stage 4G Collection。
 
-### 4G.1-D — Market Path Worker
+### 4G.1-B2 — Durable Market Path Worker
 
-- 消费 append-only market artifacts；
-- calendar/session/gap 验证；
-- deterministic terminal resolver。
+- 消费 audited append-only market artifacts；
+- 生成 B0 session/path evidence；
+- Stage 4G PATH append 成功并 audit 后才推进 source cursor；
+- duplicate/restart/gap/out-of-order/quarantine/global-block 恢复。
 
-### 4G.1-E — Shadow Acceptance
+### 4G.1-B3 — Request-Time Prefix / Terminal Orchestration
+
+- 在 Exit Request 时冻结 source/collection high-water prefix；
+- late-observed early-timestamp 事件不能回填旧请求；
+- 只把 B0 Resolver 的 TARGET/STOP/TIMEOUT candidate 交给 Stage 4G；
+- OPEN/BLOCKED 不得伪造 exit。
+
+### 4G.1-C1 — Deterministic Paper Adapter
+
+- 绑定 execution policy/market rules/cost/slippage；
+- 生成 deterministic、diagnostic-only execution evidence；
+- 永久 `DIAGNOSTIC_ONLY`，不能晋级真实表现；
+- 所有 Paper 结果保持 `verified=false`。
+
+### 4G.1-C2 — Manual Live Candidate Adapter
+
+- 授权本地输入、actor authentication 与 nonce/replay protection；
+- 保存结构化事实与 opaque evidence reference，不保存 secret；
+- 永久 `LIVE_CANDIDATE / verified=false`，不能自报 Trusted Admission。
+
+### 4G.1-D — Shadow / Restart / Scale Acceptance
 
 - 不启用 Broker trader；
 - 至少跨多交易日运行；
-- 验证 duplicate/reconnect/gap/restart；
+- 验证 duplicate/reconnect/gap/restart/cursor/lease；
+- 完成 Artifact Store 与 Path Worker scale benchmark；
 - 所有样本仍不进入真实 Scoreboard。
 
 ## 16. 合并门禁
