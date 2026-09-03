@@ -50,4 +50,4 @@ investment_performance_claim = false
 - Checkpoint C 实现永久 `DIAGNOSTIC_ONLY` 的 deterministic Paper Adapter 与永久 `LIVE_CANDIDATE` 的 authenticated Manual input。
 - Checkpoint D 实现完整 shadow/restart harness 与最终门禁。
 
-在同一 WorkBuddy 会话给出 `WORKBUDDY_CHECKPOINT_PASS:A` 前，本实现不得进入 Checkpoint B；在最终 Review 通过且用户明确授权前不得 push。
+WorkBuddy 只提供机械检查证据，不签发工程 PASS。只有 ChatGPT 对精确 commit/tree/diff 完成最终 Review 并输出 `CHATGPT_CHECKPOINT_A_REVIEW_PASSED` 后，才允许进入 B1 存储接线；在最终 Review 通过且用户明确授权前不得 push。

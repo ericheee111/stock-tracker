@@ -1707,7 +1707,101 @@ class TestRuntimeArtifactStoreAndWorker(RuntimeEvidenceTestCase):
             )
         with self.assertRaises(RuntimeArtifactStoreError) as mismatch:
             store.append(self.artifact(runtime_store_id="d" * 64))
-        self.assertEqual(mismatch.exception.code, "ROW_RUNTIME_STORE_ID_MISMATCH")
+        self.assertEqual(
+            mismatch.exception.code,
+            "ARTIFACT_STORE_RUNTIME_BINDING_MISMATCH",
+        )
+        self.assertEqual(
+            mismatch.exception.failure_class,
+            RuntimeArtifactFailureClass.STORE_INTEGRITY_BLOCK,
+        )
+        self.assertFalse(mismatch.exception.safe_to_quarantine)
+
+    def test_worker_rejects_source_runtime_store_mismatch(self) -> None:
+        root = self.temporary_root()
+        database = self.new_database(root, migrate=True)
+        repository = Repository(str(database))
+        runtime_store_id = repository.runtime_evidence_store_id()
+        artifact = self.enqueue(
+            repository,
+            self.draft(runtime_store_id=runtime_store_id),
+        )
+        clock = FrozenClock(self.now)
+        store = self.new_store(
+            root,
+            database,
+            clock,
+            source_runtime_store_id="d" * 64,
+        )
+        blocked = RuntimeArtifactWorker(repository, store, clock=clock).run_once()
+        self.assertEqual(blocked.status, RuntimeArtifactWorkerStatus.HARD_BLOCKED)
+        self.assertEqual(
+            blocked.error_code,
+            "ARTIFACT_STORE_SOURCE_RUNTIME_MISMATCH",
+        )
+        connection = get_connection(str(database))
+        self.assertEqual(
+            connection.execute(
+                "SELECT status FROM runtime_outbox_delivery WHERE artifact_id=?",
+                (artifact.artifact_id,),
+            ).fetchone()[0],
+            "PENDING",
+        )
+        self.assertEqual(
+            connection.execute(
+                "SELECT COUNT(*) FROM runtime_artifact_delivery_binding"
+            ).fetchone()[0],
+            0,
+        )
+        self.assertEqual(
+            connection.execute(
+                "SELECT COUNT(*) FROM runtime_outbox_quarantine"
+            ).fetchone()[0],
+            0,
+        )
+
+    def test_repository_rejects_source_runtime_store_mismatch_before_binding(self) -> None:
+        root = self.temporary_root()
+        database = self.new_database(root, migrate=True)
+        repository = Repository(str(database))
+        runtime_store_id = repository.runtime_evidence_store_id()
+        artifact = self.enqueue(
+            repository,
+            self.draft(runtime_store_id=runtime_store_id),
+        )
+        clock = FrozenClock(self.now)
+        store = self.new_store(
+            root,
+            database,
+            clock,
+            source_runtime_store_id="d" * 64,
+        )
+        with self.assertRaises(RuntimeOutboxError) as caught:
+            repository.claim_runtime_outbox(
+                worker_id="misbound-worker",
+                source_runtime_store_id=store.source_runtime_store_id,
+                artifact_store_id=store.store_id,
+                now=clock.now(),
+                lease_seconds=60,
+            )
+        self.assertEqual(
+            caught.exception.code,
+            "ARTIFACT_STORE_SOURCE_RUNTIME_MISMATCH",
+        )
+        connection = get_connection(str(database))
+        self.assertEqual(
+            connection.execute(
+                "SELECT status FROM runtime_outbox_delivery WHERE artifact_id=?",
+                (artifact.artifact_id,),
+            ).fetchone()[0],
+            "PENDING",
+        )
+        self.assertEqual(
+            connection.execute(
+                "SELECT COUNT(*) FROM runtime_artifact_delivery_binding"
+            ).fetchone()[0],
+            0,
+        )
 
     def test_store_adopts_exact_crash_orphan_without_duplicate_effect(self) -> None:
         root = self.temporary_root()
@@ -2425,6 +2519,7 @@ class TestRuntimeArtifactStoreAndWorker(RuntimeEvidenceTestCase):
         store = self.new_store(root, database, clock)
         claimed = repository.claim_runtime_outbox(
             worker_id="crashed-worker",
+            source_runtime_store_id=store.source_runtime_store_id,
             artifact_store_id=store.store_id,
             now=clock.now(),
             lease_seconds=60,

@@ -98,6 +98,7 @@ class RuntimeOutboxLease:
     transition_event_id: str
     decision_content_id: str
     occurrence_dedup_id: str
+    runtime_store_id: str
     delivery_binding_id: str
     artifact_store_id: str
     payload_json: str
@@ -124,6 +125,11 @@ class RuntimeOutboxLease:
         _require_runtime_id(
             self.occurrence_dedup_id,
             "lease occurrence_dedup_id",
+            sha256=True,
+        )
+        _require_runtime_id(
+            self.runtime_store_id,
+            "lease runtime_store_id",
             sha256=True,
         )
         _require_runtime_id(
@@ -2002,11 +2008,16 @@ class Repository:
         cls,
         conn: sqlite3.Connection,
         *,
+        runtime_store_id: str,
         artifact_store_id: str,
         worker_id: str,
         bound_at: datetime,
     ) -> str:
-        runtime_store_id = cls._runtime_store_id_connection(conn)
+        runtime_store_id = _require_runtime_id(
+            runtime_store_id,
+            "runtime_store_id",
+            sha256=True,
+        )
         artifact_store = _require_runtime_id(
             artifact_store_id, "artifact_store_id", sha256=True
         )
@@ -2070,7 +2081,11 @@ class Repository:
             "FROM runtime_artifact_delivery_binding WHERE delivery_binding_id=?",
             (lease.delivery_binding_id,),
         ).fetchone()
-        if row is None or str(row["artifact_store_id"]) != lease.artifact_store_id:
+        if (
+            row is None
+            or str(row["runtime_store_id"]) != lease.runtime_store_id
+            or str(row["artifact_store_id"]) != lease.artifact_store_id
+        ):
             raise RuntimeOutboxError(
                 "runtime lease delivery binding changed",
                 code="ARTIFACT_STORE_BINDING_MISMATCH",
@@ -2085,11 +2100,17 @@ class Repository:
         self,
         *,
         worker_id: str,
+        source_runtime_store_id: str,
         artifact_store_id: str,
         now: datetime,
         lease_seconds: int,
     ) -> RuntimeOutboxLease | None:
         worker = _require_runtime_id(worker_id, "worker_id")
+        source_runtime_store = _require_runtime_id(
+            source_runtime_store_id,
+            "source_runtime_store_id",
+            sha256=True,
+        )
         artifact_store = _require_runtime_id(
             artifact_store_id, "artifact_store_id", sha256=True
         )
@@ -2103,10 +2124,17 @@ class Repository:
         conn.execute("BEGIN IMMEDIATE")
         try:
             self._audit_runtime_outbox_structure_connection(conn)
+            runtime_store_id = self._runtime_store_id_connection(conn)
+            if runtime_store_id != source_runtime_store:
+                raise RuntimeOutboxError(
+                    "artifact store source Runtime identity does not match the Runtime DB",
+                    code="ARTIFACT_STORE_SOURCE_RUNTIME_MISMATCH",
+                )
             self._assert_runtime_clock_not_before_state(conn, observed)
             self._assert_runtime_worker_not_globally_blocked(conn)
             delivery_binding_id = self._ensure_runtime_artifact_delivery_binding_connection(
                 conn,
+                runtime_store_id=runtime_store_id,
                 artifact_store_id=artifact_store,
                 worker_id=worker,
                 bound_at=observed,
@@ -2144,6 +2172,7 @@ class Repository:
                 transition_event_id=str(row["transition_event_id"]),
                 decision_content_id=str(row["decision_content_id"]),
                 occurrence_dedup_id=str(row["occurrence_dedup_id"]),
+                runtime_store_id=runtime_store_id,
                 delivery_binding_id=delivery_binding_id,
                 artifact_store_id=artifact_store,
                 payload_json=str(row["payload_json"]),

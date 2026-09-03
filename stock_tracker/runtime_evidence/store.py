@@ -982,9 +982,8 @@ class RuntimeArtifactStore:
         if artifact.identity_dict()["runtime_store_id"] != self.source_runtime_store_id:
             raise RuntimeArtifactStoreError(
                 "artifact belongs to a different runtime evidence store",
-                code="ROW_RUNTIME_STORE_ID_MISMATCH",
-                failure_class=RuntimeArtifactFailureClass.ROW_PERMANENT,
-                safe_to_quarantine=True,
+                code="ARTIFACT_STORE_RUNTIME_BINDING_MISMATCH",
+                failure_class=RuntimeArtifactFailureClass.STORE_INTEGRITY_BLOCK,
             )
         created_path: Path | None = None
         created_raw: bytes | None = None

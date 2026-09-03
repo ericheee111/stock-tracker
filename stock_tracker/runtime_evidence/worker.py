@@ -142,6 +142,7 @@ class RuntimeArtifactWorker:
             or identity["transition_event_id"] != lease.transition_event_id
             or identity["decision_content_id"] != lease.decision_content_id
             or identity["occurrence_dedup_id"] != lease.occurrence_dedup_id
+            or identity["runtime_store_id"] != lease.runtime_store_id
         ):
             raise RuntimeEvidenceContractError("outbox envelope identity mismatch")
         return artifact
@@ -296,6 +297,7 @@ class RuntimeArtifactWorker:
         try:
             lease = self.repository.claim_runtime_outbox(
                 worker_id=self.worker_id,
+                source_runtime_store_id=self.artifact_store.source_runtime_store_id,
                 artifact_store_id=self.artifact_store.store_id,
                 now=claimed_at,
                 lease_seconds=self.lease_seconds,
