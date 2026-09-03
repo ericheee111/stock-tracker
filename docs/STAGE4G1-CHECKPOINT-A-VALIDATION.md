@@ -1,4 +1,4 @@
-# Stage 4G.1 Checkpoint A4 / B0 / B1 R1 Validation
+# Stage 4G.1 Checkpoint A4 / B0 / B1 R2 Validation
 
 ## Scope and identity
 
@@ -8,9 +8,16 @@
 - A4 commit: `728835c96e23222abec3cd20827388d4d2cf963c`
 - A4 tree: `2f32dfe900823d0fbeb2be6f04ab1bdbb763dc61`
 - B0/B1 pure-contract commit: `1297f9e36611935d327965104fdab5e93c6b647f`
-- B0/B1 tree: `447c4569797f8d28206111c3a473803cce80cb85`
+- Original B0/B1 pure-contract tree: `447c4569797f8d28206111c3a473803cce80cb85`
 - B0 R1 causality/authority commit: `7a49222c73ca0a9800b2aec8d2c07450e195cbca`
 - B1 R1 scalable snapshot commit: `ffb0441a21b9ff60b28ae2adeb393517c8301cab`
+- B0/B1 R1 final commit: `599664ca4a3402731c4b5d963c3ba8e1922a4618`
+- B0/B1 R1 final tree: `5cf270ac16eb22719b61a88b86163f93d7de9ab8`
+- B0/B1 R1 archive SHA-256: `a2c948252e1bd0d0220db548e7b0fc0371a4e5cd7ec2e53ec59d182ed99eeefd`
+- R2 evidence-membership commit: `a5eecc8e918c238547b469bf8dc6b3459bd7eb8a`
+- R2 path/interval closure commit: `db94b9616b66c05d077a7ebd189b50173bcb362b`
+- R2 implementation tree before this docs-only commit: `28aef4eb5927299ec52fe5af5231286893be54f4`
+- R2 implementation archive SHA-256: `7f27b2146406daee9b32247d17dc1c5b8e53e068814776cf7629c9b1d1d58a56`
 - Validation interpreter: `Python 3.14.6`
 - The docs-only validation commit is reported after creation because a commit
   cannot contain its own future object ID without becoming self-referential.
@@ -74,27 +81,56 @@ Artifacts use schema `stage4g1-runtime-decision-artifact-v4`, require
 closed. `upstream_occurrence_id` is fixed to null because Checkpoint A has no
 trusted upstream occurrence authority.
 
-## B0/B1 R1 adversarial closure
+## B0/B1 R2 adversarial closure
 
-B0 schema v2 separates Calendar, Security Status, Coverage, and Market Event
-evidence. Session facts carry typed `RuntimeAuthorityFactReference` values and
-the frozen prefix binds each authority kind to its exact store, audit, and
-revision high-water. Point bars require immutable projection lineage with source
-snapshot/audit, finding digest, coverage Fact, interval, and ordered input record
-IDs/hashes. Ticks at exactly `entry_filled_at` are blocked as
-`ENTRY_BOUNDARY_ORDER_AMBIGUITY`; no caller-supplied flag can create ordering
-authority. Market-local day labels use the shared versioned A/HK/US timezone
-policy, including US DST.
+R2 source schemas v3 split `record_content_hash`, deterministic
+`record_storage_key`, `record_file_sha256`, and `source_record_id`. The record
+member ID and inventory leaf bind all six immutable inventory coordinates. A
+full-prefix `MarketEventInventoryVerification` rejects duplicate append order,
+event ID, record ID, or storage key before an Audit can be created. Selection is
+not an authority by itself: it has separate Commitment and Membership Witness
+objects and becomes consumable only after `verify_selection()` reconstructs the
+query result from the exact audited prefix. No digest is described as a Merkle,
+MMR, or range proof.
 
-B1 source schemas v2 recompute callback, provider, out-of-order, and source-time
-regression Findings from the complete prefix under a frozen sequence policy.
-The supplied Finding stream must equal that expected canonical stream exactly.
-Audit identity binds the finding-set digest and compact global, partition, and
-chunk commitments; neither Audit nor Snapshot retains a full-history record
-tuple. A bounded Selection is generated only from an exact Snapshot prefix and
-binds `snapshot_id`, audit/high-water, finding digests/IDs, record IDs/hashes,
-strict limit, and range-proof digest. Market Event Store v4 and B2 wiring remain
-out of scope.
+`RuntimeSourceReference` now carries the exact snapshot, audit, high-water,
+finding set, sequence policy, Selection, event, security, session, parser/schema,
+raw hash, and durable-time member identity. A TICK must be an exact verified
+`TRADE_TICK`. A projected bar instead binds an immutable Projection Artifact,
+half-open interval policy, OHLC output hash, coverage authority, verified input
+members, and creation/durability times; a raw tick before `interval_end` is valid
+and a tick exactly on the adjacent boundary cannot belong to the earlier bar.
+
+Path prefixes are created only from `RuntimePathStoreSnapshotBinding` and an
+exact `RuntimeCaseFactSelection`. The global store prefix is contiguous, while
+case fact orders may contain gaps caused by other cases. The case Selection binds
+the global high-water/audit, case query policy, ordered fact IDs and record
+hashes, manifest commitment, verification mode, and finding/blocker digest.
+Omitting an existing TARGET, STOP, or session fact, injecting another case,
+reordering facts, or changing the high-water/audit fails before the resolver.
+
+Calendar, Security Status, and Coverage use separate canonical Authority fact
+inventories and exact snapshot selections. Fact IDs and record hashes are
+recomputed; membership is not inferred from `revision <= high_water`. Fact
+knowledge, usability, Authority audit, path audit, source membership, and
+projection durability must all be available by the frozen prefix time.
+
+The versioned interval rule is half-open. Without an independent causal-ordering
+authority, every TICK, MINUTE_BAR, or DAILY_BAR whose
+`interval_start <= entry_filled_at` fails closed as
+`ENTRY_BOUNDARY_ORDER_AMBIGUITY`. A complete prefix with no post-entry source
+record remains `OPEN/HORIZON_NOT_REACHED`; `TRADED_SESSION_WITHOUT_POINTS` is
+reserved for an exact source Selection that contains an eligible record omitted
+from the case path facts. A complete zero-event horizon follows the frozen
+terminal policy and reaches `TIMEOUT`.
+
+Execution aggregation is explicitly only
+`structurally_projectable_to_stage4g_v3`. Execution store/snapshot/audit,
+audit-known time, high-water, Selection, and membership IDs are frozen, duplicate
+callbacks cannot double count, and no-entry reason facts must be members known no
+later than `decided_at`. Real finalizability remains the responsibility of a
+later Execution ReadPort/Adapter. Market Event Store v4, B2 Path Worker, and the
+Stage 4G Collection Bridge remain out of scope.
 
 ## Legacy migration matrix
 
@@ -132,7 +168,7 @@ Production Runtime dry-run sample:
 }
 ```
 
-## Validation results
+## Historical R1 validation results
 
 Every final gate below completed with exit code 0.
 
@@ -160,13 +196,41 @@ Every final gate below completed with exit code 0.
 | temporary real Today | `py -3.14 scripts/run_stage1_today_integration.py` | Today 17/17 and browser Portfolio CRUD 13/13 passed |
 | Portfolio unit | `py -3.14 -m unittest tests.test_portfolio_api tests.test_portfolio_repository -q` | 15 passed |
 | worktree diff | `git diff --check` | passed |
-| exact index export | `git write-tree && git rev-parse HEAD^{tree} && git archive --format=tar HEAD \| sha256sum` | index tree and HEAD tree both `447c4569797f8d28206111c3a473803cce80cb85`; archive SHA-256 `3efd57aa897c9a666c146f86097df80e77a9f015f8ccbf27489b03c0a2bbec6e` |
+| R1 exact index export | `git rev-parse 599664ca4a3402731c4b5d963c3ba8e1922a4618^{tree} && git archive --format=tar 599664ca4a3402731c4b5d963c3ba8e1922a4618 \| sha256sum` | tree `5cf270ac16eb22719b61a88b86163f93d7de9ab8`; archive SHA-256 `a2c948252e1bd0d0220db548e7b0fc0371a4e5cd7ec2e53ec59d182ed99eeefd` |
 | baseline binary audit | `git diff --numstat 082a6dac310388ec10c8a432427a40e275bcd7ae..HEAD` | all entries had numeric add/delete counts; no binary marker |
 | generated artifact scan | `git diff --name-only 082a6dac310388ec10c8a432427a40e275bcd7ae..HEAD \| grep -E '(^\|/)(__pycache__\|[^/]+\.(pyc\|pyo\|db\|sqlite3?\|wal\|shm\|log\|tmp\|exe\|dll\|zip))$'` | no findings |
 | tracked binary/database scan | `git ls-files '*.pyc' '*.pyo' '*.db' '*.sqlite' '*.sqlite3' '*.dll' '*.exe'` | no findings |
 | secret signature scan | `git diff --unified=0 082a6dac310388ec10c8a432427a40e275bcd7ae..HEAD -- '*.py' '*.sql' '*.md'` with private-key, AWS, OpenAI, and GitHub token signatures | no findings |
 | Broker/XTP write scan | `git diff --unified=0 082a6dac310388ec10c8a432427a40e275bcd7ae..HEAD -- stock_tracker scripts` with Trader/Order/Cancel/Algo/Account/Position write-call signatures | no findings |
 | auto-trade audit | `git grep -n -I 'auto_trade' HEAD -- stock_tracker scripts` | Stage 4G.1 contracts reject true and emit false; no true declaration found |
+
+## R2 implementation-tree validation
+
+The following gates ran against implementation commit
+`db94b9616b66c05d077a7ebd189b50173bcb362b` plus the docs-only working-tree
+update. The final docs commit, exact final tree/archive, scans, database hashes,
+and command logs are recorded in the external mechanical evidence package whose
+directory is named with that final commit's short SHA.
+
+| Surface | Exact command | Result |
+| --- | --- | --- |
+| focused R2 contracts | `py -3.14 -m unittest tests.test_runtime_evidence tests.test_runtime_path_contracts tests.test_market_source_snapshot_contracts -q` | 148 passed |
+| Stage 4G/4F adjacent | `py -3.14 -m unittest tests_quant.test_outcome_collection tests_quant.test_outcome_ledger_codec tests_quant.test_outcome_ledger_store tests_quant.test_outcome_ledger_cli tests_quant.test_outcome_ledger_scoreboard tests_quant.test_outcomes -q` | 114 passed |
+| full Runtime | `py -3.14 -m unittest discover -s tests -p "test_*.py" -q` | 670 passed, 1 expected skip |
+| full Quant | `py -3.14 -m unittest discover -s tests_quant -p "test_*.py" -q` | 724 passed |
+| distribution/no bytecode | `py -3.14 -m unittest tests_quant.test_source_distribution tests_quant.test_no_tracked_bytecode -q` | 2 passed in a real Git checkout |
+| targeted Ruff | `py -3.14 -m ruff check stock_tracker/runtime_evidence/path_contracts.py stock_tracker/runtime_evidence/source_snapshot_contracts.py stock_tracker/runtime_evidence/__init__.py tests/test_runtime_path_contracts.py tests/test_market_source_snapshot_contracts.py tests_quant/test_source_distribution.py` | passed |
+| production type diagnostics | `basedpyright --level error stock_tracker/runtime_evidence/path_contracts.py stock_tracker/runtime_evidence/source_snapshot_contracts.py stock_tracker/runtime_evidence/__init__.py` | 0 errors, 0 warnings |
+| compile | `py -3.14 -X pycache_prefix="<external-temp>" -m compileall -q stock_tracker tests tests_quant scripts` | passed; bytecode stayed outside the checkout |
+| dependencies | `py -3.14 -m pip check` | no broken requirements |
+| worktree diff | `git diff --check` | passed |
+
+The R2 Runtime run retained the known local test-server
+`ConnectionAbortedError: [WinError 10053]` and temporary HTTPError cleanup
+`ResourceWarning` stderr. The suite still exited 0. Quant negative CLI tests emitted
+their expected argument errors, and the known temporary migration-test
+connection warnings remained visible; the suite still exited 0. Neither warning
+class is treated as evidence of production database mutation.
 
 R1 debugging intentionally began with three non-final red regressions: an omitted
 callback gap Finding was accepted, a drive-qualified storage key was accepted,

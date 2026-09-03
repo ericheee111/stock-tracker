@@ -1,6 +1,6 @@
 # Stage 4G.1 Checkpoint B1–B3 — Audited Market Path Pipeline Design
 
-状态：`DESIGN_FROZEN / B0_B1_R1_PURE_CONTRACTS_COMMITTED / STORE_MIGRATION_AND_WORKER_WIRING_PENDING`
+状态：`DESIGN_FROZEN / B0_B1_R2_MEMBERSHIP_CLOSURE_COMMITTED / STORE_MIGRATION_AND_WORKER_WIRING_PENDING`
 
 日期：2026-09-03
 
@@ -10,12 +10,14 @@
 - A4 Source Runtime/Artifact Store Binding：`728835c493642488044df68700f8dfbf35fde5df`
 - B0 R1 Path Causality / Authority：`7a49222c73ca0a9800b2aec8d2c07450e195cbca`
 - B1 R1 Scalable Source Snapshot：`ffb0441a21b9ff60b28ae2adeb393517c8301cab`
+- B0/B1 R2 Evidence Membership：`a5eecc8e918c238547b469bf8dc6b3459bd7eb8a`
+- B0/B1 R2 Case/Interval Closure：`db94b9616b66c05d077a7ebd189b50173bcb362b`
 
 合同与最终 Review：ChatGPT GPT-5.6 Pro
 
 复杂工程实现：单一 Codex 长会话
 
-机械复跑：单一 WorkBuddy 长会话
+机械复跑：单一 WorkBuddy 长会话，只输出 `MECHANICAL_CHECK_COMPLETE`，不签发最终 PASS
 
 ## 1. 设计结论
 
@@ -182,7 +184,7 @@ Snapshot 是 compact Audit identity，不携带全量 Record tuple。其创建�
 - 每个 partition previous hash 连续；
 - Store ID 一致；
 - `durable_known_at <= audited_at`；
-- Event ID 和 immutable record path 的唯一性由 audited catalog exact unique indexes 证明；
+- Pure Contract 由 exact Inventory Verification 拒绝重复 Event ID、Record ID、Storage Key 和 append order；未来 Store v4 还必须用 exact UNIQUE indexes 与 SQL duplicate audit 提供可扩展证明；
 - Partition head count/first/last 与 Record 一致；
 - Sequence Findings 是按冻结 policy 从同一完整前缀重算的 exact set；
 - chunk manifest/global chain/partition root/finding root 与同一 request-time prefix 一致。
@@ -199,14 +201,16 @@ snapshot_high_water_append_order
 snapshot_finding_set_digest
 symbol / market
 source-time window
-ordered source record IDs/hashes
+ordered inventory leaf IDs、source record IDs/hashes
 relevant finding IDs/digest
 strict record limit
-membership/range proof digest
+Selection Commitment
+Membership Witness
+exact ReadPort SelectionVerification
 selection_id
 ```
 
-Selection 不得包含 high-water 后的记录，不得跨 Store、symbol 或时间窗口。ReadPort 必须在同一 SQLite snapshot/Store lock 中冻结 high-water 并生成 proof；任意调用方直接构造的空 Selection 不能自证 Audit。调用方必须显式提供 `market`，因此即使 audited prefix 中该 symbol 为零事件，也可以生成绑定同一 audit/high-water/range proof 的空 Selection；空 Selection只证明“该 audited prefix/filter 没有 Event”，不自动等于 `NO_TRADE` 或 `SUSPENDED`。
+Selection 不得包含 high-water 后的记录，不得跨 Store、symbol、market、event type 或半开时间窗口。ReadPort 必须在同一 SQLite snapshot/Store lock 中冻结 high-water，重建 query 结果，再签发 exact full-prefix-rescan Verification；在真正的 Merkle/MMR/range proof 实现前，Commitment/Witness 不能描述为 cryptographic range proof。任意调用方直接构造的空 Selection 不能自证 Audit。调用方必须显式提供 `market`，因此即使 audited prefix 中该 symbol 为零事件，也可以生成绑定同一 audit/high-water/verified witness 的空 Selection；空 Selection只证明“该 audited prefix/filter 没有 Event”，不自动等于 `NO_TRADE` 或 `SUSPENDED`。
 
 ## 4. Market Event Store v4
 
@@ -406,7 +410,7 @@ Crash window：
 5. 验证不存在未解决 crash orphan；
 6. 流式扫描 `MarketEventSourceRecord`，计算 global/partition/finding/chunk commitments；
 7. 计算 compact `MarketEventStoreAudit`；
-8. 对 query 只保留 bounded Records、relevant Findings 和 membership/range proof；
+8. 对 query 只保留 bounded Records、relevant Findings、Selection Commitment 与可由 exact rescan 验证的 Membership Witness；
 9. rollback只读事务；
 10. 返回 immutable compact `MarketEventStoreSnapshot` 或由其验证的 `MarketEventSelection`。
 

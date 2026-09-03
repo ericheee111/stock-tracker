@@ -1,6 +1,6 @@
 # Stage 4G.1 Checkpoint B0 — Evidence Vocabulary and Path Resolution Contract
 
-状态：`CONTRACT_FROZEN / R1_PURE_CORE_COMMITTED / STORAGE_AND_WORKER_WIRING_PENDING`
+状态：`CONTRACT_FROZEN / R2_MEMBERSHIP_CLOSURE_COMMITTED / STORAGE_AND_WORKER_WIRING_PENDING`
 
 日期：2026-09-03
 
@@ -109,8 +109,8 @@ DAILY_BAR
 ```
 
 - `TICK` 必须满足 `source_time == interval_start == interval_end` 且 `high == low == close`。
-- Bar 必须有非零时间区间，且 `source_time == interval_end`。
-- Bar 必须绑定 immutable projection lineage：projection policy、source snapshot/audit、高水位、finding-set digest、coverage Fact 和有序输入 Record IDs/hashes。
+- Bar 必须有非零半开时间区间 `[interval_start, interval_end)`，不要求任一 raw tick 的 `source_time == interval_end`。
+- Bar 必须绑定 immutable Projection Artifact 与 lineage：projection policy、创建/持久化时间、source snapshot/audit/Selection verification、高水位、finding-set digest、coverage Fact、有序输入 Event/Record IDs/hashes 和 OHLC output hash。
 - 粗粒度 Bar 同时触及 target 和 stop 时为 `INTRABAR_AMBIGUITY`。
 - 不允许事后选择更有利的障碍顺序。
 
@@ -131,11 +131,20 @@ BLOCKED
 
 ## 4. Source 与 Authority Reference 合同
 
-每个 Path Point 必须绑定 exact Market Event Source Reference：
+每个 raw TICK Path Point 必须绑定 exact verified Market Event member Reference：
 
 ```text
 source_store_id
+source_snapshot_id
+source_audit_id
+source_high_water_append_order
+finding_set_digest
+sequence_policy_id
+selection_id
+event_id
 source_session_id
+symbol / market / event_type / trading_day
+session_label_policy_id
 source_record_id
 source_append_order
 source_record_hash
@@ -157,7 +166,7 @@ source_append_order > 0
 record_hash/raw_payload_sha256 使用 lowercase SHA-256
 ```
 
-`source_time` 与 `received_at` 之间不假定绝对先后；但 Observation 必须按 frozen projection policy 把 `source_time` 对齐到 point/interval end。
+`source_time` 与 `received_at` 之间不假定绝对先后。Raw TICK 必须满足 `source_time == point time`；Projected Bar 的每个 raw input 必须落在半开区间内，但无需等于 `interval_end`。
 
 Session 不再用一个泛化 Source Reference 冒充多种 Authority，而是分别绑定 `calendar_reference`、`security_status_reference` 和 `coverage_reference`。每个 `RuntimeAuthorityFactReference` 包含 authority kind、store/audit、fact/schema、effective session date、`known_at/usable_from`、source、revision 和 policy ID；prefix 必须把每个 Reference 对到同类的 exact authority snapshot binding，且 `known_at <= frozen_at`、`usable_from <= frozen_at`。
 
@@ -193,9 +202,9 @@ session_evidence_id or path_observation_id
 规则：
 
 1. Point 的 `source durable_known_at <= collection_observed_at <= frozen_at`；Session 的 Authority `known_at/usable_from <= collection_observed_at <= frozen_at`。
-2. Market source append order 和 Authority revision 不得超过各自 frozen snapshot high-water mark。
-3. prefix 中的 collection append order 必须唯一且严格递增。
-4. `prefix_id` 包含 ordered facts、Market Source Snapshot、canonical Authority Snapshot bindings、Collection high-water 与 audit ID。
+2. Market source append order 和 Authority revision 不得超过各自 frozen snapshot high-water mark；这只是必要条件，成员还必须存在于 exact verified Selection。
+3. prefix 中的 case collection append order 必须唯一且严格递增，但不要求从 1 连续到 global high-water，因为同一 Store 可包含其他 Case。
+4. `prefix_id` 包含 ordered case facts、Market Source Selection verification、canonical Authority fact selections、Path Store Snapshot、case selection commitment、global high-water 与 audit ID。
 5. Resolver 只允许读取该 prefix。
 6. 请求后才 durable append 的事件，即使 market timestamp 更早，也不能回填解释旧请求。
 7. 新数据只能形成新的 prefix 和新的 resolution，不得修改旧 prefix。
@@ -449,7 +458,7 @@ B1 必须：
    - high-water append order；
    - audit ID；
    - compact prefix commitment，不在单个 JSON/tuple 中物化 `1..N` 全量记录；
-   - bounded Selection 与 exact snapshot/range proof；
+   - bounded Selection Commitment、exact full-prefix rescan Verification 与 Membership Witness；在真正 Merkle/MMR/range proof 实现前不得称为 range proof；
    - record/raw hashes 和 relevant finding IDs/digest；
    - parser/schema identity；
    - source/received/durable-known times。
@@ -571,4 +580,4 @@ stock_tracker/runtime_evidence/store.py
 tests/test_runtime_evidence.py
 ```
 
-R1 已由同一 Codex 长会话形成 scoped commits；Market Event Store v4、B2 Worker、Paper/Manual 和 Trusted Admission 仍未开始，不能由这些纯合同推断为已接线。
+R2 已由同一 Codex 长会话形成 scoped commits；WorkBuddy 只提供 `MECHANICAL_CHECK_COMPLETE` 输入，ChatGPT 持有最终 Review 裁决。Market Event Store v4、B2 Worker、Paper/Manual 和 Trusted Admission 仍未开始，不能由这些纯合同推断为已接线。
