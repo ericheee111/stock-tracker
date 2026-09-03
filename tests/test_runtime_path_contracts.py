@@ -1,19 +1,27 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import unittest
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from stock_tracker.core.market_time import MARKET_SESSION_LABEL_POLICY_V1
+from stock_tracker.core.market_time import (
+    MARKET_SESSION_LABEL_POLICY_V1,
+    market_session_date,
+)
 from stock_tracker.core.types import Market
 from stock_tracker.runtime_evidence.path_contracts import (
+    RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
     RuntimeAuthorityFactReference,
+    RuntimeAuthorityFactSelection,
     RuntimeAuthorityKind,
     RuntimeAuthoritySnapshotBinding,
     RuntimeCalendarState,
+    RuntimeCaseFactSelection,
     RuntimeCoverageState,
+    RuntimeExecutionEvidenceReference,
     RuntimeExecutionFragment,
     RuntimeExecutionSide,
     RuntimeExecutionSummary,
@@ -30,11 +38,24 @@ from stock_tracker.runtime_evidence.path_contracts import (
     RuntimePathGranularity,
     RuntimePathObservation,
     RuntimePathResolutionState,
+    RuntimePathStoreSnapshotBinding,
     RuntimePathWindow,
+    RuntimeProjectionArtifactReference,
     RuntimeProjectionLineage,
     RuntimeSessionEvidence,
     RuntimeSourceReference,
     resolve_runtime_path,
+)
+from stock_tracker.runtime_evidence.source_snapshot_contracts import (
+    MARKET_EVENT_SEQUENCE_POLICY_V1,
+    MarketEventCallbackSequenceScope,
+    MarketEventInventoryVerification,
+    MarketEventPartitionHead,
+    MarketEventProviderSequenceScope,
+    MarketEventSourceRecord,
+    MarketEventSourceSessionManifest,
+    MarketEventStoreAudit,
+    MarketEventStoreSnapshot,
 )
 
 
@@ -53,6 +74,7 @@ class RuntimePathContractTestCase(unittest.TestCase):
         self.source_finding_set_digest = _hash("source-findings")
         self.source_high_water = 10_000
         self.coverage_fact_by_index: dict[int, str] = {}
+        self.raw_source_time_by_collection_order: dict[int, datetime] = {}
 
     def source_reference(
         self,
@@ -61,11 +83,28 @@ class RuntimePathContractTestCase(unittest.TestCase):
         append_order: int,
         known_at: datetime,
         source_time: datetime | None = None,
+        event_type: str = "TRADE_TICK",
     ) -> RuntimeSourceReference:
         source_time = known_at - timedelta(seconds=2) if source_time is None else source_time
         return RuntimeSourceReference(
             source_store_id=self.source_store_id,
+            source_snapshot_id=self.source_snapshot_id,
+            source_audit_id=self.source_audit_id,
+            source_high_water_append_order=self.source_high_water,
+            finding_set_digest=self.source_finding_set_digest,
+            sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V1,
+            selection_id=_hash("placeholder-selection"),
+            event_id=_hash(f"event:{label}"),
             source_session_id="market-session-a",
+            symbol="600519.SH",
+            market=Market.A,
+            event_type=event_type,
+            trading_day=market_session_date(
+                source_time,
+                Market.A,
+                MARKET_SESSION_LABEL_POLICY_V1,
+            ),
+            session_label_policy_id=MARKET_SESSION_LABEL_POLICY_V1,
             source_record_id=_hash(f"source-record:{label}"),
             source_append_order=append_order,
             source_record_hash=_hash(f"record:{label}"),
@@ -90,8 +129,6 @@ class RuntimePathContractTestCase(unittest.TestCase):
         return RuntimeAuthorityFactReference(
             authority_kind=kind,
             authority_store_id=_hash(f"authority-store:{kind.value}"),
-            authority_audit_id=_hash(f"authority-audit:{kind.value}"),
-            fact_id=_hash(label),
             fact_schema=f"stage4g1-{kind.value.lower()}-fact-v1",
             effective_session_date=trading_day,
             known_at=known_at,
@@ -99,6 +136,7 @@ class RuntimePathContractTestCase(unittest.TestCase):
             source=f"test-{kind.value.lower()}",
             revision=revision,
             policy_id=_hash(f"policy:{kind.value}"),
+            fact_payload_sha256=_hash(f"payload:{label}"),
         )
 
     def session_fact(
@@ -193,6 +231,7 @@ class RuntimePathContractTestCase(unittest.TestCase):
         return RuntimeFrozenPathFact(
             collection_store_id=self.collection_store_id,
             collection_append_order=collection_order,
+            case_id=self.case_id,
             collection_fact_id=_hash(f"collection-fact-{collection_order}"),
             collection_observed_at=known_at + timedelta(seconds=1),
             kind=RuntimePathFactKind.SESSION,
@@ -212,6 +251,7 @@ class RuntimePathContractTestCase(unittest.TestCase):
         close: str = "10",
         granularity: RuntimePathGranularity = RuntimePathGranularity.MINUTE_BAR,
         known_at: datetime | None = None,
+        raw_source_time: datetime | None = None,
     ) -> RuntimeFrozenPathFact:
         interval_end = (
             interval_start + timedelta(minutes=1)
@@ -221,11 +261,19 @@ class RuntimePathContractTestCase(unittest.TestCase):
         durable_known_at = (
             interval_end + timedelta(seconds=2) if known_at is None else known_at
         )
+        actual_source_time = (
+            interval_start
+            if granularity is RuntimePathGranularity.TICK
+            else raw_source_time
+            if raw_source_time is not None
+            else interval_start + (interval_end - interval_start) / 2
+        )
+        self.raw_source_time_by_collection_order[collection_order] = actual_source_time
         source = self.source_reference(
             label=f"point-{collection_order}",
             append_order=source_order,
             known_at=durable_known_at,
-            source_time=interval_end,
+            source_time=actual_source_time,
         )
         projection_lineage = (
             None
@@ -237,15 +285,43 @@ class RuntimePathContractTestCase(unittest.TestCase):
                 source_audit_id=self.source_audit_id,
                 source_high_water_append_order=self.source_high_water,
                 finding_set_digest=self.source_finding_set_digest,
+                selection_id=_hash("placeholder-selection"),
+                selection_verification_id=_hash("placeholder-selection-verification"),
                 interval_start=interval_start,
                 interval_end=interval_end,
+                interval_boundary_policy_id=RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
                 coverage_fact_id=self.coverage_fact_by_index.get(
                     session_index,
                     _hash(f"missing-coverage:{session_index}"),
                 ),
+                input_event_ids=(source.event_id,),
                 input_source_append_orders=(source.source_append_order,),
                 input_source_record_ids=(source.source_record_id,),
                 input_source_record_hashes=(source.source_record_hash,),
+            )
+        )
+        projection_artifact = (
+            None
+            if projection_lineage is None
+            else RuntimeProjectionArtifactReference.create(
+                projection_policy_id=projection_lineage.projection_policy_id,
+                created_at=durable_known_at,
+                durable_known_at=durable_known_at,
+                symbol="600519.SH",
+                market=Market.A,
+                trading_day=market_session_date(
+                    interval_end - timedelta(microseconds=1),
+                    Market.A,
+                    MARKET_SESSION_LABEL_POLICY_V1,
+                ),
+                interval_start=interval_start,
+                interval_end=interval_end,
+                interval_boundary_policy_id=RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
+                lineage=projection_lineage,
+                high=Decimal(high),
+                low=Decimal(low),
+                close=Decimal(close),
+                coverage_fact_id=projection_lineage.coverage_fact_id,
             )
         )
         point = RuntimePathObservation(
@@ -258,12 +334,16 @@ class RuntimePathContractTestCase(unittest.TestCase):
             low=Decimal(low),
             close=Decimal(close),
             granularity=granularity,
-            source_reference=source,
-            projection_lineage=projection_lineage,
+            interval_boundary_policy_id=RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
+            source_reference=(
+                source if granularity is RuntimePathGranularity.TICK else None
+            ),
+            projection_artifact_reference=projection_artifact,
         )
         return RuntimeFrozenPathFact(
             collection_store_id=self.collection_store_id,
             collection_append_order=collection_order,
+            case_id=self.case_id,
             collection_fact_id=_hash(f"collection-fact-{collection_order}"),
             collection_observed_at=durable_known_at + timedelta(seconds=1),
             kind=RuntimePathFactKind.POINT,
@@ -275,9 +355,270 @@ class RuntimePathContractTestCase(unittest.TestCase):
         facts: list[RuntimeFrozenPathFact],
         *,
         frozen_at: datetime | None = None,
+        eligible_unprojected_source_times: tuple[datetime, ...] = (),
+        source_start_proof: bool = True,
     ) -> RuntimeFrozenPathPrefix:
         ordered = tuple(sorted(facts, key=lambda item: item.collection_append_order))
         last_observed = max(item.collection_observed_at for item in ordered)
+        actual_frozen_at = (
+            last_observed + timedelta(seconds=1)
+            if frozen_at is None
+            else frozen_at
+        )
+
+        sessions = {
+            item.session_evidence.open_session_index: item.session_evidence
+            for item in ordered
+            if item.session_evidence is not None
+            and item.session_evidence.open_session_index is not None
+        }
+        manifests = tuple(
+            MarketEventSourceSessionManifest(
+                source_store_id=self.source_store_id,
+                session_id=f"market-session-{session.open_session_index}",
+                connection_epoch=session.open_session_index + 1,
+                reconnect_epoch=0,
+                collector_started_at=session.scheduled_open_at,
+                coverage_start=session.scheduled_open_at,
+                expected_first_callback_seq=1 if source_start_proof else None,
+                callback_sequence_scope=MarketEventCallbackSequenceScope.SESSION,
+                provider_sequence_available=False,
+                provider_sequence_scope=MarketEventProviderSequenceScope.UNAVAILABLE,
+                sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V1,
+            )
+            for session in sorted(
+                sessions.values(),
+                key=lambda item: item.open_session_index,
+            )
+        )
+        manifest_by_index = {
+            index: manifest
+            for index, manifest in zip(sorted(sessions), manifests, strict=True)
+        }
+        raw_specs: list[tuple[str, int, datetime, int]] = []
+        for item in ordered:
+            observation = item.path_observation
+            if observation is None:
+                continue
+            raw_specs.append(
+                (
+                    f"point-{item.collection_append_order}",
+                    item.collection_append_order,
+                    self.raw_source_time_by_collection_order[
+                        item.collection_append_order
+                    ],
+                    observation.open_session_index,
+                )
+            )
+        for index, source_time in enumerate(eligible_unprojected_source_times, 1):
+            session_index = next(
+                index
+                for index, session in sessions.items()
+                if session.scheduled_open_at <= source_time <= session.scheduled_close_at
+            )
+            raw_specs.append((f"eligible-{index}", -index, source_time, session_index))
+        raw_specs.sort(key=lambda item: (item[2], item[0]))
+        source_records: list[MarketEventSourceRecord] = []
+        previous_global = "0" * 64
+        previous_by_partition: dict[str, str] = {}
+        callback_by_session: dict[int, int] = {}
+        record_by_collection_order: dict[int, MarketEventSourceRecord] = {}
+        for append_order, (label, collection_order, source_time, session_index) in enumerate(
+            raw_specs,
+            1,
+        ):
+            manifest = manifest_by_index[session_index]
+            callback_by_session[session_index] = callback_by_session.get(session_index, 0) + 1
+            trading_day = market_session_date(
+                source_time,
+                Market.A,
+                MARKET_SESSION_LABEL_POLICY_V1,
+            )
+            partition_key = (
+                f"market=A/trading_day={trading_day.isoformat()}/symbol=600519.SH"
+            )
+            record = MarketEventSourceRecord.create(
+                source_store_id=self.source_store_id,
+                append_order=append_order,
+                event_id=_hash(f"event:{label}"),
+                session_id=manifest.session_id,
+                source_session_manifest_id=manifest.manifest_id,
+                connection_epoch=manifest.connection_epoch,
+                reconnect_epoch=manifest.reconnect_epoch,
+                source="test-market-event-store",
+                feed_mode="LEVEL2",
+                symbol="600519.SH",
+                market=Market.A,
+                event_type="TRADE_TICK",
+                trading_day=trading_day,
+                session_label_policy_id=MARKET_SESSION_LABEL_POLICY_V1,
+                source_time=source_time,
+                received_at=source_time + timedelta(microseconds=1),
+                durable_known_at=source_time + timedelta(microseconds=2),
+                callback_seq=callback_by_session[session_index],
+                provider_seq=None,
+                partition_key=partition_key,
+                previous_global_record_hash=previous_global,
+                previous_partition_record_hash=previous_by_partition.get(
+                    partition_key,
+                    "0" * 64,
+                ),
+                raw_payload_sha256=_hash(f"raw:{label}"),
+                payload={"last_price": "10", "quantity": 100},
+                parser_id="test-market-event-parser-v1",
+                source_schema_id="test-market-event-record-v1",
+                record_file_sha256=_hash(f"file:{label}"),
+            )
+            source_records.append(record)
+            previous_global = record.record_content_hash
+            previous_by_partition[partition_key] = record.record_content_hash
+            if collection_order > 0:
+                record_by_collection_order[collection_order] = record
+        source_record_tuple = tuple(source_records)
+        grouped: dict[str, list[MarketEventSourceRecord]] = {}
+        for record in source_record_tuple:
+            grouped.setdefault(record.partition_key, []).append(record)
+        partition_heads = tuple(
+            MarketEventPartitionHead(
+                partition_key=partition_key,
+                event_count=len(items),
+                first_record_hash=items[0].record_content_hash,
+                last_record_hash=items[-1].record_content_hash,
+                manifest_sha256=_hash(f"manifest:{partition_key}"),
+            )
+            for partition_key, items in sorted(grouped.items())
+        )
+        inventory = MarketEventInventoryVerification.create_from_prefix(
+            source_store_id=self.source_store_id,
+            catalog_schema_fingerprint=_hash("test-market-catalog-schema-v4"),
+            records=source_record_tuple,
+        )
+        coverage_ends = tuple(
+            session.coverage_through
+            for session in sessions.values()
+            if session.coverage_through is not None
+        )
+        source_audited_at = max(
+            *(item.durable_known_at for item in source_record_tuple),
+            *coverage_ends,
+            *(session.scheduled_open_at for session in sessions.values()),
+        ) + timedelta(microseconds=1)
+        source_audit = MarketEventStoreAudit.create_from_prefix(
+            source_store_id=self.source_store_id,
+            source_schema_id="stock-tracker-market-event-store-v4",
+            sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V1,
+            audited_at=source_audited_at,
+            catalog_schema_fingerprint=_hash("test-market-catalog-schema-v4"),
+            inventory_verification=inventory,
+            records=source_record_tuple,
+            partition_heads=partition_heads,
+            findings=(),
+            source_session_manifests=manifests,
+        )
+        source_snapshot = MarketEventStoreSnapshot.from_audit(source_audit)
+        selection_start = min(
+            session.scheduled_open_at for session in sessions.values()
+        )
+        selection_end = max(
+            *coverage_ends,
+            *(item.source_time for item in source_record_tuple),
+            *(session.scheduled_open_at for session in sessions.values()),
+        ) + timedelta(microseconds=1)
+        source_selection = source_snapshot.select_from_prefix(
+            records=source_record_tuple,
+            partition_heads=partition_heads,
+            findings=(),
+            source_session_manifests=manifests,
+            symbol="600519.SH",
+            market=Market.A,
+            start_source_time=selection_start,
+            end_source_time=selection_end,
+            allowed_event_types=("TRADE_TICK",),
+            interval_boundary_policy_id=RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
+            record_limit=max(1, len(source_record_tuple)),
+        )
+        source_verification = source_snapshot.verify_selection(
+            source_selection,
+            records=source_record_tuple,
+            partition_heads=partition_heads,
+            findings=(),
+            source_session_manifests=manifests,
+        )
+        market_source_binding = RuntimeMarketSourceSnapshotBinding.from_verified_selection(
+            selection=source_selection,
+            verification=source_verification,
+        )
+
+        rebound_facts: list[RuntimeFrozenPathFact] = []
+        for item in ordered:
+            observation = item.path_observation
+            if observation is None:
+                rebound_facts.append(item)
+                continue
+            record = record_by_collection_order[item.collection_append_order]
+            source_reference = RuntimeSourceReference.from_verified_selection(
+                record=record,
+                selection=source_selection,
+                verification=source_verification,
+            )
+            if observation.granularity is RuntimePathGranularity.TICK:
+                rebound_observation = replace(
+                    observation,
+                    source_reference=source_reference,
+                    projection_artifact_reference=None,
+                )
+            else:
+                session = sessions[observation.open_session_index]
+                assert session.coverage_reference is not None
+                lineage = RuntimeProjectionLineage(
+                    projection_policy_id=_hash("projection-policy-v1"),
+                    source_store_id=self.source_store_id,
+                    source_snapshot_id=source_selection.snapshot_id,
+                    source_audit_id=source_selection.snapshot_audit_id,
+                    source_high_water_append_order=(
+                        source_selection.snapshot_high_water_append_order
+                    ),
+                    finding_set_digest=source_selection.snapshot_finding_set_digest,
+                    selection_id=source_selection.selection_id,
+                    selection_verification_id=source_verification.verification_id,
+                    interval_start=observation.interval_start,
+                    interval_end=observation.interval_end,
+                    interval_boundary_policy_id=RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
+                    coverage_fact_id=session.coverage_reference.fact_id,
+                    input_event_ids=(record.event_id,),
+                    input_source_append_orders=(record.append_order,),
+                    input_source_record_ids=(record.source_record_id,),
+                    input_source_record_hashes=(record.record_content_hash,),
+                )
+                projection = RuntimeProjectionArtifactReference.create(
+                    projection_policy_id=lineage.projection_policy_id,
+                    created_at=max(
+                        record.durable_known_at,
+                        observation.interval_end,
+                    ),
+                    durable_known_at=max(
+                        record.durable_known_at,
+                        observation.interval_end,
+                    ),
+                    symbol=observation.symbol,
+                    market=observation.market,
+                    trading_day=record.trading_day,
+                    interval_start=observation.interval_start,
+                    interval_end=observation.interval_end,
+                    interval_boundary_policy_id=RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
+                    lineage=lineage,
+                    high=observation.high,
+                    low=observation.low,
+                    close=observation.close,
+                    coverage_fact_id=lineage.coverage_fact_id,
+                )
+                rebound_observation = replace(
+                    observation,
+                    source_reference=None,
+                    projection_artifact_reference=projection,
+                )
+            rebound_facts.append(replace(item, path_observation=rebound_observation))
+        ordered = tuple(rebound_facts)
         authority_references = tuple(
             reference
             for item in ordered
@@ -289,50 +630,68 @@ class RuntimePathContractTestCase(unittest.TestCase):
             )
             if reference is not None
         )
-        authority_bindings = tuple(
-            RuntimeAuthoritySnapshotBinding(
-                authority_kind=kind,
-                authority_store_id=next(
-                    item.authority_store_id
-                    for item in authority_references
-                    if item.authority_kind is kind
+        authority_selections = tuple(
+            RuntimeAuthorityFactSelection.from_verified_snapshot(
+                snapshot=RuntimeAuthoritySnapshotBinding.from_facts(
+                    authority_kind=kind,
+                    authority_store_id=next(
+                        item.authority_store_id
+                        for item in authority_references
+                        if item.authority_kind is kind
+                    ),
+                    authority_audited_at=max(
+                        item.usable_from
+                        for item in authority_references
+                        if item.authority_kind is kind
+                    )
+                    + timedelta(microseconds=1),
+                    facts=tuple(
+                        sorted(
+                            (
+                                item
+                                for item in authority_references
+                                if item.authority_kind is kind
+                            ),
+                            key=lambda item: (item.revision, item.fact_id),
+                        )
+                    ),
                 ),
-                authority_audit_id=next(
-                    item.authority_audit_id
-                    for item in authority_references
-                    if item.authority_kind is kind
+                facts=tuple(
+                    sorted(
+                        (
+                            item
+                            for item in authority_references
+                            if item.authority_kind is kind
+                        ),
+                        key=lambda item: (item.revision, item.fact_id),
+                    )
                 ),
-                high_water_revision=max(
-                    item.revision
-                    for item in authority_references
-                    if item.authority_kind is kind
-                ),
+                selection_policy_id=_hash(f"authority-selection:{kind.value}"),
             )
             for kind in sorted(
                 {item.authority_kind for item in authority_references},
                 key=lambda item: item.value,
             )
         )
-        return RuntimeFrozenPathPrefix(
+        path_snapshot = RuntimePathStoreSnapshotBinding.from_prefix(
+            path_store_id=self.collection_store_id,
+            path_audited_at=last_observed + timedelta(microseconds=1),
+            facts=ordered,
+            finding_blocker_digest=_hash("path-findings-and-blockers"),
+        )
+        case_selection = RuntimeCaseFactSelection.from_verified_snapshot(
+            path_store_snapshot=path_snapshot,
+            all_facts=ordered,
             case_id=self.case_id,
             symbol="600519.SH",
             market=Market.A,
-            collection_store_id=self.collection_store_id,
-            market_source_snapshot=RuntimeMarketSourceSnapshotBinding(
-                source_store_id=self.source_store_id,
-                source_snapshot_id=self.source_snapshot_id,
-                source_audit_id=self.source_audit_id,
-                high_water_append_order=self.source_high_water,
-                finding_set_digest=self.source_finding_set_digest,
-                sequence_policy_id="stage4g1-market-event-sequence-policy-v1",
-            ),
-            authority_snapshot_bindings=authority_bindings,
-            frozen_at=last_observed + timedelta(seconds=1) if frozen_at is None else frozen_at,
-            collection_high_water_append_order=max(
-                item.collection_append_order for item in ordered
-            ),
-            collection_audit_id=_hash("collection-audit"),
-            facts=ordered,
+            selection_policy_id=_hash("case-selection-policy-v1"),
+        )
+        return RuntimeFrozenPathPrefix.from_verified_case_selection(
+            case_selection=case_selection,
+            market_source_snapshot=market_source_binding,
+            authority_fact_selections=authority_selections,
+            frozen_at=actual_frozen_at,
         )
 
     def window(self, *, horizon_sessions: int = 2) -> RuntimePathWindow:
@@ -349,6 +708,37 @@ class RuntimePathContractTestCase(unittest.TestCase):
             horizon_sessions=horizon_sessions,
             terminal_policy_id=_hash("terminal-policy"),
             session_label_policy_id=MARKET_SESSION_LABEL_POLICY_V1,
+            interval_boundary_policy_id=RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
+        )
+
+    def refreeze_case(
+        self,
+        prefix: RuntimeFrozenPathPrefix,
+        facts: tuple[RuntimeFrozenPathFact, ...],
+        *,
+        frozen_at: datetime | None = None,
+    ) -> RuntimeFrozenPathPrefix:
+        path_snapshot = RuntimePathStoreSnapshotBinding.from_prefix(
+            path_store_id=prefix.path_store_snapshot.path_store_id,
+            path_audited_at=prefix.path_store_snapshot.path_audited_at,
+            facts=facts,
+            finding_blocker_digest=(
+                prefix.path_store_snapshot.finding_blocker_digest
+            ),
+        )
+        case_selection = RuntimeCaseFactSelection.from_verified_snapshot(
+            path_store_snapshot=path_snapshot,
+            all_facts=facts,
+            case_id=prefix.case_id,
+            symbol=prefix.symbol,
+            market=prefix.market,
+            selection_policy_id=prefix.case_selection.selection_policy_id,
+        )
+        return RuntimeFrozenPathPrefix.from_verified_case_selection(
+            case_selection=case_selection,
+            market_source_snapshot=prefix.market_source_snapshot,
+            authority_fact_selections=prefix.authority_fact_selections,
+            frozen_at=prefix.frozen_at if frozen_at is None else frozen_at,
         )
 
     def three_complete_sessions(self) -> list[RuntimeFrozenPathFact]:
@@ -436,6 +826,56 @@ class TestRuntimeFirstTouch(RuntimePathContractTestCase):
         )
         result = resolve_runtime_path(self.window(), self.prefix(facts))
         self.assertEqual(result.state, RuntimePathResolutionState.TARGET)
+
+    def test_bar_starting_at_entry_is_blocked_for_each_bar_granularity(self) -> None:
+        for granularity, interval_end in (
+            (RuntimePathGranularity.MINUTE_BAR, self.entry_time + timedelta(minutes=1)),
+            (RuntimePathGranularity.DAILY_BAR, self.entry_time + timedelta(hours=5)),
+        ):
+            with self.subTest(granularity=granularity.value):
+                facts = self.three_complete_sessions()
+                facts.append(
+                    self.point_fact(
+                        collection_order=4,
+                        source_order=4,
+                        session_index=0,
+                        interval_start=self.entry_time,
+                        interval_end=interval_end,
+                        granularity=granularity,
+                    )
+                )
+                result = resolve_runtime_path(self.window(), self.prefix(facts))
+                self.assertEqual(result.state, RuntimePathResolutionState.BLOCKED)
+                self.assertEqual(
+                    result.blocker_codes,
+                    (RuntimePathBlockerCode.ENTRY_BOUNDARY_ORDER_AMBIGUITY,),
+                )
+
+    def test_adjacent_closed_boundary_source_input_is_rejected(self) -> None:
+        session = self.session_fact(
+            trading_day=date(2026, 9, 1),
+            collection_order=1,
+            source_order=1,
+            open_session_index=0,
+        )
+        interval_start = self.entry_time + timedelta(minutes=1)
+        interval_end = interval_start + timedelta(minutes=1)
+        bar = self.point_fact(
+            collection_order=2,
+            source_order=2,
+            session_index=0,
+            interval_start=interval_start,
+            interval_end=interval_end,
+            raw_source_time=interval_end,
+        )
+        with self.assertRaisesRegex(RuntimePathContractError, "verified raw Selection"):
+            self.prefix([session, bar])
+
+    def test_window_has_no_caller_ordering_authority_boolean(self) -> None:
+        self.assertNotIn(
+            "ordering_authority",
+            RuntimePathWindow.__dataclass_fields__,
+        )
     def test_first_target_precedes_later_stop(self) -> None:
         facts = self.three_complete_sessions()
         target = self.point_fact(
@@ -706,7 +1146,7 @@ class TestRuntimeFirstTouch(RuntimePathContractTestCase):
         self.assertEqual(result.state, RuntimePathResolutionState.BLOCKED)
         self.assertEqual(
             result.blocker_codes,
-            (RuntimePathBlockerCode.WINDOW_BOUNDARY_OVERLAP,),
+            (RuntimePathBlockerCode.ENTRY_BOUNDARY_ORDER_AMBIGUITY,),
         )
 
     def test_nontraded_session_cannot_carry_price_point(self) -> None:
@@ -764,6 +1204,7 @@ class TestRuntimeFirstTouch(RuntimePathContractTestCase):
             horizon_sessions=2,
             terminal_policy_id=_hash("terminal-policy"),
             session_label_policy_id=MARKET_SESSION_LABEL_POLICY_V1,
+            interval_boundary_policy_id=RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
         )
         result = resolve_runtime_path(invalid_window, self.prefix([session]))
         self.assertEqual(result.state, RuntimePathResolutionState.BLOCKED)
@@ -864,7 +1305,7 @@ class TestRuntimeFirstTouch(RuntimePathContractTestCase):
             (RuntimePathBlockerCode.ENTRY_SESSION_NOT_TRADED,),
         )
 
-    def test_traded_complete_session_without_points_is_blocked(self) -> None:
+    def test_traded_complete_session_without_source_records_remains_open(self) -> None:
         facts = [
             self.session_fact(
                 trading_day=date(2026, 9, 1),
@@ -877,6 +1318,45 @@ class TestRuntimeFirstTouch(RuntimePathContractTestCase):
             self.window(horizon_sessions=1),
             self.prefix(facts),
         )
+        self.assertEqual(result.state, RuntimePathResolutionState.OPEN)
+        self.assertEqual(result.pending_code.value, "HORIZON_NOT_REACHED")
+
+    def test_entry_complete_prefix_at_fill_without_post_entry_record_is_open(self) -> None:
+        session = self.session_fact(
+            trading_day=date(2026, 9, 1),
+            collection_order=1,
+            source_order=1,
+            open_session_index=0,
+            coverage_state=RuntimeCoverageState.COMPLETE_PREFIX,
+            session_complete=False,
+            coverage_through=self.entry_time,
+        )
+        result = resolve_runtime_path(self.window(), self.prefix([session]))
+        self.assertEqual(result.state, RuntimePathResolutionState.OPEN)
+        self.assertEqual(result.pending_code.value, "HORIZON_NOT_REACHED")
+
+    def test_complete_horizon_with_zero_events_times_out(self) -> None:
+        result = resolve_runtime_path(
+            self.window(),
+            self.prefix(self.three_complete_sessions()),
+        )
+        self.assertEqual(result.state, RuntimePathResolutionState.TIMEOUT)
+        self.assertEqual(result.effective_session_index, 2)
+
+    def test_eligible_source_record_without_projection_is_blocked(self) -> None:
+        session = self.session_fact(
+            trading_day=date(2026, 9, 1),
+            collection_order=1,
+            source_order=1,
+            open_session_index=0,
+        )
+        prefix = self.prefix(
+            [session],
+            eligible_unprojected_source_times=(
+                self.entry_time + timedelta(minutes=1),
+            ),
+        )
+        result = resolve_runtime_path(self.window(horizon_sessions=1), prefix)
         self.assertEqual(result.state, RuntimePathResolutionState.BLOCKED)
         self.assertEqual(
             result.blocker_codes,
@@ -964,6 +1444,203 @@ class TestRuntimeFirstTouch(RuntimePathContractTestCase):
 
 
 class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
+    def test_source_member_identity_attacks_fail_before_resolver(self) -> None:
+        session = self.session_fact(
+            trading_day=date(2026, 9, 1),
+            collection_order=1,
+            source_order=1,
+            open_session_index=0,
+        )
+        tick = self.point_fact(
+            collection_order=2,
+            source_order=2,
+            session_index=0,
+            interval_start=self.entry_time + timedelta(minutes=1),
+            interval_end=self.entry_time + timedelta(minutes=1),
+            high="12",
+            low="12",
+            close="12",
+            granularity=RuntimePathGranularity.TICK,
+        )
+        prefix = self.prefix([session, tick])
+        point = prefix.facts[1]
+        assert point.path_observation is not None
+        source = point.path_observation.source_reference
+        assert source is not None
+
+        for label, changes in (
+            ("record-id", {"source_record_id": _hash("arbitrary-record")}),
+            ("snapshot", {"source_snapshot_id": _hash("wrong-snapshot")}),
+            ("audit", {"source_audit_id": _hash("wrong-audit")}),
+            ("findings", {"finding_set_digest": _hash("wrong-findings")}),
+        ):
+            with self.subTest(attack=label):
+                attacked_observation = replace(
+                    point.path_observation,
+                    source_reference=replace(source, **changes),
+                )
+                attacked_fact = replace(
+                    point,
+                    path_observation=attacked_observation,
+                )
+                with self.assertRaisesRegex(
+                    RuntimePathContractError,
+                    "verified Selection",
+                ):
+                    self.refreeze_case(
+                        prefix,
+                        (prefix.facts[0], attacked_fact),
+                    )
+
+        with self.assertRaisesRegex(RuntimePathContractError, "trade-event member"):
+            replace(
+                point.path_observation,
+                source_reference=replace(source, event_type="ORDER_BOOK"),
+            )
+        us_trading_day = market_session_date(
+            source.source_time,
+            Market.US,
+            MARKET_SESSION_LABEL_POLICY_V1,
+        )
+        with self.assertRaisesRegex(RuntimePathContractError, "trade-event member"):
+            replace(
+                point.path_observation,
+                source_reference=replace(
+                    source,
+                    symbol="AAPL.US",
+                    market=Market.US,
+                    trading_day=us_trading_day,
+                ),
+            )
+
+    def test_case_selection_rejects_omission_and_forged_inventory(self) -> None:
+        facts = self.three_complete_sessions()
+        facts.extend(
+            (
+                self.point_fact(
+                    collection_order=4,
+                    source_order=4,
+                    session_index=0,
+                    interval_start=self.entry_time + timedelta(minutes=1),
+                    high="12.1",
+                    low="10",
+                    close="12",
+                ),
+                self.point_fact(
+                    collection_order=5,
+                    source_order=5,
+                    session_index=1,
+                    interval_start=self.entry_time + timedelta(days=1, minutes=1),
+                    high="10",
+                    low="7.9",
+                    close="8",
+                ),
+            )
+        )
+        prefix = self.prefix(facts)
+        for label, omitted_index in (("session", 0), ("target", 3), ("stop", 4)):
+            with self.subTest(omission=label), self.assertRaisesRegex(
+                RuntimePathContractError,
+                "prefix",
+            ):
+                RuntimeCaseFactSelection.from_verified_snapshot(
+                    path_store_snapshot=prefix.path_store_snapshot,
+                    all_facts=tuple(
+                        item
+                        for index, item in enumerate(prefix.facts)
+                        if index != omitted_index
+                    ),
+                    case_id=self.case_id,
+                    symbol="600519.SH",
+                    market=Market.A,
+                    selection_policy_id=prefix.case_selection.selection_policy_id,
+                )
+
+        raised_high_water = copy.copy(prefix.path_store_snapshot)
+        object.__setattr__(
+            raised_high_water,
+            "global_high_water_append_order",
+            raised_high_water.global_high_water_append_order + 1,
+        )
+        forged_high_water_selection = copy.copy(prefix.case_selection)
+        object.__setattr__(
+            forged_high_water_selection,
+            "path_store_snapshot",
+            raised_high_water,
+        )
+        with self.assertRaises(RuntimePathContractError):
+            RuntimeFrozenPathPrefix.from_verified_case_selection(
+                case_selection=forged_high_water_selection,
+                market_source_snapshot=prefix.market_source_snapshot,
+                authority_fact_selections=prefix.authority_fact_selections,
+                frozen_at=prefix.frozen_at,
+            )
+
+        other_case_fact = replace(
+            prefix.facts[-1],
+            collection_append_order=len(prefix.facts) + 1,
+            case_id=_hash("other-case"),
+            collection_fact_id=_hash("other-case-fact"),
+        )
+        all_facts = (*prefix.facts, other_case_fact)
+        global_snapshot = RuntimePathStoreSnapshotBinding.from_prefix(
+            path_store_id=self.collection_store_id,
+            path_audited_at=prefix.path_store_snapshot.path_audited_at,
+            facts=all_facts,
+            finding_blocker_digest=prefix.path_store_snapshot.finding_blocker_digest,
+        )
+        exact_case = RuntimeCaseFactSelection.from_verified_snapshot(
+            path_store_snapshot=global_snapshot,
+            all_facts=all_facts,
+            case_id=self.case_id,
+            symbol="600519.SH",
+            market=Market.A,
+            selection_policy_id=prefix.case_selection.selection_policy_id,
+        )
+        injected = copy.copy(exact_case)
+        object.__setattr__(injected, "facts", (*exact_case.facts, other_case_fact))
+        with self.assertRaisesRegex(RuntimePathContractError, "verified case query"):
+            RuntimeFrozenPathPrefix.from_verified_case_selection(
+                case_selection=injected,
+                market_source_snapshot=prefix.market_source_snapshot,
+                authority_fact_selections=prefix.authority_fact_selections,
+                frozen_at=prefix.frozen_at,
+            )
+        reordered = copy.copy(prefix.case_selection)
+        object.__setattr__(reordered, "facts", tuple(reversed(reordered.facts)))
+        with self.assertRaisesRegex(RuntimePathContractError, "verified case query"):
+            RuntimeFrozenPathPrefix.from_verified_case_selection(
+                case_selection=reordered,
+                market_source_snapshot=prefix.market_source_snapshot,
+                authority_fact_selections=prefix.authority_fact_selections,
+                frozen_at=prefix.frozen_at,
+            )
+        arbitrary_audit = copy.copy(prefix.path_store_snapshot)
+        object.__setattr__(arbitrary_audit, "path_audit_id", _hash("caller-audit"))
+        arbitrary_audit_selection = copy.copy(prefix.case_selection)
+        object.__setattr__(
+            arbitrary_audit_selection,
+            "path_store_snapshot",
+            arbitrary_audit,
+        )
+        with self.assertRaises(RuntimePathContractError):
+            RuntimeFrozenPathPrefix.from_verified_case_selection(
+                case_selection=arbitrary_audit_selection,
+                market_source_snapshot=prefix.market_source_snapshot,
+                authority_fact_selections=prefix.authority_fact_selections,
+                frozen_at=prefix.frozen_at,
+            )
+
+    def test_complete_session_requires_source_sequence_start_proof(self) -> None:
+        fact = self.session_fact(
+            trading_day=date(2026, 9, 1),
+            collection_order=1,
+            source_order=1,
+            open_session_index=0,
+        )
+        with self.assertRaisesRegex(RuntimePathContractError, "start capability"):
+            self.prefix([fact], source_start_proof=False)
+
     def test_prefix_rejects_fact_known_after_freeze(self) -> None:
         fact = self.session_fact(
             trading_day=date(2026, 9, 1),
@@ -994,13 +1671,14 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
             interval_start=self.entry_time + timedelta(minutes=1),
         )
         prefix_with_point = self.prefix([fact, point])
+        tampered_binding = copy.copy(prefix_with_point.market_source_snapshot)
+        object.__setattr__(tampered_binding, "high_water_append_order", 0)
         with self.assertRaises(RuntimePathContractError):
-            replace(
-                prefix_with_point,
-                market_source_snapshot=replace(
-                    prefix_with_point.market_source_snapshot,
-                    high_water_append_order=0,
-                ),
+            RuntimeFrozenPathPrefix.from_verified_case_selection(
+                case_selection=prefix_with_point.case_selection,
+                market_source_snapshot=tampered_binding,
+                authority_fact_selections=prefix_with_point.authority_fact_selections,
+                frozen_at=prefix_with_point.frozen_at,
             )
 
     def test_market_closed_session_cannot_fabricate_open_state(self) -> None:
@@ -1083,7 +1761,7 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
                 source_time=self.entry_time + timedelta(seconds=1),
             )
 
-    def test_bar_and_tick_source_times_must_equal_interval_end(self) -> None:
+    def test_projected_bar_accepts_last_tick_before_interval_end(self) -> None:
         session = self.session_fact(
             trading_day=date(2026, 9, 1),
             collection_order=1,
@@ -1094,20 +1772,19 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
             collection_order=2,
             source_order=2,
             session_index=0,
-            interval_start=self.entry_time + timedelta(minutes=1),
+            interval_start=self.entry_time,
+            interval_end=self.entry_time + timedelta(minutes=1),
+            raw_source_time=self.entry_time + timedelta(seconds=57),
         )
         assert bar.path_observation is not None
-        with self.assertRaisesRegex(RuntimePathContractError, "source_time"):
-            replace(
-                bar.path_observation,
-                source_reference=replace(
-                    bar.path_observation.source_reference,
-                    source_time=bar.path_observation.interval_end - timedelta(seconds=1),
-                ),
-            )
+        self.assertIsNone(bar.path_observation.source_reference)
+        self.assertIsNotNone(bar.path_observation.projection_artifact_reference)
+        self.prefix([session, bar])
+
+    def test_tick_source_time_must_equal_point_time(self) -> None:
         tick = self.point_fact(
-            collection_order=3,
-            source_order=3,
+            collection_order=1,
+            source_order=1,
             session_index=0,
             interval_start=self.entry_time + timedelta(minutes=2),
             interval_end=self.entry_time + timedelta(minutes=2),
@@ -1117,7 +1794,8 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
             granularity=RuntimePathGranularity.TICK,
         )
         assert tick.path_observation is not None
-        with self.assertRaisesRegex(RuntimePathContractError, "source_time"):
+        assert tick.path_observation.source_reference is not None
+        with self.assertRaisesRegex(RuntimePathContractError, "trade-event member"):
             replace(
                 tick.path_observation,
                 source_reference=replace(
@@ -1125,7 +1803,6 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
                     source_time=tick.path_observation.interval_end - timedelta(seconds=1),
                 ),
             )
-        self.prefix([session, bar, tick])
 
     def test_bar_requires_exact_projection_lineage(self) -> None:
         session = self.session_fact(
@@ -1140,23 +1817,28 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
             session_index=0,
             interval_start=self.entry_time + timedelta(minutes=1),
         )
-        assert point.path_observation is not None
-        with self.assertRaisesRegex(RuntimePathContractError, "projection lineage"):
-            replace(point.path_observation, projection_lineage=None)
-        assert point.path_observation.projection_lineage is not None
-        rewritten = replace(
-            point.path_observation,
-            projection_lineage=replace(
-                point.path_observation.projection_lineage,
-                source_snapshot_id=_hash("later-source-snapshot"),
-            ),
+        prefix = self.prefix([session, point])
+        rebound_point = prefix.facts[1]
+        assert rebound_point.path_observation is not None
+        projection = rebound_point.path_observation.projection_artifact_reference
+        assert projection is not None
+        rewritten_lineage = replace(
+            projection.lineage,
+            source_snapshot_id=_hash("later-source-snapshot"),
+        )
+        rewritten_projection = replace(projection, lineage=rewritten_lineage)
+        rewritten_observation = replace(
+            rebound_point.path_observation,
+            projection_artifact_reference=rewritten_projection,
+        )
+        rewritten_fact = replace(
+            rebound_point,
+            path_observation=rewritten_observation,
         )
         with self.assertRaisesRegex(RuntimePathContractError, "frozen market"):
-            self.prefix(
-                [
-                    session,
-                    replace(point, path_observation=rewritten),
-                ]
+            self.refreeze_case(
+                prefix,
+                (prefix.facts[0], rewritten_fact),
             )
 
     def test_authority_facts_are_pit_bound_to_exact_stores(self) -> None:
@@ -1169,38 +1851,125 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
         assert fact.session_evidence is not None
         prefix = self.prefix([fact])
         stores = {
-            item.authority_store_id for item in prefix.authority_snapshot_bindings
+            item.snapshot.authority_store_id
+            for item in prefix.authority_fact_selections
         }
         self.assertEqual(len(stores), 2)
-        wrong_binding = replace(
-            prefix.authority_snapshot_bindings[0],
-            authority_store_id=_hash("wrong-authority-store"),
+        original = prefix.authority_fact_selections[0]
+        wrong_store_snapshot = copy.copy(original.snapshot)
+        object.__setattr__(
+            wrong_store_snapshot,
+            "authority_store_id",
+            _hash("wrong-authority-store"),
         )
-        with self.assertRaisesRegex(RuntimePathContractError, "exact frozen"):
-            replace(
-                prefix,
-                authority_snapshot_bindings=(
-                    wrong_binding,
-                    *prefix.authority_snapshot_bindings[1:],
+        wrong_store_selection = copy.copy(original)
+        object.__setattr__(wrong_store_selection, "snapshot", wrong_store_snapshot)
+        with self.assertRaisesRegex(RuntimePathContractError, "snapshot"):
+            RuntimeFrozenPathPrefix.from_verified_case_selection(
+                case_selection=prefix.case_selection,
+                market_source_snapshot=prefix.market_source_snapshot,
+                authority_fact_selections=(
+                    wrong_store_selection,
+                    *prefix.authority_fact_selections[1:],
                 ),
+                frozen_at=prefix.frozen_at,
             )
-        wrong_audit = replace(
-            prefix.authority_snapshot_bindings[0],
-            authority_audit_id=_hash("wrong-authority-audit"),
+        wrong_audit_snapshot = copy.copy(original.snapshot)
+        object.__setattr__(
+            wrong_audit_snapshot,
+            "authority_audit_id",
+            _hash("wrong-authority-audit"),
         )
-        with self.assertRaisesRegex(RuntimePathContractError, "exact frozen"):
-            replace(
-                prefix,
-                authority_snapshot_bindings=(
-                    wrong_audit,
-                    *prefix.authority_snapshot_bindings[1:],
+        wrong_audit_selection = copy.copy(original)
+        object.__setattr__(wrong_audit_selection, "snapshot", wrong_audit_snapshot)
+        with self.assertRaisesRegex(RuntimePathContractError, "snapshot"):
+            RuntimeFrozenPathPrefix.from_verified_case_selection(
+                case_selection=prefix.case_selection,
+                market_source_snapshot=prefix.market_source_snapshot,
+                authority_fact_selections=(
+                    wrong_audit_selection,
+                    *prefix.authority_fact_selections[1:],
                 ),
+                frozen_at=prefix.frozen_at,
             )
         with self.assertRaisesRegex(RuntimePathContractError, "calendar_reference"):
             replace(
                 fact.session_evidence,
                 calendar_reference=_hash("caller-only-fact"),
             )
+
+    def test_authority_member_and_future_audit_attacks_are_rejected(self) -> None:
+        fact = self.session_fact(
+            trading_day=date(2026, 9, 1),
+            collection_order=1,
+            source_order=1,
+            open_session_index=0,
+            open_session_state=RuntimeOpenSessionState.SUSPENDED,
+        )
+        prefix = self.prefix([fact])
+        rebound = prefix.facts[0]
+        assert rebound.session_evidence is not None
+        session = rebound.session_evidence
+        references = (
+            session.calendar_reference,
+            session.security_status_reference,
+        )
+        for reference in references:
+            assert reference is not None
+            attacked_reference = replace(
+                reference,
+                fact_payload_sha256=_hash(
+                    f"caller:{reference.authority_kind.value}"
+                ),
+            )
+            attacked_session = replace(
+                session,
+                calendar_reference=(
+                    attacked_reference
+                    if reference.authority_kind is RuntimeAuthorityKind.CALENDAR
+                    else session.calendar_reference
+                ),
+                security_status_reference=(
+                    attacked_reference
+                    if reference.authority_kind
+                    is RuntimeAuthorityKind.SECURITY_STATUS
+                    else session.security_status_reference
+                ),
+            )
+            attacked_fact = replace(rebound, session_evidence=attacked_session)
+            with self.subTest(kind=reference.authority_kind.value), self.assertRaisesRegex(
+                RuntimePathContractError,
+                "absent from its verified store selection",
+            ):
+                self.refreeze_case(prefix, (attacked_fact,))
+
+        future_selection = copy.copy(prefix.authority_fact_selections[0])
+        future_snapshot = copy.copy(future_selection.snapshot)
+        object.__setattr__(
+            future_snapshot,
+            "authority_audited_at",
+            prefix.frozen_at + timedelta(seconds=1),
+        )
+        object.__setattr__(future_selection, "snapshot", future_snapshot)
+        with self.assertRaises(RuntimePathContractError):
+            RuntimeFrozenPathPrefix.from_verified_case_selection(
+                case_selection=prefix.case_selection,
+                market_source_snapshot=prefix.market_source_snapshot,
+                authority_fact_selections=(
+                    future_selection,
+                    *prefix.authority_fact_selections[1:],
+                ),
+                frozen_at=prefix.frozen_at,
+            )
+        self.assertEqual(
+            len(
+                {
+                    item.snapshot.authority_store_id
+                    for item in prefix.authority_fact_selections
+                }
+            ),
+            3,
+        )
 
     def test_future_calendar_and_security_authority_are_rejected(self) -> None:
         calendar_fact = self.session_fact(
@@ -1267,6 +2036,33 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
 
 
 class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
+    def execution_binding_kwargs(self) -> dict[str, object]:
+        return {
+            "execution_source_store_id": _hash("execution-store"),
+            "execution_snapshot_id": _hash("execution-snapshot"),
+            "execution_audit_id": _hash("execution-audit"),
+            "execution_audited_at": self.entry_time + timedelta(seconds=10),
+            "execution_high_water_append_order": 100,
+            "execution_selection_id": _hash("execution-selection"),
+            "membership_verification_id": _hash("execution-membership"),
+        }
+
+    def evidence_reference(
+        self,
+        fact_id: str,
+        *,
+        source_append_order: int,
+        known_at: datetime,
+        fact_kind: str,
+    ) -> RuntimeExecutionEvidenceReference:
+        return RuntimeExecutionEvidenceReference(
+            fact_id=fact_id,
+            fact_kind=fact_kind,
+            source_append_order=source_append_order,
+            known_at=known_at,
+            membership_verification_id=_hash("execution-membership"),
+        )
+
     def fragment(
         self,
         *,
@@ -1284,6 +2080,8 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
             source_fact_id=_hash(
                 source_fact_label or f"execution:{execution_id}"
             ),
+            source_callback_id=_hash(f"callback:{execution_id}"),
+            source_append_order=seconds,
             side=RuntimeExecutionSide.BUY,
             timestamp=timestamp,
             durable_known_at=timestamp + timedelta(seconds=1),
@@ -1298,11 +2096,11 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
             side=RuntimeExecutionSide.BUY,
             requested_quantity=100,
             fragments=(),
+            **self.execution_binding_kwargs(),
             execution_stream_complete=True,
-            execution_stream_audit_id=_hash("execution-stream-audit"),
         )
 
-    def test_partial_fill_aggregation_is_not_stage4g_v3_finalizable(self) -> None:
+    def test_partial_fill_aggregation_is_not_structurally_projectable_to_stage4g_v3(self) -> None:
         summary = RuntimeExecutionSummary(
             intent_id=_hash("intent"),
             side=RuntimeExecutionSide.BUY,
@@ -1324,15 +2122,15 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
                 ),
             ),
             execution_stream_complete=True,
-            execution_stream_audit_id=_hash("execution-stream-audit"),
+            **self.execution_binding_kwargs(),
         )
         self.assertEqual(summary.completion, RuntimeFillCompletion.PARTIAL)
         self.assertEqual(summary.filled_quantity, 50)
         self.assertEqual(summary.quantity_weighted_price, Decimal("10.4"))
         self.assertEqual(summary.total_explicit_cost, Decimal(3))
-        self.assertFalse(summary.stage4g_v3_finalizable)
+        self.assertFalse(summary.structurally_projectable_to_stage4g_v3)
 
-    def test_complete_fill_aggregation_is_finalizable(self) -> None:
+    def test_complete_fill_aggregation_is_structurally_projectable(self) -> None:
         summary = RuntimeExecutionSummary(
             intent_id=_hash("intent"),
             side=RuntimeExecutionSide.BUY,
@@ -1354,10 +2152,10 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
                 ),
             ),
             execution_stream_complete=True,
-            execution_stream_audit_id=_hash("execution-stream-audit"),
+            **self.execution_binding_kwargs(),
         )
         self.assertEqual(summary.completion, RuntimeFillCompletion.COMPLETE)
-        self.assertTrue(summary.stage4g_v3_finalizable)
+        self.assertTrue(summary.structurally_projectable_to_stage4g_v3)
 
     def test_duplicate_execution_id_and_multi_leg_fail_closed(self) -> None:
         fragment = self.fragment(
@@ -1374,7 +2172,7 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
                 requested_quantity=100,
                 fragments=(fragment, fragment),
                 execution_stream_complete=True,
-                execution_stream_audit_id=_hash("execution-stream-audit"),
+                **self.execution_binding_kwargs(),
             )
         with self.assertRaises(RuntimePathContractError) as caught:
             RuntimeExecutionSummary(
@@ -1383,7 +2181,7 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
                 requested_quantity=100,
                 fragments=(),
                 execution_stream_complete=True,
-                execution_stream_audit_id=_hash("execution-stream-audit"),
+                **self.execution_binding_kwargs(),
                 native_multi_leg=True,
             )
         self.assertEqual(caught.exception.code, "NATIVE_MULTI_LEG_UNSUPPORTED")
@@ -1391,15 +2189,17 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
     def test_complete_execution_stream_requires_audit_identity(self) -> None:
         with self.assertRaisesRegex(
             RuntimePathContractError,
-            "audit identity",
+            "execution_audit_id",
         ):
+            bindings = self.execution_binding_kwargs()
+            bindings["execution_audit_id"] = "caller-asserted"
             RuntimeExecutionSummary(
                 intent_id=_hash("intent"),
                 side=RuntimeExecutionSide.BUY,
                 requested_quantity=100,
                 fragments=(),
                 execution_stream_complete=True,
-                execution_stream_audit_id=None,
+                **bindings,
             )
 
     def test_one_source_fact_cannot_produce_multiple_fragments(self) -> None:
@@ -1426,8 +2226,89 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
                 requested_quantity=100,
                 fragments=(first, second),
                 execution_stream_complete=True,
-                execution_stream_audit_id=_hash("execution-stream-audit"),
+                **self.execution_binding_kwargs(),
             )
+
+    def test_duplicate_callback_cannot_hide_behind_another_source_fact(self) -> None:
+        first = self.fragment(
+            execution_id="exec-1",
+            quantity=10,
+            price="10",
+            cost="1",
+            seconds=1,
+        )
+        second = self.fragment(
+            execution_id="exec-2",
+            quantity=10,
+            price="10",
+            cost="1",
+            seconds=2,
+        )
+        second = replace(second, source_callback_id=first.source_callback_id)
+        with self.assertRaisesRegex(RuntimePathContractError, "one execution callback"):
+            RuntimeExecutionSummary(
+                intent_id=_hash("intent"),
+                side=RuntimeExecutionSide.BUY,
+                requested_quantity=100,
+                fragments=(first, second),
+                execution_stream_complete=True,
+                **self.execution_binding_kwargs(),
+            )
+
+    def test_arbitrary_audit_hash_does_not_claim_verified_execution(self) -> None:
+        summary = self.zero_fill_summary()
+        altered = replace(summary, execution_audit_id=_hash("caller-audit"))
+        self.assertNotEqual(summary.summary_id, altered.summary_id)
+        self.assertNotIn("verified", altered.as_dict())
+        self.assertNotIn("finalizable", altered.as_dict())
+
+    def test_late_reason_facts_cannot_explain_earlier_no_entry(self) -> None:
+        for reason, fact_kind, keyword in (
+            (RuntimeNoEntryReason.USER_CANCELLED, "USER_CANCELLATION", "cancellation_fact_id"),
+            (RuntimeNoEntryReason.ORDER_REJECTED, "ORDER_REJECTION", "rejection_fact_id"),
+        ):
+            fact_id = _hash(f"late:{reason.value}")
+            decided_at = self.entry_time + timedelta(minutes=5)
+            references = (
+                self.evidence_reference(
+                    fact_id,
+                    source_append_order=2,
+                    known_at=decided_at + timedelta(seconds=1),
+                    fact_kind=fact_kind,
+                ),
+            )
+            reason_kwargs: dict[str, object] = {keyword: fact_id}
+            if reason is RuntimeNoEntryReason.USER_CANCELLED:
+                authentication = _hash("actor-authentication")
+                references = (
+                    self.evidence_reference(
+                        authentication,
+                        source_append_order=1,
+                        known_at=self.entry_time + timedelta(minutes=1),
+                        fact_kind="ACTOR_AUTHENTICATION",
+                    ),
+                    *references,
+                )
+                reason_kwargs.update(
+                    actor_id="local-user",
+                    actor_authentication_fact_id=authentication,
+                )
+            with self.subTest(reason=reason.value), self.assertRaisesRegex(
+                RuntimePathContractError,
+                "predates its execution evidence",
+            ):
+                RuntimeNoEntryEvidence(
+                    reason=reason,
+                    execution_summary=self.zero_fill_summary(),
+                    entry_window_start=self.entry_time,
+                    entry_window_end=self.entry_time + timedelta(hours=1),
+                    decided_at=decided_at,
+                    execution_policy_id=_hash("policy"),
+                    evidence_references=references,
+                    evidence_ids=tuple(item.fact_id for item in references),
+                    entry_window_coverage_complete=False,
+                    **reason_kwargs,
+                )
 
     def test_entry_expired_requires_complete_zero_fill_window(self) -> None:
         coverage_fact = _hash("entry-window-coverage")
@@ -1438,6 +2319,14 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
             entry_window_end=self.entry_time + timedelta(hours=1),
             decided_at=self.entry_time + timedelta(hours=1),
             execution_policy_id=_hash("policy"),
+            evidence_references=(
+                self.evidence_reference(
+                    coverage_fact,
+                    source_append_order=1,
+                    known_at=self.entry_time + timedelta(minutes=1),
+                    fact_kind="ENTRY_WINDOW_COVERAGE",
+                ),
+            ),
             evidence_ids=(coverage_fact,),
             entry_window_coverage_complete=True,
             entry_window_coverage_fact_id=coverage_fact,
@@ -1451,6 +2340,7 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
                 entry_window_end=self.entry_time + timedelta(hours=1),
                 decided_at=self.entry_time + timedelta(minutes=30),
                 execution_policy_id=_hash("policy"),
+                evidence_references=(),
                 evidence_ids=(),
                 entry_window_coverage_complete=False,
             )
@@ -1465,6 +2355,20 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
             entry_window_end=self.entry_time + timedelta(hours=1),
             decided_at=self.entry_time + timedelta(minutes=10),
             execution_policy_id=_hash("policy"),
+            evidence_references=(
+                self.evidence_reference(
+                    authentication,
+                    source_append_order=1,
+                    known_at=self.entry_time + timedelta(minutes=1),
+                    fact_kind="ACTOR_AUTHENTICATION",
+                ),
+                self.evidence_reference(
+                    cancellation,
+                    source_append_order=2,
+                    known_at=self.entry_time + timedelta(minutes=5),
+                    fact_kind="USER_CANCELLATION",
+                ),
+            ),
             evidence_ids=(authentication, cancellation),
             entry_window_coverage_complete=False,
             actor_id="local-user",
@@ -1479,6 +2383,14 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
                 entry_window_end=self.entry_time + timedelta(hours=1),
                 decided_at=self.entry_time + timedelta(minutes=10),
                 execution_policy_id=_hash("policy"),
+                evidence_references=(
+                    self.evidence_reference(
+                        cancellation,
+                        source_append_order=1,
+                        known_at=self.entry_time + timedelta(minutes=5),
+                        fact_kind="USER_CANCELLATION",
+                    ),
+                ),
                 evidence_ids=(cancellation,),
                 entry_window_coverage_complete=False,
                 cancellation_fact_id=cancellation,
@@ -1494,6 +2406,14 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
             entry_window_end=self.entry_time + timedelta(hours=1),
             decided_at=self.entry_time + timedelta(minutes=1),
             execution_policy_id=_hash("policy"),
+            evidence_references=(
+                self.evidence_reference(
+                    rejection,
+                    source_append_order=1,
+                    known_at=self.entry_time + timedelta(seconds=20),
+                    fact_kind="ORDER_REJECTION",
+                ),
+            ),
             evidence_ids=(rejection,),
             entry_window_coverage_complete=False,
             rejection_fact_id=rejection,
@@ -1505,6 +2425,14 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
             entry_window_end=self.entry_time + timedelta(hours=1),
             decided_at=self.entry_time + timedelta(minutes=1),
             execution_policy_id=_hash("policy"),
+            evidence_references=(
+                self.evidence_reference(
+                    invalidity,
+                    source_append_order=1,
+                    known_at=self.entry_time + timedelta(seconds=20),
+                    fact_kind="DATA_INVALIDITY",
+                ),
+            ),
             evidence_ids=(invalidity,),
             entry_window_coverage_complete=False,
             data_invalidity_fact_id=invalidity,
@@ -1517,6 +2445,14 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
                 entry_window_end=self.entry_time + timedelta(hours=1),
                 decided_at=self.entry_time + timedelta(minutes=1),
                 execution_policy_id=_hash("policy"),
+                evidence_references=(
+                    self.evidence_reference(
+                        rejection,
+                        source_append_order=1,
+                        known_at=self.entry_time + timedelta(seconds=20),
+                        fact_kind="ORDER_REJECTION",
+                    ),
+                ),
                 evidence_ids=(rejection,),
                 entry_window_coverage_complete=False,
                 rejection_fact_id=rejection,
@@ -1528,8 +2464,8 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
             side=RuntimeExecutionSide.BUY,
             requested_quantity=100,
             fragments=(),
+            **self.execution_binding_kwargs(),
             execution_stream_complete=False,
-            execution_stream_audit_id=None,
         )
         with self.assertRaises(RuntimePathContractError):
             RuntimeNoEntryEvidence(
@@ -1539,6 +2475,7 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
                 entry_window_end=self.entry_time + timedelta(hours=1),
                 decided_at=self.entry_time + timedelta(hours=1),
                 execution_policy_id=_hash("policy"),
+                evidence_references=(),
                 evidence_ids=(),
                 entry_window_coverage_complete=True,
             )

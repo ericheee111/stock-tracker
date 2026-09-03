@@ -42,6 +42,7 @@ class TestSourceDistribution(unittest.TestCase):
             "stock_tracker/collector/free_stockdb.py",
             "stock_tracker/collector/hithink_finance.py",
             "stock_tracker/collector/tencent.py",
+            "stock_tracker/core/market_time.py",
             "stock_tracker/quant/core/big_trend.py",
             "stock_tracker/quant/core/classification.py",
             "stock_tracker/quant/core/corporate_actions.py",

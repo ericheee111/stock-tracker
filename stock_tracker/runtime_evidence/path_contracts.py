@@ -16,12 +16,20 @@ from stock_tracker.core.market_time import (
     market_session_date,
 )
 from stock_tracker.core.types import Market
+from stock_tracker.runtime_evidence.source_snapshot_contracts import (
+    MARKET_EVENT_INTERVAL_BOUNDARY_POLICY_V1,
+    MARKET_EVENT_SEQUENCE_POLICY_V1,
+    MarketEventSelection,
+    MarketEventSelectionVerification,
+    MarketEventSourceRecord,
+)
 
-RUNTIME_PATH_CONTRACT_SCHEMA = "stage4g1-runtime-path-contract-v2"
-RUNTIME_PATH_PREFIX_SCHEMA = "stage4g1-runtime-path-prefix-v2"
-RUNTIME_PATH_RESOLUTION_SCHEMA = "stage4g1-runtime-path-resolution-v1"
-RUNTIME_NO_ENTRY_SCHEMA = "stage4g1-runtime-no-entry-evidence-v1"
-RUNTIME_EXECUTION_SUMMARY_SCHEMA = "stage4g1-runtime-execution-summary-v2"
+RUNTIME_PATH_CONTRACT_SCHEMA = "stage4g1-runtime-path-contract-v3"
+RUNTIME_PATH_PREFIX_SCHEMA = "stage4g1-runtime-path-prefix-v3"
+RUNTIME_PATH_RESOLUTION_SCHEMA = "stage4g1-runtime-path-resolution-v2"
+RUNTIME_NO_ENTRY_SCHEMA = "stage4g1-runtime-no-entry-evidence-v2"
+RUNTIME_EXECUTION_SUMMARY_SCHEMA = "stage4g1-runtime-execution-summary-v3"
+RUNTIME_INTERVAL_BOUNDARY_POLICY_V1 = MARKET_EVENT_INTERVAL_BOUNDARY_POLICY_V1
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MAX_TEXT = 4096
@@ -255,10 +263,46 @@ def _hash_document(document: dict[str, Any]) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _ohlc_output_hash(
+    *,
+    symbol: str,
+    market: Market,
+    interval_start: datetime,
+    interval_end: datetime,
+    high: Decimal,
+    low: Decimal,
+    close: Decimal,
+) -> str:
+    return _hash_document(
+        {
+            "schema": "stage4g1-runtime-projection-ohlc-output-v1",
+            "symbol": symbol,
+            "market": market.value,
+            "interval_start": _utc_text(interval_start),
+            "interval_end": _utc_text(interval_end),
+            "high": _decimal_text(high),
+            "low": _decimal_text(low),
+            "close": _decimal_text(close),
+        }
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeSourceReference:
     source_store_id: str
+    source_snapshot_id: str
+    source_audit_id: str
+    source_high_water_append_order: int
+    finding_set_digest: str
+    sequence_policy_id: str
+    selection_id: str
+    event_id: str
     source_session_id: str
+    symbol: str
+    market: Market
+    event_type: str
+    trading_day: date
+    session_label_policy_id: str
     source_record_id: str
     source_append_order: int
     source_record_hash: str
@@ -271,6 +315,28 @@ class RuntimeSourceReference:
     source_reference_id: str = field(init=False)
 
     def __post_init__(self) -> None:
+        _require_sha256(self.source_store_id, "source_store_id")
+        _require_sha256(self.source_snapshot_id, "source_snapshot_id")
+        _require_sha256(self.source_audit_id, "source_audit_id")
+        high_water = _require_int(
+            self.source_high_water_append_order,
+            "source_high_water_append_order",
+        )
+        _require_sha256(self.finding_set_digest, "finding_set_digest")
+        if self.sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V1:
+            raise RuntimePathContractError(
+                "unsupported market-event sequence policy"
+            )
+        _require_sha256(self.selection_id, "selection_id")
+        _require_sha256(self.event_id, "event_id")
+        market = _require_market(self.market)
+        _require_symbol(self.symbol, market)
+        _require_text(self.event_type, "event_type", maximum=128)
+        _require_date(self.trading_day, "trading_day")
+        if self.session_label_policy_id != MARKET_SESSION_LABEL_POLICY_V1:
+            raise RuntimePathContractError(
+                "unsupported market session label policy"
+            )
         source_time = _require_utc(self.source_time, "source_time")
         received_at = _require_utc(self.received_at, "received_at")
         durable_known_at = _require_utc(self.durable_known_at, "durable_known_at")
@@ -281,10 +347,17 @@ class RuntimeSourceReference:
         object.__setattr__(self, "source_time", source_time)
         object.__setattr__(self, "received_at", received_at)
         object.__setattr__(self, "durable_known_at", durable_known_at)
-        _require_sha256(self.source_store_id, "source_store_id")
         _require_text(self.source_session_id, "source_session_id", maximum=256)
         _require_sha256(self.source_record_id, "source_record_id")
-        _require_int(self.source_append_order, "source_append_order", minimum=1)
+        append_order = _require_int(
+            self.source_append_order,
+            "source_append_order",
+            minimum=1,
+        )
+        if append_order > high_water:
+            raise RuntimePathContractError(
+                "source member exceeds its selection high-water"
+            )
         _require_sha256(self.source_record_hash, "source_record_hash")
         _require_sha256(self.raw_payload_sha256, "raw_payload_sha256")
         _require_text(self.parser_id, "parser_id", maximum=256)
@@ -295,11 +368,68 @@ class RuntimeSourceReference:
             _hash_document(self.as_dict(include_id=False)),
         )
 
+    @classmethod
+    def from_verified_selection(
+        cls,
+        *,
+        record: MarketEventSourceRecord,
+        selection: MarketEventSelection,
+        verification: MarketEventSelectionVerification,
+    ) -> RuntimeSourceReference:
+        if (
+            type(record) is not MarketEventSourceRecord
+            or type(selection) is not MarketEventSelection
+            or type(verification) is not MarketEventSelectionVerification
+            or verification.selection_id != selection.selection_id
+            or verification.snapshot_id != selection.snapshot_id
+            or record not in selection.records
+        ):
+            raise RuntimePathContractError(
+                "runtime source member requires an exact verified Selection"
+            )
+        return cls(
+            source_store_id=record.source_store_id,
+            source_snapshot_id=selection.snapshot_id,
+            source_audit_id=selection.snapshot_audit_id,
+            source_high_water_append_order=selection.snapshot_high_water_append_order,
+            finding_set_digest=selection.snapshot_finding_set_digest,
+            sequence_policy_id=selection.sequence_policy_id,
+            selection_id=selection.selection_id,
+            event_id=record.event_id,
+            source_session_id=record.session_id,
+            symbol=record.symbol,
+            market=record.market,
+            event_type=record.event_type,
+            trading_day=record.trading_day,
+            session_label_policy_id=record.session_label_policy_id,
+            source_record_id=record.source_record_id,
+            source_append_order=record.append_order,
+            source_record_hash=record.record_content_hash,
+            raw_payload_sha256=record.raw_payload_sha256,
+            parser_id=record.parser_id,
+            schema_id=record.source_schema_id,
+            source_time=record.source_time,
+            received_at=record.received_at,
+            durable_known_at=record.durable_known_at,
+        )
+
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-runtime-source-reference-v1",
+            "schema": "stage4g1-runtime-source-reference-v2",
             "source_store_id": self.source_store_id,
+            "source_snapshot_id": self.source_snapshot_id,
+            "source_audit_id": self.source_audit_id,
+            "source_high_water_append_order": self.source_high_water_append_order,
+            "finding_set_digest": self.finding_set_digest,
+            "sequence_policy_id": self.sequence_policy_id,
+            "selection_id": self.selection_id,
+            "event_id": self.event_id,
             "source_session_id": self.source_session_id,
+            "symbol": self.symbol,
+            "market": self.market.value,
+            "event_type": self.event_type,
+            "trading_day": self.trading_day.isoformat(),
+            "session_label_policy_id": self.session_label_policy_id,
             "source_record_id": self.source_record_id,
             "source_append_order": self.source_append_order,
             "source_record_hash": self.source_record_hash,
@@ -319,8 +449,6 @@ class RuntimeSourceReference:
 class RuntimeAuthorityFactReference:
     authority_kind: RuntimeAuthorityKind
     authority_store_id: str
-    authority_audit_id: str
-    fact_id: str
     fact_schema: str
     effective_session_date: date
     known_at: datetime
@@ -328,6 +456,9 @@ class RuntimeAuthorityFactReference:
     source: str
     revision: int
     policy_id: str
+    fact_payload_sha256: str
+    fact_record_hash: str = field(init=False)
+    fact_id: str = field(init=False)
     authority_reference_id: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -336,8 +467,6 @@ class RuntimeAuthorityFactReference:
                 "authority_kind must be RuntimeAuthorityKind"
             )
         _require_sha256(self.authority_store_id, "authority_store_id")
-        _require_sha256(self.authority_audit_id, "authority_audit_id")
-        _require_sha256(self.fact_id, "fact_id")
         _require_text(self.fact_schema, "fact_schema", maximum=256)
         _require_date(self.effective_session_date, "effective_session_date")
         known_at = _require_utc(self.known_at, "known_at")
@@ -349,19 +478,36 @@ class RuntimeAuthorityFactReference:
         _require_text(self.source, "source", maximum=256)
         _require_int(self.revision, "revision", minimum=1)
         _require_sha256(self.policy_id, "policy_id")
+        _require_sha256(self.fact_payload_sha256, "fact_payload_sha256")
+        object.__setattr__(
+            self,
+            "fact_record_hash",
+            _hash_document(self.fact_document()),
+        )
+        object.__setattr__(
+            self,
+            "fact_id",
+            _hash_document(
+                {
+                    "schema": "stage4g1-runtime-authority-fact-id-v1",
+                    "authority_kind": self.authority_kind.value,
+                    "authority_store_id": self.authority_store_id,
+                    "revision": self.revision,
+                    "fact_record_hash": self.fact_record_hash,
+                }
+            ),
+        )
         object.__setattr__(
             self,
             "authority_reference_id",
             _hash_document(self.as_dict(include_id=False)),
         )
 
-    def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
-        document = {
-            "schema": "stage4g1-runtime-authority-fact-reference-v1",
+    def fact_document(self) -> dict[str, Any]:
+        return {
+            "schema": "stage4g1-runtime-authority-canonical-fact-v1",
             "authority_kind": self.authority_kind.value,
             "authority_store_id": self.authority_store_id,
-            "authority_audit_id": self.authority_audit_id,
-            "fact_id": self.fact_id,
             "fact_schema": self.fact_schema,
             "effective_session_date": self.effective_session_date.isoformat(),
             "known_at": _utc_text(self.known_at),
@@ -369,48 +515,218 @@ class RuntimeAuthorityFactReference:
             "source": self.source,
             "revision": self.revision,
             "policy_id": self.policy_id,
+            "fact_payload_sha256": self.fact_payload_sha256,
+        }
+
+    def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
+        document = {
+            "schema": "stage4g1-runtime-authority-fact-reference-v2",
+            "fact": self.fact_document(),
+            "fact_record_hash": self.fact_record_hash,
+            "fact_id": self.fact_id,
         }
         if include_id:
             document["authority_reference_id"] = self.authority_reference_id
         return document
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class RuntimeAuthoritySnapshotBinding:
     authority_kind: RuntimeAuthorityKind
     authority_store_id: str
     authority_audit_id: str
+    authority_audited_at: datetime
     high_water_revision: int
-    authority_snapshot_id: str = field(init=False)
+    fact_count: int
+    fact_manifest_digest: str
+    authority_snapshot_id: str
 
-    def __post_init__(self) -> None:
-        if type(self.authority_kind) is not RuntimeAuthorityKind:
+    def __init__(self) -> None:
+        raise TypeError(
+            "RuntimeAuthoritySnapshotBinding requires an exact fact inventory"
+        )
+
+    @classmethod
+    def from_facts(
+        cls,
+        *,
+        authority_kind: RuntimeAuthorityKind,
+        authority_store_id: str,
+        authority_audited_at: datetime,
+        facts: tuple[RuntimeAuthorityFactReference, ...],
+    ) -> RuntimeAuthoritySnapshotBinding:
+        if type(authority_kind) is not RuntimeAuthorityKind:
             raise RuntimePathContractError(
                 "authority_kind must be RuntimeAuthorityKind"
             )
-        _require_sha256(self.authority_store_id, "authority_store_id")
-        _require_sha256(self.authority_audit_id, "authority_audit_id")
-        _require_int(self.high_water_revision, "high_water_revision", minimum=1)
+        _require_sha256(authority_store_id, "authority_store_id")
+        audited_at = _require_utc(authority_audited_at, "authority_audited_at")
+        if type(facts) is not tuple or not facts or any(
+            type(item) is not RuntimeAuthorityFactReference
+            or item.authority_kind is not authority_kind
+            or item.authority_store_id != authority_store_id
+            or item.known_at > audited_at
+            or item.usable_from > audited_at
+            for item in facts
+        ):
+            raise RuntimePathContractError(
+                "authority snapshot facts are invalid or future-known"
+            )
+        ordered = tuple(sorted(facts, key=lambda item: (item.revision, item.fact_id)))
+        if ordered != facts or len({item.revision for item in facts}) != len(facts):
+            raise RuntimePathContractError(
+                "authority facts must have unique canonically ordered revisions"
+            )
+        chain = "0" * 64
+        for fact in facts:
+            chain = _hash_document(
+                {
+                    "schema": "stage4g1-runtime-authority-fact-manifest-node-v1",
+                    "previous": chain,
+                    "fact_id": fact.fact_id,
+                    "fact_record_hash": fact.fact_record_hash,
+                    "revision": fact.revision,
+                }
+            )
+        fact_manifest_digest = _hash_document(
+            {
+                "schema": "stage4g1-runtime-authority-fact-manifest-root-v1",
+                "fact_count": len(facts),
+                "chain_head": chain,
+            }
+        )
+        audit_document = {
+            "schema": "stage4g1-runtime-authority-audit-v1",
+            "authority_kind": authority_kind.value,
+            "authority_store_id": authority_store_id,
+            "authority_audited_at": _utc_text(audited_at),
+            "high_water_revision": max(item.revision for item in facts),
+            "fact_count": len(facts),
+            "fact_manifest_digest": fact_manifest_digest,
+        }
+        self = object.__new__(cls)
+        for name, value in {
+            "authority_kind": authority_kind,
+            "authority_store_id": authority_store_id,
+            "authority_audit_id": _hash_document(audit_document),
+            "authority_audited_at": audited_at,
+            "high_water_revision": max(item.revision for item in facts),
+            "fact_count": len(facts),
+            "fact_manifest_digest": fact_manifest_digest,
+        }.items():
+            object.__setattr__(self, name, value)
         object.__setattr__(
             self,
             "authority_snapshot_id",
             _hash_document(self.as_dict(include_id=False)),
         )
+        return self
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-runtime-authority-snapshot-binding-v1",
+            "schema": "stage4g1-runtime-authority-snapshot-binding-v2",
             "authority_kind": self.authority_kind.value,
             "authority_store_id": self.authority_store_id,
             "authority_audit_id": self.authority_audit_id,
+            "authority_audited_at": _utc_text(self.authority_audited_at),
             "high_water_revision": self.high_water_revision,
+            "fact_count": self.fact_count,
+            "fact_manifest_digest": self.fact_manifest_digest,
         }
         if include_id:
             document["authority_snapshot_id"] = self.authority_snapshot_id
         return document
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
+class RuntimeAuthorityFactSelection:
+    snapshot: RuntimeAuthoritySnapshotBinding
+    facts: tuple[RuntimeAuthorityFactReference, ...]
+    selection_policy_id: str
+    verification_mode: str
+    selection_id: str
+
+    def __init__(self) -> None:
+        raise TypeError(
+            "RuntimeAuthorityFactSelection requires exact snapshot verification"
+        )
+
+    @classmethod
+    def from_verified_snapshot(
+        cls,
+        *,
+        snapshot: RuntimeAuthoritySnapshotBinding,
+        facts: tuple[RuntimeAuthorityFactReference, ...],
+        selection_policy_id: str,
+    ) -> RuntimeAuthorityFactSelection:
+        if type(snapshot) is not RuntimeAuthoritySnapshotBinding:
+            raise RuntimePathContractError(
+                "authority selection requires RuntimeAuthoritySnapshotBinding"
+            )
+        _require_sha256(selection_policy_id, "selection_policy_id")
+        expected = RuntimeAuthoritySnapshotBinding.from_facts(
+            authority_kind=snapshot.authority_kind,
+            authority_store_id=snapshot.authority_store_id,
+            authority_audited_at=snapshot.authority_audited_at,
+            facts=facts,
+        )
+        if expected != snapshot:
+            raise RuntimePathContractError(
+                "authority fact inventory disagrees with the exact snapshot"
+            )
+        self = object.__new__(cls)
+        for name, value in {
+            "snapshot": snapshot,
+            "facts": facts,
+            "selection_policy_id": selection_policy_id,
+            "verification_mode": "FULL_PREFIX_RESCAN",
+        }.items():
+            object.__setattr__(self, name, value)
+        object.__setattr__(
+            self,
+            "selection_id",
+            _hash_document(self.as_dict(include_id=False)),
+        )
+        return self
+
+    def contains(self, reference: RuntimeAuthorityFactReference) -> bool:
+        return any(
+            item.fact_id == reference.fact_id
+            and item.fact_record_hash == reference.fact_record_hash
+            for item in self.facts
+        )
+
+    def verify(self) -> None:
+        expected_snapshot = RuntimeAuthoritySnapshotBinding.from_facts(
+            authority_kind=self.snapshot.authority_kind,
+            authority_store_id=self.snapshot.authority_store_id,
+            authority_audited_at=self.snapshot.authority_audited_at,
+            facts=self.facts,
+        )
+        if expected_snapshot != self.snapshot or self.verification_mode != "FULL_PREFIX_RESCAN":
+            raise RuntimePathContractError(
+                "authority fact selection no longer matches its exact snapshot"
+            )
+        if self.selection_id != _hash_document(self.as_dict(include_id=False)):
+            raise RuntimePathContractError("authority fact selection identity mismatch")
+
+    def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
+        document = {
+            "schema": "stage4g1-runtime-authority-fact-selection-v1",
+            "snapshot": self.snapshot.as_dict(),
+            "selection_policy_id": self.selection_policy_id,
+            "verification_mode": self.verification_mode,
+            "ordered_fact_ids": [item.fact_id for item in self.facts],
+            "ordered_fact_record_hashes": [
+                item.fact_record_hash for item in self.facts
+            ],
+        }
+        if include_id:
+            document["selection_id"] = self.selection_id
+        return document
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class RuntimeMarketSourceSnapshotBinding:
     source_store_id: str
     source_snapshot_id: str
@@ -418,30 +734,102 @@ class RuntimeMarketSourceSnapshotBinding:
     high_water_append_order: int
     finding_set_digest: str
     sequence_policy_id: str
-    source_snapshot_binding_id: str = field(init=False)
+    selection: MarketEventSelection
+    selection_verification: MarketEventSelectionVerification
+    source_snapshot_binding_id: str
 
-    def __post_init__(self) -> None:
-        _require_sha256(self.source_store_id, "source_store_id")
-        _require_sha256(self.source_snapshot_id, "source_snapshot_id")
-        _require_sha256(self.source_audit_id, "source_audit_id")
-        _require_int(self.high_water_append_order, "high_water_append_order")
-        _require_sha256(self.finding_set_digest, "finding_set_digest")
-        _require_text(self.sequence_policy_id, "sequence_policy_id", maximum=256)
+    def __init__(self) -> None:
+        raise TypeError(
+            "RuntimeMarketSourceSnapshotBinding requires a verified Selection"
+        )
+
+    @classmethod
+    def from_verified_selection(
+        cls,
+        *,
+        selection: MarketEventSelection,
+        verification: MarketEventSelectionVerification,
+    ) -> RuntimeMarketSourceSnapshotBinding:
+        if (
+            type(selection) is not MarketEventSelection
+            or type(verification) is not MarketEventSelectionVerification
+            or verification.selection_id != selection.selection_id
+            or verification.selection_commitment_id
+            != selection.commitment.commitment_id
+            or verification.membership_witness_id
+            != selection.membership_witness.witness_id
+            or verification.snapshot_id != selection.snapshot_id
+            or verification.snapshot_audit_id != selection.snapshot_audit_id
+            or verification.snapshot_high_water_append_order
+            != selection.snapshot_high_water_append_order
+        ):
+            raise RuntimePathContractError(
+                "market source binding requires exact selection verification"
+            )
+        if selection.sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V1:
+            raise RuntimePathContractError(
+                "unsupported market-event sequence policy"
+            )
+        self = object.__new__(cls)
+        for name, value in {
+            "source_store_id": selection.source_store_id,
+            "source_snapshot_id": selection.snapshot_id,
+            "source_audit_id": selection.snapshot_audit_id,
+            "high_water_append_order": selection.snapshot_high_water_append_order,
+            "finding_set_digest": selection.snapshot_finding_set_digest,
+            "sequence_policy_id": selection.sequence_policy_id,
+            "selection": selection,
+            "selection_verification": verification,
+        }.items():
+            object.__setattr__(self, name, value)
         object.__setattr__(
             self,
             "source_snapshot_binding_id",
             _hash_document(self.as_dict(include_id=False)),
         )
+        return self
+
+    def verify(self) -> None:
+        selection = self.selection
+        verification = self.selection_verification
+        selection._validate_contents()
+        if (
+            self.source_store_id != selection.source_store_id
+            or self.source_snapshot_id != selection.snapshot_id
+            or self.source_audit_id != selection.snapshot_audit_id
+            or self.high_water_append_order
+            != selection.snapshot_high_water_append_order
+            or self.finding_set_digest != selection.snapshot_finding_set_digest
+            or self.sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V1
+            or verification.selection_id != selection.selection_id
+            or verification.selection_commitment_id
+            != selection.commitment.commitment_id
+            or verification.membership_witness_id
+            != selection.membership_witness.witness_id
+            or verification.snapshot_id != selection.snapshot_id
+            or verification.snapshot_audit_id != selection.snapshot_audit_id
+            or verification.snapshot_high_water_append_order
+            != selection.snapshot_high_water_append_order
+            or self.source_snapshot_binding_id
+            != _hash_document(self.as_dict(include_id=False))
+        ):
+            raise RuntimePathContractError(
+                "market source binding no longer matches its verified Selection"
+            )
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-runtime-market-source-snapshot-binding-v1",
+            "schema": "stage4g1-runtime-market-source-snapshot-binding-v2",
             "source_store_id": self.source_store_id,
             "source_snapshot_id": self.source_snapshot_id,
             "source_audit_id": self.source_audit_id,
             "high_water_append_order": self.high_water_append_order,
             "finding_set_digest": self.finding_set_digest,
             "sequence_policy_id": self.sequence_policy_id,
+            "selection_id": self.selection.selection_id,
+            "selection_commitment_id": self.selection.commitment.commitment_id,
+            "selection_membership_witness_id": self.selection.membership_witness.witness_id,
+            "selection_verification_id": self.selection_verification.verification_id,
         }
         if include_id:
             document["source_snapshot_binding_id"] = self.source_snapshot_binding_id
@@ -456,9 +844,13 @@ class RuntimeProjectionLineage:
     source_audit_id: str
     source_high_water_append_order: int
     finding_set_digest: str
+    selection_id: str
+    selection_verification_id: str
     interval_start: datetime
     interval_end: datetime
+    interval_boundary_policy_id: str
     coverage_fact_id: str
+    input_event_ids: tuple[str, ...]
     input_source_append_orders: tuple[int, ...]
     input_source_record_ids: tuple[str, ...]
     input_source_record_hashes: tuple[str, ...]
@@ -474,6 +866,11 @@ class RuntimeProjectionLineage:
             "source_high_water_append_order",
         )
         _require_sha256(self.finding_set_digest, "finding_set_digest")
+        _require_sha256(self.selection_id, "selection_id")
+        _require_sha256(
+            self.selection_verification_id,
+            "selection_verification_id",
+        )
         start = _require_utc(self.interval_start, "interval_start")
         end = _require_utc(self.interval_end, "interval_end")
         if end <= start:
@@ -482,7 +879,18 @@ class RuntimeProjectionLineage:
             )
         object.__setattr__(self, "interval_start", start)
         object.__setattr__(self, "interval_end", end)
+        if self.interval_boundary_policy_id != RUNTIME_INTERVAL_BOUNDARY_POLICY_V1:
+            raise RuntimePathContractError(
+                "unsupported runtime interval boundary policy"
+            )
         _require_sha256(self.coverage_fact_id, "coverage_fact_id")
+        if type(self.input_event_ids) is not tuple or any(
+            type(item) is not str or _SHA256.fullmatch(item) is None
+            for item in self.input_event_ids
+        ):
+            raise RuntimePathContractError(
+                "projection input event IDs must be SHA-256 tuples"
+            )
         if type(self.input_source_append_orders) is not tuple or not self.input_source_append_orders:
             raise RuntimePathContractError("projection input append orders are required")
         orders = tuple(
@@ -513,6 +921,7 @@ class RuntimeProjectionLineage:
             )
         if not (
             len(orders)
+            == len(self.input_event_ids)
             == len(self.input_source_record_ids)
             == len(self.input_source_record_hashes)
         ):
@@ -521,6 +930,8 @@ class RuntimeProjectionLineage:
             )
         if len(set(self.input_source_record_ids)) != len(orders):
             raise RuntimePathContractError("projection input record IDs must be unique")
+        if len(set(self.input_event_ids)) != len(orders):
+            raise RuntimePathContractError("projection input event IDs must be unique")
         object.__setattr__(
             self,
             "projection_lineage_id",
@@ -529,22 +940,163 @@ class RuntimeProjectionLineage:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-runtime-projection-lineage-v1",
+            "schema": "stage4g1-runtime-projection-lineage-v2",
             "projection_policy_id": self.projection_policy_id,
             "source_store_id": self.source_store_id,
             "source_snapshot_id": self.source_snapshot_id,
             "source_audit_id": self.source_audit_id,
             "source_high_water_append_order": self.source_high_water_append_order,
             "finding_set_digest": self.finding_set_digest,
+            "selection_id": self.selection_id,
+            "selection_verification_id": self.selection_verification_id,
             "interval_start": _utc_text(self.interval_start),
             "interval_end": _utc_text(self.interval_end),
+            "interval_boundary_policy_id": self.interval_boundary_policy_id,
             "coverage_fact_id": self.coverage_fact_id,
+            "input_event_ids": list(self.input_event_ids),
             "input_source_append_orders": list(self.input_source_append_orders),
             "input_source_record_ids": list(self.input_source_record_ids),
             "input_source_record_hashes": list(self.input_source_record_hashes),
         }
         if include_id:
             document["projection_lineage_id"] = self.projection_lineage_id
+        return document
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeProjectionArtifactReference:
+    projection_policy_id: str
+    created_at: datetime
+    durable_known_at: datetime
+    symbol: str
+    market: Market
+    trading_day: date
+    interval_start: datetime
+    interval_end: datetime
+    interval_boundary_policy_id: str
+    lineage: RuntimeProjectionLineage
+    output_ohlc_sha256: str
+    coverage_fact_id: str
+    projection_artifact_id: str = field(init=False)
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        projection_policy_id: str,
+        created_at: datetime,
+        durable_known_at: datetime,
+        symbol: str,
+        market: Market,
+        trading_day: date,
+        interval_start: datetime,
+        interval_end: datetime,
+        interval_boundary_policy_id: str,
+        lineage: RuntimeProjectionLineage,
+        high: Decimal,
+        low: Decimal,
+        close: Decimal,
+        coverage_fact_id: str,
+    ) -> RuntimeProjectionArtifactReference:
+        return cls(
+            projection_policy_id=projection_policy_id,
+            created_at=created_at,
+            durable_known_at=durable_known_at,
+            symbol=symbol,
+            market=market,
+            trading_day=trading_day,
+            interval_start=interval_start,
+            interval_end=interval_end,
+            interval_boundary_policy_id=interval_boundary_policy_id,
+            lineage=lineage,
+            output_ohlc_sha256=_ohlc_output_hash(
+                symbol=symbol,
+                market=market,
+                interval_start=interval_start,
+                interval_end=interval_end,
+                high=high,
+                low=low,
+                close=close,
+            ),
+            coverage_fact_id=coverage_fact_id,
+        )
+
+    def __post_init__(self) -> None:
+        _require_sha256(self.projection_policy_id, "projection_policy_id")
+        created_at = _require_utc(self.created_at, "created_at")
+        durable_known_at = _require_utc(
+            self.durable_known_at,
+            "durable_known_at",
+        )
+        if created_at > durable_known_at:
+            raise RuntimePathContractError(
+                "projection creation time is outside its causal interval"
+            )
+        object.__setattr__(self, "created_at", created_at)
+        object.__setattr__(self, "durable_known_at", durable_known_at)
+        market = _require_market(self.market)
+        _require_symbol(self.symbol, market)
+        _require_date(self.trading_day, "trading_day")
+        start = _require_utc(self.interval_start, "interval_start")
+        end = _require_utc(self.interval_end, "interval_end")
+        if end <= start or end > durable_known_at or created_at < end:
+            raise RuntimePathContractError(
+                "projection interval is invalid at durable-known time"
+            )
+        object.__setattr__(self, "interval_start", start)
+        object.__setattr__(self, "interval_end", end)
+        if (
+            self.interval_boundary_policy_id != RUNTIME_INTERVAL_BOUNDARY_POLICY_V1
+            or market_session_date(
+                end - timedelta(microseconds=1),
+                market,
+                MARKET_SESSION_LABEL_POLICY_V1,
+            )
+            != self.trading_day
+        ):
+            raise RuntimePathContractError(
+                "projection interval policy or trading-day label is invalid"
+            )
+        if type(self.lineage) is not RuntimeProjectionLineage or (
+            self.lineage.projection_policy_id != self.projection_policy_id
+            or self.lineage.interval_start != start
+            or self.lineage.interval_end != end
+            or self.lineage.interval_boundary_policy_id
+            != self.interval_boundary_policy_id
+        ):
+            raise RuntimePathContractError(
+                "projection artifact and lineage disagree"
+            )
+        _require_sha256(self.output_ohlc_sha256, "output_ohlc_sha256")
+        _require_sha256(self.coverage_fact_id, "coverage_fact_id")
+        if self.lineage.coverage_fact_id != self.coverage_fact_id:
+            raise RuntimePathContractError(
+                "projection coverage reference disagrees with lineage"
+            )
+        object.__setattr__(
+            self,
+            "projection_artifact_id",
+            _hash_document(self.as_dict(include_id=False)),
+        )
+
+    def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
+        document = {
+            "schema": "stage4g1-runtime-projection-artifact-reference-v1",
+            "projection_policy_id": self.projection_policy_id,
+            "created_at": _utc_text(self.created_at),
+            "durable_known_at": _utc_text(self.durable_known_at),
+            "symbol": self.symbol,
+            "market": self.market.value,
+            "trading_day": self.trading_day.isoformat(),
+            "interval_start": _utc_text(self.interval_start),
+            "interval_end": _utc_text(self.interval_end),
+            "interval_boundary_policy_id": self.interval_boundary_policy_id,
+            "lineage": self.lineage.as_dict(),
+            "output_ohlc_sha256": self.output_ohlc_sha256,
+            "coverage_fact_id": self.coverage_fact_id,
+        }
+        if include_id:
+            document["projection_artifact_id"] = self.projection_artifact_id
         return document
 
 
@@ -798,8 +1350,9 @@ class RuntimePathObservation:
     low: Decimal
     close: Decimal
     granularity: RuntimePathGranularity
-    source_reference: RuntimeSourceReference
-    projection_lineage: RuntimeProjectionLineage | None
+    interval_boundary_policy_id: str
+    source_reference: RuntimeSourceReference | None
+    projection_artifact_reference: RuntimeProjectionArtifactReference | None
     path_observation_id: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -821,57 +1374,67 @@ class RuntimePathObservation:
             raise RuntimePathContractError(
                 "granularity must be RuntimePathGranularity"
             )
-        if type(self.source_reference) is not RuntimeSourceReference:
+        if self.interval_boundary_policy_id != RUNTIME_INTERVAL_BOUNDARY_POLICY_V1:
             raise RuntimePathContractError(
-                "source_reference must be RuntimeSourceReference"
-            )
-        if interval_end > self.source_reference.durable_known_at:
-            raise RuntimePathContractError(
-                "path interval cannot end after its durable known time"
-            )
-        if self.source_reference.source_time != interval_end:
-            raise RuntimePathContractError(
-                "source_time must equal the observation interval end"
+                "unsupported runtime interval boundary policy"
             )
         if self.granularity is RuntimePathGranularity.TICK:
             if (
                 interval_start != interval_end
                 or not (high == low == close)
-                or self.projection_lineage is not None
+                or type(self.source_reference) is not RuntimeSourceReference
+                or self.projection_artifact_reference is not None
             ):
                 raise RuntimePathContractError(
                     "TICK evidence requires one exact source point without projection"
                 )
+            source_reference = self.source_reference
+            if (
+                source_reference.symbol != self.symbol
+                or source_reference.market is not self.market
+                or source_reference.event_type != "TRADE_TICK"
+                or source_reference.source_time != interval_start
+                or source_reference.trading_day
+                != market_session_date(
+                    interval_start,
+                    market,
+                    source_reference.session_label_policy_id,
+                )
+                or interval_end > source_reference.durable_known_at
+            ):
+                raise RuntimePathContractError(
+                    "TICK observation disagrees with its verified trade-event member"
+                )
         else:
             if interval_start == interval_end:
                 raise RuntimePathContractError("bar evidence requires a non-zero interval")
-            if type(self.projection_lineage) is not RuntimeProjectionLineage:
+            if self.source_reference is not None or type(
+                self.projection_artifact_reference
+            ) is not RuntimeProjectionArtifactReference:
                 raise RuntimePathContractError(
-                    "bar evidence requires immutable projection lineage"
+                    "bar evidence requires one immutable projection artifact"
                 )
-            lineage = self.projection_lineage
+            projection = self.projection_artifact_reference
             if (
-                lineage.interval_start != interval_start
-                or lineage.interval_end != interval_end
-                or lineage.source_store_id
-                != self.source_reference.source_store_id
-                or self.source_reference.source_append_order
-                not in lineage.input_source_append_orders
+                projection.symbol != self.symbol
+                or projection.market is not self.market
+                or projection.interval_start != interval_start
+                or projection.interval_end != interval_end
+                or projection.interval_boundary_policy_id
+                != self.interval_boundary_policy_id
+                or projection.output_ohlc_sha256
+                != _ohlc_output_hash(
+                    symbol=self.symbol,
+                    market=self.market,
+                    interval_start=interval_start,
+                    interval_end=interval_end,
+                    high=high,
+                    low=low,
+                    close=close,
+                )
             ):
                 raise RuntimePathContractError(
-                    "projection lineage disagrees with the observation interval or source"
-                )
-            source_index = lineage.input_source_append_orders.index(
-                self.source_reference.source_append_order
-            )
-            if (
-                lineage.input_source_record_ids[source_index]
-                != self.source_reference.source_record_id
-                or lineage.input_source_record_hashes[source_index]
-                != self.source_reference.source_record_hash
-            ):
-                raise RuntimePathContractError(
-                    "projection lineage does not contain the exact source record"
+                    "projection artifact disagrees with the observation output"
                 )
         object.__setattr__(
             self,
@@ -881,7 +1444,7 @@ class RuntimePathObservation:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-runtime-path-observation-v2",
+            "schema": "stage4g1-runtime-path-observation-v3",
             "symbol": self.symbol,
             "market": self.market.value,
             "open_session_index": self.open_session_index,
@@ -891,11 +1454,16 @@ class RuntimePathObservation:
             "low": _decimal_text(self.low),
             "close": _decimal_text(self.close),
             "granularity": self.granularity.value,
-            "source_reference": self.source_reference.as_dict(),
-            "projection_lineage": (
+            "interval_boundary_policy_id": self.interval_boundary_policy_id,
+            "source_reference": (
                 None
-                if self.projection_lineage is None
-                else self.projection_lineage.as_dict()
+                if self.source_reference is None
+                else self.source_reference.as_dict()
+            ),
+            "projection_artifact_reference": (
+                None
+                if self.projection_artifact_reference is None
+                else self.projection_artifact_reference.as_dict()
             ),
         }
         if include_id:
@@ -907,6 +1475,7 @@ class RuntimePathObservation:
 class RuntimeFrozenPathFact:
     collection_store_id: str
     collection_append_order: int
+    case_id: str
     collection_fact_id: str
     collection_observed_at: datetime
     kind: RuntimePathFactKind
@@ -916,6 +1485,7 @@ class RuntimeFrozenPathFact:
 
     def __post_init__(self) -> None:
         _require_sha256(self.collection_store_id, "collection_store_id")
+        _require_sha256(self.case_id, "case_id")
         _require_int(
             self.collection_append_order,
             "collection_append_order",
@@ -961,7 +1531,14 @@ class RuntimeFrozenPathFact:
                 raise RuntimePathContractError(
                     "POINT fact must contain exactly one RuntimePathObservation"
                 )
-            if self.path_observation.source_reference.durable_known_at > observed_at:
+            evidence_known_at = (
+                self.path_observation.source_reference.durable_known_at
+                if self.path_observation.source_reference is not None
+                else self.path_observation.projection_artifact_reference.durable_known_at
+                if self.path_observation.projection_artifact_reference is not None
+                else observed_at + timedelta(microseconds=1)
+            )
+            if evidence_known_at > observed_at:
                 raise RuntimePathContractError(
                     "collection fact predates the source durable-known time"
                 )
@@ -996,9 +1573,10 @@ class RuntimeFrozenPathFact:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-runtime-frozen-path-fact-v1",
+            "schema": "stage4g1-runtime-frozen-path-fact-v2",
             "collection_store_id": self.collection_store_id,
             "collection_append_order": self.collection_append_order,
+            "case_id": self.case_id,
             "collection_fact_id": self.collection_fact_id,
             "collection_observed_at": _utc_text(self.collection_observed_at),
             "kind": self.kind.value,
@@ -1018,110 +1596,423 @@ class RuntimeFrozenPathFact:
         return document
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
+class RuntimePathStoreSnapshotBinding:
+    path_store_id: str
+    path_snapshot_id: str
+    path_audit_id: str
+    path_audited_at: datetime
+    global_high_water_append_order: int
+    record_count: int
+    global_manifest_digest: str
+    finding_blocker_digest: str
+    verification_mode: str
+
+    def __init__(self) -> None:
+        raise TypeError(
+            "RuntimePathStoreSnapshotBinding requires an exact path-store prefix"
+        )
+
+    @classmethod
+    def from_prefix(
+        cls,
+        *,
+        path_store_id: str,
+        path_audited_at: datetime,
+        facts: tuple[RuntimeFrozenPathFact, ...],
+        finding_blocker_digest: str,
+    ) -> RuntimePathStoreSnapshotBinding:
+        path_store_id = _require_sha256(path_store_id, "path_store_id")
+        audited_at = _require_utc(path_audited_at, "path_audited_at")
+        _require_sha256(finding_blocker_digest, "finding_blocker_digest")
+        if type(facts) is not tuple or any(
+            type(item) is not RuntimeFrozenPathFact for item in facts
+        ):
+            raise RuntimePathContractError(
+                "path snapshot facts must be an exact tuple"
+            )
+        orders = tuple(item.collection_append_order for item in facts)
+        if orders != tuple(range(1, len(facts) + 1)) or any(
+            item.collection_store_id != path_store_id
+            or item.collection_observed_at > audited_at
+            for item in facts
+        ):
+            raise RuntimePathContractError(
+                "path snapshot is not the exact contiguous global prefix"
+            )
+        if len({item.collection_fact_id for item in facts}) != len(facts) or len(
+            {item.frozen_fact_id for item in facts}
+        ) != len(facts):
+            raise RuntimePathContractError(
+                "path snapshot contains duplicate fact identity"
+            )
+        chain = "0" * 64
+        for fact in facts:
+            chain = _hash_document(
+                {
+                    "schema": "stage4g1-runtime-path-store-manifest-node-v1",
+                    "previous": chain,
+                    "append_order": fact.collection_append_order,
+                    "case_id": fact.case_id,
+                    "collection_fact_id": fact.collection_fact_id,
+                    "record_hash": fact.frozen_fact_id,
+                }
+            )
+        manifest = _hash_document(
+            {
+                "schema": "stage4g1-runtime-path-store-manifest-root-v1",
+                "record_count": len(facts),
+                "chain_head": chain,
+            }
+        )
+        audit_document = {
+            "schema": "stage4g1-runtime-path-store-audit-v1",
+            "path_store_id": path_store_id,
+            "path_audited_at": _utc_text(audited_at),
+            "global_high_water_append_order": len(facts),
+            "record_count": len(facts),
+            "global_manifest_digest": manifest,
+            "finding_blocker_digest": finding_blocker_digest,
+            "verification_mode": "FULL_PREFIX_RESCAN",
+        }
+        self = object.__new__(cls)
+        for name, value in {
+            "path_store_id": path_store_id,
+            "path_audit_id": _hash_document(audit_document),
+            "path_audited_at": audited_at,
+            "global_high_water_append_order": len(facts),
+            "record_count": len(facts),
+            "global_manifest_digest": manifest,
+            "finding_blocker_digest": finding_blocker_digest,
+            "verification_mode": "FULL_PREFIX_RESCAN",
+        }.items():
+            object.__setattr__(self, name, value)
+        object.__setattr__(
+            self,
+            "path_snapshot_id",
+            _hash_document(self.as_dict(include_id=False)),
+        )
+        return self
+
+    def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
+        document = {
+            "schema": "stage4g1-runtime-path-store-snapshot-binding-v1",
+            "path_store_id": self.path_store_id,
+            "path_audit_id": self.path_audit_id,
+            "path_audited_at": _utc_text(self.path_audited_at),
+            "global_high_water_append_order": self.global_high_water_append_order,
+            "record_count": self.record_count,
+            "global_manifest_digest": self.global_manifest_digest,
+            "finding_blocker_digest": self.finding_blocker_digest,
+            "verification_mode": self.verification_mode,
+        }
+        if include_id:
+            document["path_snapshot_id"] = self.path_snapshot_id
+        return document
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class RuntimeCaseFactSelection:
+    path_store_snapshot: RuntimePathStoreSnapshotBinding
+    case_id: str
+    symbol: str
+    market: Market
+    selection_policy_id: str
+    facts: tuple[RuntimeFrozenPathFact, ...]
+    case_manifest_commitment: str
+    verification_mode: str
+    finding_blocker_digest: str
+    selection_id: str
+
+    def __init__(self) -> None:
+        raise TypeError(
+            "RuntimeCaseFactSelection requires exact path-store verification"
+        )
+
+    @classmethod
+    def from_verified_snapshot(
+        cls,
+        *,
+        path_store_snapshot: RuntimePathStoreSnapshotBinding,
+        all_facts: tuple[RuntimeFrozenPathFact, ...],
+        case_id: str,
+        symbol: str,
+        market: Market,
+        selection_policy_id: str,
+    ) -> RuntimeCaseFactSelection:
+        if type(path_store_snapshot) is not RuntimePathStoreSnapshotBinding:
+            raise RuntimePathContractError(
+                "case selection requires RuntimePathStoreSnapshotBinding"
+            )
+        _require_sha256(case_id, "case_id")
+        market = _require_market(market)
+        _require_symbol(symbol, market)
+        _require_sha256(selection_policy_id, "selection_policy_id")
+        expected_snapshot = RuntimePathStoreSnapshotBinding.from_prefix(
+            path_store_id=path_store_snapshot.path_store_id,
+            path_audited_at=path_store_snapshot.path_audited_at,
+            facts=all_facts,
+            finding_blocker_digest=path_store_snapshot.finding_blocker_digest,
+        )
+        if expected_snapshot != path_store_snapshot:
+            raise RuntimePathContractError(
+                "path-store prefix disagrees with the frozen snapshot"
+            )
+        selected = tuple(item for item in all_facts if item.case_id == case_id)
+        if not selected or any(
+            item.symbol != symbol or item.market is not market for item in selected
+        ):
+            raise RuntimePathContractError(
+                "case selection is empty or contains inconsistent facts"
+            )
+        chain = "0" * 64
+        for fact in selected:
+            chain = _hash_document(
+                {
+                    "schema": "stage4g1-runtime-case-selection-node-v1",
+                    "previous": chain,
+                    "collection_fact_id": fact.collection_fact_id,
+                    "record_hash": fact.frozen_fact_id,
+                }
+            )
+        commitment = _hash_document(
+            {
+                "schema": "stage4g1-runtime-case-selection-root-v1",
+                "case_id": case_id,
+                "selection_policy_id": selection_policy_id,
+                "fact_count": len(selected),
+                "chain_head": chain,
+            }
+        )
+        self = object.__new__(cls)
+        for name, value in {
+            "path_store_snapshot": path_store_snapshot,
+            "case_id": case_id,
+            "symbol": symbol,
+            "market": market,
+            "selection_policy_id": selection_policy_id,
+            "facts": selected,
+            "case_manifest_commitment": commitment,
+            "verification_mode": "FULL_PREFIX_RESCAN",
+            "finding_blocker_digest": path_store_snapshot.finding_blocker_digest,
+        }.items():
+            object.__setattr__(self, name, value)
+        object.__setattr__(
+            self,
+            "selection_id",
+            _hash_document(self.as_dict(include_id=False)),
+        )
+        return self
+
+    def verify(self) -> None:
+        orders = tuple(item.collection_append_order for item in self.facts)
+        if orders != tuple(sorted(orders)) or any(
+            item.case_id != self.case_id
+            or item.symbol != self.symbol
+            or item.market is not self.market
+            or item.collection_store_id
+            != self.path_store_snapshot.path_store_id
+            or item.collection_append_order
+            > self.path_store_snapshot.global_high_water_append_order
+            for item in self.facts
+        ):
+            raise RuntimePathContractError(
+                "case selection facts are outside the verified case query"
+            )
+        chain = "0" * 64
+        for fact in self.facts:
+            chain = _hash_document(
+                {
+                    "schema": "stage4g1-runtime-case-selection-node-v1",
+                    "previous": chain,
+                    "collection_fact_id": fact.collection_fact_id,
+                    "record_hash": fact.frozen_fact_id,
+                }
+            )
+        expected_commitment = _hash_document(
+            {
+                "schema": "stage4g1-runtime-case-selection-root-v1",
+                "case_id": self.case_id,
+                "selection_policy_id": self.selection_policy_id,
+                "fact_count": len(self.facts),
+                "chain_head": chain,
+            }
+        )
+        if (
+            self.case_manifest_commitment != expected_commitment
+            or self.verification_mode != "FULL_PREFIX_RESCAN"
+            or self.finding_blocker_digest
+            != self.path_store_snapshot.finding_blocker_digest
+        ):
+            raise RuntimePathContractError("case selection commitment mismatch")
+        if self.selection_id != _hash_document(self.as_dict(include_id=False)):
+            raise RuntimePathContractError("case selection identity mismatch")
+
+    def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
+        document = {
+            "schema": "stage4g1-runtime-case-fact-selection-v1",
+            "path_store_snapshot": self.path_store_snapshot.as_dict(),
+            "case_id": self.case_id,
+            "symbol": self.symbol,
+            "market": self.market.value,
+            "selection_policy_id": self.selection_policy_id,
+            "ordered_case_fact_ids": [
+                item.collection_fact_id for item in self.facts
+            ],
+            "ordered_case_record_hashes": [
+                item.frozen_fact_id for item in self.facts
+            ],
+            "case_manifest_commitment": self.case_manifest_commitment,
+            "verification_mode": self.verification_mode,
+            "finding_blocker_digest": self.finding_blocker_digest,
+        }
+        if include_id:
+            document["selection_id"] = self.selection_id
+        return document
+
+
+def _source_reference_matches_record(
+    reference: RuntimeSourceReference,
+    record: MarketEventSourceRecord,
+    binding: RuntimeMarketSourceSnapshotBinding,
+) -> bool:
+    return (
+        reference.source_store_id == binding.source_store_id == record.source_store_id
+        and reference.source_snapshot_id == binding.source_snapshot_id
+        and reference.source_audit_id == binding.source_audit_id
+        and reference.source_high_water_append_order
+        == binding.high_water_append_order
+        and reference.finding_set_digest == binding.finding_set_digest
+        and reference.sequence_policy_id == binding.sequence_policy_id
+        and reference.selection_id == binding.selection.selection_id
+        and reference.event_id == record.event_id
+        and reference.source_session_id == record.session_id
+        and reference.symbol == record.symbol
+        and reference.market is record.market
+        and reference.event_type == record.event_type
+        and reference.trading_day == record.trading_day
+        and reference.session_label_policy_id == record.session_label_policy_id
+        and reference.source_record_id == record.source_record_id
+        and reference.source_append_order == record.append_order
+        and reference.source_record_hash == record.record_content_hash
+        and reference.raw_payload_sha256 == record.raw_payload_sha256
+        and reference.parser_id == record.parser_id
+        and reference.schema_id == record.source_schema_id
+        and reference.source_time == record.source_time
+        and reference.received_at == record.received_at
+        and reference.durable_known_at == record.durable_known_at
+    )
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class RuntimeFrozenPathPrefix:
     case_id: str
     symbol: str
     market: Market
-    collection_store_id: str
+    path_store_snapshot: RuntimePathStoreSnapshotBinding
+    case_selection: RuntimeCaseFactSelection
     market_source_snapshot: RuntimeMarketSourceSnapshotBinding
-    authority_snapshot_bindings: tuple[RuntimeAuthoritySnapshotBinding, ...]
+    authority_fact_selections: tuple[RuntimeAuthorityFactSelection, ...]
     frozen_at: datetime
-    collection_high_water_append_order: int
-    collection_audit_id: str
     facts: tuple[RuntimeFrozenPathFact, ...]
-    prefix_id: str = field(init=False)
+    prefix_id: str
 
-    def __post_init__(self) -> None:
-        _require_sha256(self.case_id, "case_id")
-        market = _require_market(self.market)
-        _require_symbol(self.symbol, market)
-        _require_sha256(self.collection_store_id, "collection_store_id")
-        if type(self.market_source_snapshot) is not RuntimeMarketSourceSnapshotBinding:
+    def __init__(self) -> None:
+        raise TypeError(
+            "RuntimeFrozenPathPrefix requires a verified case selection"
+        )
+
+    @classmethod
+    def from_verified_case_selection(
+        cls,
+        *,
+        case_selection: RuntimeCaseFactSelection,
+        market_source_snapshot: RuntimeMarketSourceSnapshotBinding,
+        authority_fact_selections: tuple[RuntimeAuthorityFactSelection, ...],
+        frozen_at: datetime,
+    ) -> RuntimeFrozenPathPrefix:
+        if type(case_selection) is not RuntimeCaseFactSelection:
             raise RuntimePathContractError(
-                "market_source_snapshot must be RuntimeMarketSourceSnapshotBinding"
+                "case_selection must be RuntimeCaseFactSelection"
             )
-        if type(self.authority_snapshot_bindings) is not tuple or any(
-            type(item) is not RuntimeAuthoritySnapshotBinding
-            for item in self.authority_snapshot_bindings
+        case_selection.verify()
+        if type(market_source_snapshot) is not RuntimeMarketSourceSnapshotBinding:
+            raise RuntimePathContractError(
+                "market_source_snapshot must be a verified source Selection"
+            )
+        market_source_snapshot.verify()
+        if (
+            market_source_snapshot.selection.symbol != case_selection.symbol
+            or market_source_snapshot.selection.market is not case_selection.market
+            or "TRADE_TICK"
+            not in market_source_snapshot.selection.allowed_event_types
         ):
             raise RuntimePathContractError(
-                "authority_snapshot_bindings must be an exact tuple"
+                "market source Selection does not cover the frozen case identity"
             )
-        ordered_bindings = tuple(
+        if type(authority_fact_selections) is not tuple or any(
+            type(item) is not RuntimeAuthorityFactSelection
+            for item in authority_fact_selections
+        ):
+            raise RuntimePathContractError(
+                "authority_fact_selections must be an exact tuple"
+            )
+        ordered_selections = tuple(
             sorted(
-                self.authority_snapshot_bindings,
+                authority_fact_selections,
                 key=lambda item: (
-                    item.authority_kind.value,
-                    item.authority_store_id,
-                    item.authority_audit_id,
+                    item.snapshot.authority_kind.value,
+                    item.snapshot.authority_store_id,
+                    item.snapshot.authority_audit_id,
                 ),
             )
         )
-        if ordered_bindings != self.authority_snapshot_bindings or len(
-            {item.authority_kind for item in ordered_bindings}
-        ) != len(ordered_bindings):
+        if ordered_selections != authority_fact_selections or len(
+            {item.snapshot.authority_kind for item in ordered_selections}
+        ) != len(ordered_selections):
             raise RuntimePathContractError(
-                "authority snapshot bindings must be canonical and unique by kind"
+                "authority selections must be canonical and unique by kind"
             )
-        frozen_at = _require_utc(self.frozen_at, "frozen_at")
-        object.__setattr__(self, "frozen_at", frozen_at)
-        _require_int(
-            self.collection_high_water_append_order,
-            "collection_high_water_append_order",
-        )
-        _require_sha256(self.collection_audit_id, "collection_audit_id")
-        if type(self.facts) is not tuple or any(
-            type(item) is not RuntimeFrozenPathFact for item in self.facts
-        ):
-            raise RuntimePathContractError(
-                "facts must be an exact tuple of RuntimeFrozenPathFact"
-            )
-        collection_orders = tuple(item.collection_append_order for item in self.facts)
+        for selection in authority_fact_selections:
+            selection.verify()
+        frozen_at = _require_utc(frozen_at, "frozen_at")
+        facts = case_selection.facts
+        collection_orders = tuple(item.collection_append_order for item in facts)
         if collection_orders != tuple(sorted(collection_orders)) or len(
             set(collection_orders)
         ) != len(collection_orders):
             raise RuntimePathContractError(
                 "frozen path facts must use unique increasing collection order"
             )
-        if collection_orders and collection_orders[-1] > self.collection_high_water_append_order:
-            raise RuntimePathContractError(
-                "path fact exceeds collection high-water mark"
-            )
-        point_sources = tuple(
-            item.source_reference
-            for item in self.facts
-            if item.source_reference is not None
-        )
-        if any(
-            item.source_append_order
-            > self.market_source_snapshot.high_water_append_order
-            for item in point_sources
+        if collection_orders and collection_orders[-1] > (
+            case_selection.path_store_snapshot.global_high_water_append_order
         ):
-            raise RuntimePathContractError("path fact exceeds source high-water mark")
+            raise RuntimePathContractError(
+                "case fact exceeds path-store high-water mark"
+            )
         if any(
-            item.collection_store_id != self.collection_store_id
-            or item.symbol != self.symbol
-            or item.market is not self.market
+            item.collection_store_id
+            != case_selection.path_store_snapshot.path_store_id
+            or item.case_id != case_selection.case_id
+            or item.symbol != case_selection.symbol
+            or item.market is not case_selection.market
             or item.collection_observed_at > frozen_at
-            for item in self.facts
+            for item in facts
         ):
             raise RuntimePathContractError(
                 "path prefix fact identity or knowledge time is inconsistent"
             )
-        if any(
-            item.source_store_id != self.market_source_snapshot.source_store_id
-            for item in point_sources
-        ):
+        if case_selection.path_store_snapshot.path_audited_at > frozen_at:
             raise RuntimePathContractError(
-                "path point source store disagrees with its market snapshot"
+                "path-store audit is future-known at prefix freeze time"
             )
-        authority_bindings = {
-            item.authority_kind: item for item in self.authority_snapshot_bindings
+        authority_selections = {
+            item.snapshot.authority_kind: item
+            for item in authority_fact_selections
         }
         used_authority_kinds: set[RuntimeAuthorityKind] = set()
         sessions_by_index: dict[int, RuntimeSessionEvidence] = {}
-        for fact in self.facts:
+        for fact in facts:
             if fact.session_evidence is None:
                 continue
             session = fact.session_evidence
@@ -1135,40 +2026,75 @@ class RuntimeFrozenPathPrefix:
                 if reference is None:
                     continue
                 used_authority_kinds.add(reference.authority_kind)
-                binding = authority_bindings.get(reference.authority_kind)
+                selection = authority_selections.get(reference.authority_kind)
                 if (
-                    binding is None
-                    or reference.authority_store_id != binding.authority_store_id
-                    or reference.authority_audit_id != binding.authority_audit_id
-                    or reference.revision > binding.high_water_revision
+                    selection is None
+                    or reference.authority_store_id
+                    != selection.snapshot.authority_store_id
+                    or reference.revision
+                    > selection.snapshot.high_water_revision
+                    or not selection.contains(reference)
                 ):
                     raise RuntimePathContractError(
-                        "authority fact is outside its exact frozen store audit"
+                        "authority fact is absent from its verified store selection"
                     )
-                if reference.known_at > frozen_at or reference.usable_from > frozen_at:
+                if (
+                    reference.known_at > frozen_at
+                    or reference.usable_from > frozen_at
+                    or selection.snapshot.authority_audited_at > frozen_at
+                ):
                     raise RuntimePathContractError(
-                        "authority fact was not known and usable at prefix freeze time"
+                        "authority fact or audit was future-known at prefix freeze time"
                     )
-        if set(authority_bindings) != used_authority_kinds:
+        if set(authority_selections) != used_authority_kinds:
             raise RuntimePathContractError(
-                "authority snapshot bindings do not match the referenced authority set"
+                "authority selections do not match the referenced authority set"
             )
-        for fact in self.facts:
+
+        selected_records = {
+            item.source_record_id: item
+            for item in market_source_snapshot.selection.records
+        }
+        for fact in facts:
             observation = fact.path_observation
-            if observation is None or observation.projection_lineage is None:
+            if observation is None:
                 continue
-            lineage = observation.projection_lineage
+            source_reference = observation.source_reference
+            if source_reference is not None:
+                record = selected_records.get(source_reference.source_record_id)
+                session = sessions_by_index.get(observation.open_session_index)
+                if (
+                    record is None
+                    or session is None
+                    or record.trading_day != session.trading_day
+                    or not _source_reference_matches_record(
+                    source_reference,
+                    record,
+                    market_source_snapshot,
+                    )
+                ):
+                    raise RuntimePathContractError(
+                        "path point source member is absent from verified Selection"
+                    )
+                continue
+            projection = observation.projection_artifact_reference
+            assert projection is not None
+            lineage = projection.lineage
             if (
                 lineage.source_store_id
-                != self.market_source_snapshot.source_store_id
+                != market_source_snapshot.source_store_id
                 or lineage.source_snapshot_id
-                != self.market_source_snapshot.source_snapshot_id
+                != market_source_snapshot.source_snapshot_id
                 or lineage.source_audit_id
-                != self.market_source_snapshot.source_audit_id
+                != market_source_snapshot.source_audit_id
                 or lineage.source_high_water_append_order
-                != self.market_source_snapshot.high_water_append_order
+                != market_source_snapshot.high_water_append_order
                 or lineage.finding_set_digest
-                != self.market_source_snapshot.finding_set_digest
+                != market_source_snapshot.finding_set_digest
+                or lineage.selection_id
+                != market_source_snapshot.selection.selection_id
+                or lineage.selection_verification_id
+                != market_source_snapshot.selection_verification.verification_id
             ):
                 raise RuntimePathContractError(
                     "projection lineage disagrees with frozen market source snapshot"
@@ -1178,16 +2104,77 @@ class RuntimeFrozenPathPrefix:
                 session is None
                 or session.coverage_reference is None
                 or lineage.coverage_fact_id != session.coverage_reference.fact_id
+                or projection.trading_day != session.trading_day
             ):
                 raise RuntimePathContractError(
                     "projection lineage is not bound to session coverage authority"
                 )
+            for event_id, append_order, record_id, record_hash in zip(
+                lineage.input_event_ids,
+                lineage.input_source_append_orders,
+                lineage.input_source_record_ids,
+                lineage.input_source_record_hashes,
+                strict=True,
+            ):
+                record = selected_records.get(record_id)
+                if record is None or (
+                    record.event_id != event_id
+                    or record.append_order != append_order
+                    or record.record_content_hash != record_hash
+                    or record.symbol != observation.symbol
+                    or record.market is not observation.market
+                    or record.event_type != "TRADE_TICK"
+                    or record.trading_day != session.trading_day
+                    or record.durable_known_at > projection.created_at
+                    or not projection.interval_start
+                    <= record.source_time
+                    < projection.interval_end
+                ):
+                    raise RuntimePathContractError(
+                        "projection input is absent from the verified raw Selection"
+                    )
+        if any(
+            session.coverage_state is RuntimeCoverageState.COMPLETE_SESSION
+            for session in sessions_by_index.values()
+        ):
+            if any(
+                not manifest.has_sequence_start_proof
+                for manifest in market_source_snapshot.selection.source_session_manifests
+            ):
+                raise RuntimePathContractError(
+                    "COMPLETE_SESSION requires source sequence start capability proof"
+                )
+            if market_source_snapshot.selection.relevant_findings:
+                raise RuntimePathContractError(
+                    "COMPLETE_SESSION conflicts with verified source sequence findings"
+                )
+        selection = market_source_snapshot.selection
+        for session in sessions_by_index.values():
+            if (
+                session.scheduled_open_at is None
+                or session.coverage_through is None
+                or session.coverage_state
+                not in {
+                    RuntimeCoverageState.COMPLETE_PREFIX,
+                    RuntimeCoverageState.COMPLETE_SESSION,
+                }
+            ):
+                continue
+            if (
+                selection.start_source_time > session.scheduled_open_at
+                or selection.end_source_time <= session.coverage_through
+                or selection.snapshot_audit_id
+                != market_source_snapshot.source_audit_id
+            ):
+                raise RuntimePathContractError(
+                    "market source Selection does not cover the claimed session interval"
+                )
         for values, label in (
             (
-                tuple(item.collection_fact_id for item in self.facts),
+                tuple(item.collection_fact_id for item in facts),
                 "collection fact",
             ),
-            (tuple(item.frozen_fact_id for item in self.facts), "frozen fact"),
+            (tuple(item.frozen_fact_id for item in facts), "frozen fact"),
         ):
             if len(values) != len(set(values)):
                 raise RuntimePathContractError(
@@ -1195,7 +2182,7 @@ class RuntimeFrozenPathPrefix:
                 )
         session_days = tuple(
             item.session_evidence.trading_day
-            for item in self.facts
+            for item in facts
             if item.session_evidence is not None
         )
         if len(session_days) != len(set(session_days)):
@@ -1204,18 +2191,32 @@ class RuntimeFrozenPathPrefix:
             )
         point_ids = tuple(
             item.path_observation.path_observation_id
-            for item in self.facts
+            for item in facts
             if item.path_observation is not None
         )
         if len(point_ids) != len(set(point_ids)):
             raise RuntimePathContractError(
                 "path prefix contains duplicate path observations"
             )
+        self = object.__new__(cls)
+        for name, value in {
+            "case_id": case_selection.case_id,
+            "symbol": case_selection.symbol,
+            "market": case_selection.market,
+            "path_store_snapshot": case_selection.path_store_snapshot,
+            "case_selection": case_selection,
+            "market_source_snapshot": market_source_snapshot,
+            "authority_fact_selections": authority_fact_selections,
+            "frozen_at": frozen_at,
+            "facts": facts,
+        }.items():
+            object.__setattr__(self, name, value)
         object.__setattr__(
             self,
             "prefix_id",
             _hash_document(self.as_dict(include_id=False)),
         )
+        return self
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
@@ -1223,14 +2224,13 @@ class RuntimeFrozenPathPrefix:
             "case_id": self.case_id,
             "symbol": self.symbol,
             "market": self.market.value,
-            "collection_store_id": self.collection_store_id,
+            "path_store_snapshot": self.path_store_snapshot.as_dict(),
+            "case_selection_id": self.case_selection.selection_id,
             "market_source_snapshot": self.market_source_snapshot.as_dict(),
-            "authority_snapshot_bindings": [
-                item.as_dict() for item in self.authority_snapshot_bindings
+            "authority_fact_selections": [
+                item.as_dict() for item in self.authority_fact_selections
             ],
             "frozen_at": _utc_text(self.frozen_at),
-            "collection_high_water_append_order": self.collection_high_water_append_order,
-            "collection_audit_id": self.collection_audit_id,
             "facts": [item.as_dict() for item in self.facts],
         }
         if include_id:
@@ -1252,6 +2252,7 @@ class RuntimePathWindow:
     horizon_sessions: int
     terminal_policy_id: str
     session_label_policy_id: str
+    interval_boundary_policy_id: str
     window_id: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -1264,6 +2265,10 @@ class RuntimePathWindow:
         if self.session_label_policy_id != MARKET_SESSION_LABEL_POLICY_V1:
             raise RuntimePathContractError(
                 "unsupported market session label policy"
+            )
+        if self.interval_boundary_policy_id != RUNTIME_INTERVAL_BOUNDARY_POLICY_V1:
+            raise RuntimePathContractError(
+                "unsupported runtime interval boundary policy"
             )
         if market_session_date(
             entry_filled_at,
@@ -1295,7 +2300,7 @@ class RuntimePathWindow:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-runtime-path-window-v1",
+            "schema": "stage4g1-runtime-path-window-v2",
             "case_id": self.case_id,
             "symbol": self.symbol,
             "market": self.market.value,
@@ -1308,6 +2313,7 @@ class RuntimePathWindow:
             "horizon_sessions": self.horizon_sessions,
             "terminal_policy_id": self.terminal_policy_id,
             "session_label_policy_id": self.session_label_policy_id,
+            "interval_boundary_policy_id": self.interval_boundary_policy_id,
         }
         if include_id:
             document["window_id"] = self.window_id
@@ -1671,24 +2677,24 @@ def resolve_runtime_path(
                 effective_session_index=index,
             )
         if index == window.entry_session_index:
-            if observation.interval_end < window.entry_filled_at:
+            if (
+                observation.granularity is RuntimePathGranularity.TICK
+                and observation.interval_start == window.entry_filled_at
+            ):
+                return _blocked_resolution(
+                    window,
+                    prefix,
+                    RuntimePathBlockerCode.ENTRY_BOUNDARY_ORDER_AMBIGUITY,
+                    effective_session_index=index,
+                )
+            if observation.interval_end <= window.entry_filled_at:
                 return _blocked_resolution(
                     window,
                     prefix,
                     RuntimePathBlockerCode.POINT_BEFORE_ENTRY_WINDOW,
                     effective_session_index=index,
                 )
-            if observation.interval_start < window.entry_filled_at:
-                return _blocked_resolution(
-                    window,
-                    prefix,
-                    RuntimePathBlockerCode.WINDOW_BOUNDARY_OVERLAP,
-                    effective_session_index=index,
-                )
-            if (
-                observation.granularity is RuntimePathGranularity.TICK
-                and observation.interval_start == window.entry_filled_at
-            ):
+            if observation.interval_start <= window.entry_filled_at:
                 return _blocked_resolution(
                     window,
                     prefix,
@@ -1732,12 +2738,37 @@ def resolve_runtime_path(
             )
         facts = points_by_session.get(session_index, [])
         if session.open_session_state is RuntimeOpenSessionState.TRADED and not facts:
-            return _blocked_resolution(
-                window,
-                prefix,
-                RuntimePathBlockerCode.TRADED_SESSION_WITHOUT_POINTS,
-                effective_session_index=session_index,
+            eligible_source_records = tuple(
+                record
+                for record in prefix.market_source_snapshot.selection.records
+                if record.symbol == window.symbol
+                and record.market is window.market
+                and record.event_type == "TRADE_TICK"
+                and record.trading_day == session.trading_day
+                and (
+                    session_index != window.entry_session_index
+                    or record.source_time > window.entry_filled_at
+                )
             )
+            if eligible_source_records:
+                return _blocked_resolution(
+                    window,
+                    prefix,
+                    RuntimePathBlockerCode.TRADED_SESSION_WITHOUT_POINTS,
+                    effective_session_index=session_index,
+                )
+            if session.coverage_state is RuntimeCoverageState.COMPLETE_PREFIX:
+                return RuntimePathResolution(
+                    state=RuntimePathResolutionState.OPEN,
+                    window_id=window.window_id,
+                    prefix_id=prefix.prefix_id,
+                    terminal_reason=None,
+                    pending_code=RuntimePathPendingCode.HORIZON_NOT_REACHED,
+                    blocker_codes=(),
+                    first_touch_collection_fact_id=None,
+                    first_touch_observation_id=None,
+                    effective_session_index=session_index,
+                )
         def point_order_key(
             item: RuntimeFrozenPathFact,
         ) -> tuple[datetime, datetime, int, str]:
@@ -1746,10 +2777,19 @@ def resolve_runtime_path(
                 raise RuntimePathContractError(
                     "point collection contains a non-point fact"
                 )
+            source_order = (
+                observation.source_reference.source_append_order
+                if observation.source_reference is not None
+                else observation.projection_artifact_reference.lineage.input_source_append_orders[
+                    0
+                ]
+                if observation.projection_artifact_reference is not None
+                else 0
+            )
             return (
                 observation.interval_start,
                 observation.interval_end,
-                observation.source_reference.source_append_order,
+                source_order,
                 observation.path_observation_id,
             )
 
@@ -1854,6 +2894,8 @@ class RuntimeExecutionFragment:
     intent_id: str
     execution_id: str
     source_fact_id: str
+    source_callback_id: str
+    source_append_order: int
     side: RuntimeExecutionSide
     timestamp: datetime
     durable_known_at: datetime
@@ -1866,6 +2908,8 @@ class RuntimeExecutionFragment:
         _require_sha256(self.intent_id, "intent_id")
         _require_text(self.execution_id, "execution_id", maximum=256)
         _require_sha256(self.source_fact_id, "source_fact_id")
+        _require_sha256(self.source_callback_id, "source_callback_id")
+        _require_int(self.source_append_order, "source_append_order", minimum=1)
         if type(self.side) is not RuntimeExecutionSide:
             raise RuntimePathContractError("side must be the exact RuntimeExecutionSide type")
         timestamp = _require_utc(self.timestamp, "execution timestamp")
@@ -1887,10 +2931,12 @@ class RuntimeExecutionFragment:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-runtime-execution-fragment-v1",
+            "schema": "stage4g1-runtime-execution-fragment-v2",
             "intent_id": self.intent_id,
             "execution_id": self.execution_id,
             "source_fact_id": self.source_fact_id,
+            "source_callback_id": self.source_callback_id,
+            "source_append_order": self.source_append_order,
             "side": self.side.value,
             "timestamp": _utc_text(self.timestamp),
             "durable_known_at": _utc_text(self.durable_known_at),
@@ -1909,8 +2955,14 @@ class RuntimeExecutionSummary:
     side: RuntimeExecutionSide
     requested_quantity: int
     fragments: tuple[RuntimeExecutionFragment, ...]
+    execution_source_store_id: str
+    execution_snapshot_id: str
+    execution_audit_id: str
+    execution_audited_at: datetime
+    execution_high_water_append_order: int
+    execution_selection_id: str
+    membership_verification_id: str
     execution_stream_complete: bool
-    execution_stream_audit_id: str | None
     native_multi_leg: bool = False
     completion: RuntimeFillCompletion = field(init=False)
     filled_quantity: int = field(init=False)
@@ -1923,6 +2975,23 @@ class RuntimeExecutionSummary:
         if type(self.side) is not RuntimeExecutionSide:
             raise RuntimePathContractError("side must be the exact RuntimeExecutionSide type")
         _require_int(self.requested_quantity, "requested_quantity", minimum=1)
+        for name in (
+            "execution_source_store_id",
+            "execution_snapshot_id",
+            "execution_audit_id",
+            "execution_selection_id",
+            "membership_verification_id",
+        ):
+            _require_sha256(getattr(self, name), name)
+        execution_audited_at = _require_utc(
+            self.execution_audited_at,
+            "execution_audited_at",
+        )
+        object.__setattr__(self, "execution_audited_at", execution_audited_at)
+        high_water = _require_int(
+            self.execution_high_water_append_order,
+            "execution_high_water_append_order",
+        )
         if type(self.fragments) is not tuple or any(
             type(item) is not RuntimeExecutionFragment for item in self.fragments
         ):
@@ -1930,18 +2999,6 @@ class RuntimeExecutionSummary:
                 "fragments must be an exact tuple of RuntimeExecutionFragment"
             )
         _require_bool(self.execution_stream_complete, "execution_stream_complete")
-        execution_stream_audit_id = (
-            None
-            if self.execution_stream_audit_id is None
-            else _require_sha256(
-                self.execution_stream_audit_id,
-                "execution_stream_audit_id",
-            )
-        )
-        if self.execution_stream_complete and execution_stream_audit_id is None:
-            raise RuntimePathContractError(
-                "complete execution stream requires an audit identity"
-            )
         if _require_bool(self.native_multi_leg, "native_multi_leg"):
             raise RuntimePathContractError(
                 "native multi-leg lifecycle is unsupported in Stage 4G v3",
@@ -1969,6 +3026,18 @@ class RuntimeExecutionSummary:
         if len({item.source_fact_id for item in ordered}) != len(ordered):
             raise RuntimePathContractError(
                 "one execution source fact may produce only one fragment"
+            )
+        if len({item.source_callback_id for item in ordered}) != len(ordered):
+            raise RuntimePathContractError(
+                "one execution callback may produce only one fragment"
+            )
+        if any(
+            item.source_append_order > high_water
+            or item.durable_known_at > execution_audited_at
+            for item in ordered
+        ):
+            raise RuntimePathContractError(
+                "execution fragment is outside the frozen execution audit"
             )
         if len({item.fragment_id for item in ordered}) != len(ordered):
             raise RuntimePathContractError("execution fragments must be unique")
@@ -2013,7 +3082,7 @@ class RuntimeExecutionSummary:
         )
 
     @property
-    def stage4g_v3_finalizable(self) -> bool:
+    def structurally_projectable_to_stage4g_v3(self) -> bool:
         return self.completion is RuntimeFillCompletion.COMPLETE
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
@@ -2023,8 +3092,14 @@ class RuntimeExecutionSummary:
             "side": self.side.value,
             "requested_quantity": self.requested_quantity,
             "fragments": [item.as_dict() for item in self.fragments],
+            "execution_source_store_id": self.execution_source_store_id,
+            "execution_snapshot_id": self.execution_snapshot_id,
+            "execution_audit_id": self.execution_audit_id,
+            "execution_audited_at": _utc_text(self.execution_audited_at),
+            "execution_high_water_append_order": self.execution_high_water_append_order,
+            "execution_selection_id": self.execution_selection_id,
+            "membership_verification_id": self.membership_verification_id,
             "execution_stream_complete": self.execution_stream_complete,
-            "execution_stream_audit_id": self.execution_stream_audit_id,
             "native_multi_leg": False,
             "completion": self.completion.value,
             "filled_quantity": self.filled_quantity,
@@ -2034,10 +3109,51 @@ class RuntimeExecutionSummary:
                 else _decimal_text(self.quantity_weighted_price)
             ),
             "total_explicit_cost": _decimal_text(self.total_explicit_cost),
-            "stage4g_v3_finalizable": self.stage4g_v3_finalizable,
+            "structurally_projectable_to_stage4g_v3": (
+                self.structurally_projectable_to_stage4g_v3
+            ),
         }
         if include_id:
             document["summary_id"] = self.summary_id
+        return document
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeExecutionEvidenceReference:
+    fact_id: str
+    fact_kind: str
+    source_append_order: int
+    known_at: datetime
+    membership_verification_id: str
+    reference_id: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        _require_sha256(self.fact_id, "fact_id")
+        _require_text(self.fact_kind, "fact_kind", maximum=128)
+        _require_int(self.source_append_order, "source_append_order", minimum=1)
+        known_at = _require_utc(self.known_at, "known_at")
+        object.__setattr__(self, "known_at", known_at)
+        _require_sha256(
+            self.membership_verification_id,
+            "membership_verification_id",
+        )
+        object.__setattr__(
+            self,
+            "reference_id",
+            _hash_document(self.as_dict(include_id=False)),
+        )
+
+    def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
+        document = {
+            "schema": "stage4g1-runtime-execution-evidence-reference-v1",
+            "fact_id": self.fact_id,
+            "fact_kind": self.fact_kind,
+            "source_append_order": self.source_append_order,
+            "known_at": _utc_text(self.known_at),
+            "membership_verification_id": self.membership_verification_id,
+        }
+        if include_id:
+            document["reference_id"] = self.reference_id
         return document
 
 
@@ -2049,6 +3165,7 @@ class RuntimeNoEntryEvidence:
     entry_window_end: datetime
     decided_at: datetime
     execution_policy_id: str
+    evidence_references: tuple[RuntimeExecutionEvidenceReference, ...]
     evidence_ids: tuple[str, ...]
     entry_window_coverage_complete: bool
     entry_window_coverage_fact_id: str | None = None
@@ -2082,6 +3199,35 @@ class RuntimeNoEntryEvidence:
         object.__setattr__(self, "entry_window_end", window_end)
         object.__setattr__(self, "decided_at", decided_at)
         _require_sha256(self.execution_policy_id, "execution_policy_id")
+        if type(self.evidence_references) is not tuple or any(
+            type(item) is not RuntimeExecutionEvidenceReference
+            for item in self.evidence_references
+        ):
+            raise RuntimePathContractError(
+                "evidence_references must be an exact tuple"
+            )
+        references = tuple(
+            sorted(
+                self.evidence_references,
+                key=lambda item: (item.source_append_order, item.fact_id),
+            )
+        )
+        if len({item.fact_id for item in references}) != len(references):
+            raise RuntimePathContractError(
+                "execution evidence fact identities must be unique"
+            )
+        if any(
+            item.membership_verification_id
+            != self.execution_summary.membership_verification_id
+            or item.source_append_order
+            > self.execution_summary.execution_high_water_append_order
+            or item.known_at > decided_at
+            for item in references
+        ) or self.execution_summary.execution_audited_at > decided_at:
+            raise RuntimePathContractError(
+                "no-entry decision predates its execution evidence or audit"
+            )
+        object.__setattr__(self, "evidence_references", references)
         if type(self.evidence_ids) is not tuple:
             raise RuntimePathContractError("evidence_ids must be an exact tuple")
         evidence_ids = tuple(
@@ -2089,6 +3235,10 @@ class RuntimeNoEntryEvidence:
         )
         if len(evidence_ids) != len(set(evidence_ids)):
             raise RuntimePathContractError("evidence_ids must be unique")
+        if evidence_ids != tuple(sorted(item.fact_id for item in references)):
+            raise RuntimePathContractError(
+                "evidence_ids must equal the verified evidence references"
+            )
         object.__setattr__(self, "evidence_ids", evidence_ids)
         coverage_complete = _require_bool(
             self.entry_window_coverage_complete,
@@ -2199,6 +3349,28 @@ class RuntimeNoEntryEvidence:
             raise RuntimePathContractError(
                 "reason-specific facts must be present in evidence_ids"
             )
+        references_by_fact_id = {item.fact_id: item for item in references}
+        expected_fact_kinds = {
+            fact_id: fact_kind
+            for fact_id, fact_kind in (
+                (
+                    coverage_fact if coverage_complete else None,
+                    "ENTRY_WINDOW_COVERAGE",
+                ),
+                (actor_authentication, "ACTOR_AUTHENTICATION"),
+                (cancellation, "USER_CANCELLATION"),
+                (rejection, "ORDER_REJECTION"),
+                (invalidity, "DATA_INVALIDITY"),
+            )
+            if fact_id is not None
+        }
+        if any(
+            references_by_fact_id[fact_id].fact_kind != fact_kind
+            for fact_id, fact_kind in expected_fact_kinds.items()
+        ):
+            raise RuntimePathContractError(
+                "reason-specific evidence fact kind is inconsistent"
+            )
         object.__setattr__(
             self,
             "no_entry_id",
@@ -2214,6 +3386,9 @@ class RuntimeNoEntryEvidence:
             "entry_window_end": _utc_text(self.entry_window_end),
             "decided_at": _utc_text(self.decided_at),
             "execution_policy_id": self.execution_policy_id,
+            "evidence_references": [
+                item.as_dict() for item in self.evidence_references
+            ],
             "evidence_ids": list(self.evidence_ids),
             "entry_window_coverage_complete": self.entry_window_coverage_complete,
             "entry_window_coverage_fact_id": self.entry_window_coverage_fact_id,
