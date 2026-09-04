@@ -15,7 +15,7 @@ from stock_tracker.runtime_evidence.source_snapshot_contracts import (
     FIXTURE_TRADE_DECODER_POLICY_V1,
     FIXTURE_TRADE_TICK_SCHEMA_V1,
     MARKET_EVENT_INTERVAL_BOUNDARY_POLICY_V1,
-    MARKET_EVENT_SEQUENCE_POLICY_V2,
+    MARKET_EVENT_SEQUENCE_POLICY_V3,
     CoverageOrigin,
     DecodedTradeTick,
     FindingResolutionState,
@@ -69,7 +69,7 @@ class MarketEventSourceSnapshotTestCase(unittest.TestCase):
             callback_sequence_scope=callback_scope,
             provider_sequence_available=provider_sequence_available,
             provider_sequence_scope=provider_scope,
-            sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V2,
+            sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V3,
             subscription=MarketEventSubscriptionManifest(
                 Market.A, ("000001.SZ", "600519.SH"), ("ORDER_BOOK", "TRADE_TICK")
             ),
@@ -207,6 +207,7 @@ class MarketEventSourceSnapshotTestCase(unittest.TestCase):
         audited_at: datetime | None = None,
         findings: tuple[MarketEventSequenceFinding, ...] = (),
         manifests: tuple[MarketEventSourceSessionManifest, ...] | None = None,
+        transport_snapshot=None,
     ) -> MarketEventStoreAudit:
         actual_manifests = (self.default_manifest,) if manifests is None else manifests
         inventory = MarketEventInventoryVerification.create_from_prefix(
@@ -217,7 +218,7 @@ class MarketEventSourceSnapshotTestCase(unittest.TestCase):
         return MarketEventStoreAudit.create_from_prefix(
             source_store_id=self.store_id,
             source_schema_id="stock-tracker-market-event-store-v4",
-            sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V2,
+            sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V3,
             audited_at=audited_at
             or max(
                 (
@@ -233,6 +234,7 @@ class MarketEventSourceSnapshotTestCase(unittest.TestCase):
             records=records,
             findings=findings,
             source_session_manifests=actual_manifests,
+            transport_snapshot=transport_snapshot,
         )
 
     def snapshot(
@@ -475,7 +477,7 @@ class TestMarketEventStoreSnapshot(MarketEventSourceSnapshotTestCase):
             MarketEventStoreAudit.create_from_prefix(
                 source_store_id=self.store_id,
                 source_schema_id="stock-tracker-market-event-store-v4",
-                sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V2,
+                sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V3,
                 audited_at=records[-1].durable_known_at + timedelta(seconds=1),
                 catalog_schema_fingerprint=_hash("catalog-schema-v4"),
                 records=records,
@@ -1187,7 +1189,11 @@ class TestR3SourceClosure(MarketEventSourceSnapshotTestCase):
                 )
             )
             self.assertEqual(selection.completeness, "EMPTY_NOT_PROVEN")
-        snapshot = self.snapshot(())
+        snapshot = MarketEventStoreSnapshot.from_audit(
+            self.audit(
+                (), transport_snapshot=transport_fixture((self.default_manifest,))
+            )
+        )
         selection = self.select(snapshot, ())
         self.assertEqual(selection.completeness, "ZERO_EVENT_PROVEN")
         self.assertFalse(
@@ -1254,7 +1260,9 @@ class TestR3SourceClosure(MarketEventSourceSnapshotTestCase):
         )
         self.assertEqual(selection.records, (first,))
         self.assertEqual(selection.relevant_findings, (finding,))
-        self.assertEqual(selection.completeness, "BLOCKED_SEQUENCE_INTEGRITY")
+        self.assertEqual(
+            selection.completeness, "BLOCKED_SEQUENCE_OR_TRANSPORT_INTEGRITY"
+        )
         with self.assertRaises(MarketEventSourceContractError):
             self.snapshot(
                 (first, second),
@@ -1293,6 +1301,454 @@ class TestR3SourceClosure(MarketEventSourceSnapshotTestCase):
         self.assertEqual(backfill.assurance, "STRUCTURAL_FIXTURE")
         with self.assertRaises(TypeError):
             replace(backfill, assurance="STORE_RESCANNED")
+
+
+def transport_fixture(
+    manifests,
+    records=(),
+    *,
+    omit=(),
+    disconnect=False,
+    heartbeat_gap=False,
+    loss=0,
+    store_id=None,
+):
+    from stock_tracker.runtime_evidence.source_snapshot_contracts import (
+        MarketEventTransportKind,
+        MarketEventTransportRecord,
+        MarketEventTransportSnapshot,
+    )
+
+    events = []
+    for manifest in manifests:
+        start, end = manifest.coverage_start, manifest.coverage_through
+        end = max(
+            end,
+            *(
+                r.durable_known_at
+                for r in records
+                if r.source_session_manifest_id == manifest.manifest_id
+            ),
+            end,
+        )
+        entries = [(start, "CONNECTED"), (start, "SUBSCRIPTION_ACKNOWLEDGED")]
+        stamp = start
+        while stamp < end:
+            entries.extend(
+                (stamp, kind)
+                for kind in ("HEARTBEAT", "CALLBACK_WATERMARK", "QUEUE_WATERMARK")
+            )
+            stamp += timedelta(minutes=5)
+        entries.extend(
+            (end, kind)
+            for kind in (
+                "HEARTBEAT",
+                "CALLBACK_WATERMARK",
+                "QUEUE_WATERMARK",
+                "SESSION_CLOSED",
+            )
+        )
+        if disconnect:
+            entries.append((start + (end - start) / 2, "DISCONNECTED"))
+        for stamp, kind in entries:
+            if kind in omit or (
+                heartbeat_gap and kind == "HEARTBEAT" and start < stamp < end
+            ):
+                continue
+            members = [
+                r
+                for r in records
+                if r.session_id == manifest.session_id
+                and r.connection_epoch == manifest.connection_epoch
+                and r.reconnect_epoch == manifest.reconnect_epoch
+                and r.durable_known_at <= stamp
+            ]
+            events.append(
+                (
+                    stamp,
+                    kind,
+                    manifest,
+                    max((r.callback_seq for r in members), default=0),
+                    max(
+                        (r.provider_seq for r in members if r.provider_seq is not None),
+                        default=None,
+                    ),
+                )
+            )
+    result = []
+    for stamp, kind, manifest, callback, provider in sorted(
+        events, key=lambda row: row[0]
+    ):
+        result.append(
+            MarketEventTransportRecord(
+                source_store_id=store_id or manifest.source_store_id,
+                transport_stream_id=_hash("fixture-transport"),
+                transport_append_order=len(result) + 1,
+                previous_transport_record_hash=result[-1].record_hash
+                if result
+                else "0" * 64,
+                session_id=manifest.session_id,
+                connection_epoch=manifest.connection_epoch,
+                reconnect_epoch=manifest.reconnect_epoch,
+                kind=MarketEventTransportKind(kind),
+                observed_at=stamp,
+                durable_known_at=stamp,
+                subscription_scope_id=None
+                if kind in {"CONNECTED", "HEARTBEAT"}
+                else manifest.subscription.subscription_scope_id,
+                callback_high_water=callback,
+                provider_high_water=provider,
+                queue_overflow_count=loss if stamp > manifest.coverage_start else 0,
+                dropped_callback_count=0,
+                canonical_payload="{}",
+            )
+        )
+    return MarketEventTransportSnapshot.from_records(
+        source_store_id=store_id or manifests[0].source_store_id,
+        records=tuple(result),
+        audited_at=max(r.durable_known_at for r in result),
+    )
+
+
+class TestR4TransportClosure(MarketEventSourceSnapshotTestCase):
+    def with_transport(self, **kwargs):
+        transport = transport_fixture((self.default_manifest,), **kwargs)
+        audit = self.audit((), transport_snapshot=transport)
+        return self.select(MarketEventStoreSnapshot.from_audit(audit), ())
+
+    def test_r4_zero_callbacks_without_liveness_is_not_zero_proven(self):
+        selection = self.select(self.snapshot(()), ())
+        self.assertEqual(selection.completeness.value, "EMPTY_NOT_PROVEN")
+
+    def test_r4_complete_liveness_proves_structural_zero(self):
+        selection = self.with_transport()
+        self.assertEqual(selection.completeness.value, "ZERO_EVENT_PROVEN")
+        self.assertEqual(
+            selection.transport_certificate.assurance.value, "STRUCTURAL_FIXTURE"
+        )
+
+    def test_r4_disconnect_blocks_coverage(self):
+        self.assertFalse(
+            self.with_transport(disconnect=True).covers_interval(
+                self.base_time, self.base_time + timedelta(minutes=10)
+            )
+        )
+
+    def test_r4_heartbeat_gap_blocks_coverage(self):
+        self.assertFalse(
+            self.with_transport(heartbeat_gap=True).covers_interval(
+                self.base_time, self.base_time + timedelta(minutes=10)
+            )
+        )
+
+    def test_r4_counter_increment_blocks_coverage(self):
+        self.assertFalse(
+            self.with_transport(loss=1).covers_interval(
+                self.base_time, self.base_time + timedelta(minutes=10)
+            )
+        )
+
+    def test_r4_missing_close_cannot_complete_session(self):
+        selection = self.with_transport(omit=("SESSION_CLOSED",))
+        self.assertFalse(
+            selection.transport_certificate.proves_session_close(
+                self.default_manifest.coverage_through
+            )
+        )
+
+    def test_r4_transport_store_mismatch_rejected(self):
+        with self.assertRaisesRegex(ValueError, "store"):
+            self.with_transport(store_id=_hash("another-store"))
+
+    def test_r4_later_transport_cannot_change_earlier_event_snapshot(self):
+        earlier = self.snapshot(())
+        transport = transport_fixture((self.default_manifest,))
+        later = MarketEventStoreSnapshot.from_audit(
+            self.audit((), transport_snapshot=transport)
+        )
+        self.assertNotEqual(earlier.snapshot_id, later.snapshot_id)
+        self.assertFalse(
+            self.select(earlier, ()).covers_interval(
+                self.base_time, self.base_time + timedelta(minutes=10)
+            )
+        )
+
+    def clock_record(self, *, ahead_seconds=0, delay_seconds=2):
+        from dataclasses import fields
+
+        first = self.records()[0]
+        args = {
+            f.name: getattr(first, f.name)
+            for f in fields(first)
+            if f.init
+            and f.name
+            not in {
+                "payload_json",
+                "payload_sha256",
+                "record_storage_key",
+                "record_file_sha256",
+                "record_content_hash",
+            }
+        }
+        args.update(
+            received_at=first.source_time - timedelta(seconds=ahead_seconds),
+            durable_known_at=first.source_time + timedelta(seconds=delay_seconds),
+        )
+        return MarketEventSourceRecord.create(
+            **args, payload={"last_price": 11, "quantity": 100}
+        )
+
+    def test_r4_one_hour_negative_latency_rejected_or_blocked(self):
+        record = self.clock_record(ahead_seconds=3600)
+        with self.assertRaisesRegex(ValueError, "finding|clock"):
+            self.snapshot((record,))
+
+    def test_r4_small_explicit_clock_skew_accepted(self):
+        from stock_tracker.runtime_evidence.source_snapshot_contracts import (
+            SourceClockPolicy,
+        )
+
+        self.assertGreater(
+            SourceClockPolicy().maximum_source_ahead_of_received.total_seconds(), 0
+        )
+        self.snapshot((self.clock_record(ahead_seconds=1),))
+
+    def test_r4_transport_factory_cannot_claim_store_rescanned(self):
+        transport = transport_fixture((self.default_manifest,))
+        self.assertEqual(transport.assurance.value, "STRUCTURAL_FIXTURE")
+        with self.assertRaises(TypeError):
+            replace(transport, assurance="STORE_RESCANNED")
+
+    def test_r4_whole_package_type_diagnostics(self):
+        import subprocess
+
+        result = subprocess.run(
+            [
+                "py",
+                "-3.14",
+                "-m",
+                "basedpyright",
+                "--level",
+                "error",
+                "stock_tracker/runtime_evidence",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        self.assertEqual(
+            result.returncode, 0, (result.stdout or "") + (result.stderr or "")
+        )
+
+    def test_r4_missing_ack_and_final_watermark_fail_closed(self):
+        for kind in (
+            "SUBSCRIPTION_ACKNOWLEDGED",
+            "CALLBACK_WATERMARK",
+            "QUEUE_WATERMARK",
+        ):
+            with self.subTest(kind=kind):
+                selection = self.with_transport(omit=(kind,))
+                self.assertEqual(selection.completeness.value, "EMPTY_NOT_PROVEN")
+
+    def test_r4_clock_findings_are_required_and_contaminate_other_symbol(self):
+        record = self.clock_record(ahead_seconds=3600)
+        findings = tuple(
+            self.finding(
+                record,
+                kind=kind,
+                expected_sequence=None,
+                observed_sequence=None,
+                detail_code=kind.value,
+            )
+            for kind in (
+                MarketEventSequenceFindingKind.SOURCE_CLOCK_SKEW,
+                MarketEventSequenceFindingKind.DURABILITY_DELAY,
+            )
+        )
+        snapshot = self.snapshot((record,), findings=findings)
+        for symbol in ("600519.SH", "000001.SZ"):
+            selection = self.select(
+                snapshot, (record,), symbol=symbol, findings=findings
+            )
+            self.assertEqual(
+                selection.completeness.value, "BLOCKED_SEQUENCE_OR_TRANSPORT_INTEGRITY"
+            )
+
+    def test_r4_durability_delay_boundary_is_explicit(self):
+        record = self.clock_record(delay_seconds=301)
+        finding = self.finding(
+            record,
+            kind=MarketEventSequenceFindingKind.DURABILITY_DELAY,
+            expected_sequence=None,
+            observed_sequence=None,
+            detail_code="DURABILITY_DELAY",
+        )
+        selection = self.select(
+            self.snapshot((record,), findings=(finding,)),
+            (record,),
+            findings=(finding,),
+        )
+        self.assertFalse(
+            selection.covers_interval(
+                self.base_time, self.base_time + timedelta(minutes=10)
+            )
+        )
+        self.snapshot((self.clock_record(delay_seconds=300),))
+
+    def test_r4_unknown_clock_and_liveness_policies_rejected(self):
+        from stock_tracker.runtime_evidence.source_snapshot_contracts import (
+            SourceClockPolicy,
+            TransportLivenessPolicy,
+        )
+
+        for factory in (SourceClockPolicy, TransportLivenessPolicy):
+            with self.assertRaisesRegex(ValueError, "policy"):
+                factory(_hash("self-named-policy"))
+        with self.assertRaisesRegex(ValueError, "clock"):
+            replace(self.default_manifest, clock_policy_id=_hash("caller-clock"))
+
+    def test_r4_transport_chain_and_counter_rollback_rejected(self):
+        transport = transport_fixture((self.default_manifest,))
+        first, second = transport.records[:2]
+        for records in (
+            (first, replace(second, transport_append_order=3)),
+            (first, replace(second, previous_transport_record_hash=_hash("wrong"))),
+        ):
+            with self.assertRaisesRegex(ValueError, "prefix"):
+                replace(transport, records=records)
+        first = replace(first, queue_overflow_count=1)
+        second = replace(second, previous_transport_record_hash=first.record_hash)
+        with self.assertRaisesRegex(ValueError, "monotonic"):
+            replace(transport, records=(first, second))
+
+    def test_r4_backfill_requires_exact_completed_job(self):
+        from stock_tracker.runtime_evidence.source_snapshot_contracts import (
+            MarketEventTransportKind,
+            MarketEventTransportRecord,
+            MarketEventTransportSnapshot,
+        )
+
+        original = self.with_transport()
+        snapshot = original.transport_certificate.event_snapshot
+        verification = snapshot.verify_selection(
+            original,
+            records=(),
+            partition_heads=(),
+            findings=(),
+            source_session_manifests=(self.default_manifest,),
+        )
+        job_time = self.base_time + timedelta(days=1)
+        manifest = replace(
+            self.default_manifest,
+            session_id="backfill-job",
+            coverage_origin=CoverageOrigin.BACKFILL,
+            subscription=MarketEventSubscriptionManifest(
+                Market.A, ("600519.SH",), ("TRADE_TICK",)
+            ),
+            coverage_start=original.start_source_time,
+            coverage_through=original.end_source_time,
+            collector_started_at=job_time,
+            subscription_activated_at=job_time,
+            replay_selection=original,
+            replay_verification=verification,
+        )
+        rows = []
+        for index, kind in enumerate(
+            (
+                MarketEventTransportKind.BACKFILL_STARTED,
+                MarketEventTransportKind.BACKFILL_COMPLETED,
+            ),
+            1,
+        ):
+            rows.append(
+                MarketEventTransportRecord(
+                    self.store_id,
+                    _hash("backfill-stream"),
+                    index,
+                    rows[-1].record_hash if rows else "0" * 64,
+                    manifest.session_id,
+                    1,
+                    0,
+                    kind,
+                    job_time,
+                    job_time,
+                    manifest.subscription.subscription_scope_id,
+                    0,
+                    None,
+                    0,
+                    0,
+                    "{}",
+                    original,
+                    verification,
+                    0,
+                    "0" * 64,
+                )
+            )
+
+        def select_job(rows):
+            transport = MarketEventTransportSnapshot.from_records(
+                source_store_id=self.store_id, records=tuple(rows), audited_at=job_time
+            )
+            audit = self.audit(
+                (),
+                manifests=(manifest,),
+                transport_snapshot=transport,
+                audited_at=job_time,
+            )
+            return self.select(
+                MarketEventStoreSnapshot.from_audit(audit), (), manifests=(manifest,)
+            )
+
+        self.assertEqual(select_job(rows).completeness.value, "ZERO_EVENT_PROVEN")
+        self.assertEqual(select_job(rows[:1]).completeness.value, "EMPTY_NOT_PROVEN")
+        wrong = replace(rows[1], job_output_chain_head=_hash("fabricated-output"))
+        self.assertEqual(
+            select_job((rows[0], wrong)).completeness.value, "EMPTY_NOT_PROVEN"
+        )
+
+    def test_r4_backfill_cannot_bootstrap_an_unproven_input(self):
+        selection = self.select(self.snapshot(()), ())
+        self.assertEqual(selection.completeness.value, "EMPTY_NOT_PROVEN")
+        self.assertFalse(
+            selection.transport_certificate.proves_interval(
+                self.base_time, self.base_time + timedelta(minutes=10)
+            )
+        )
+
+    def test_r4_event_watermark_mismatch_is_integrity_blocked(self):
+        transport = transport_fixture((self.default_manifest,))
+        rows = []
+        for item in transport.records:
+            rows.append(
+                replace(
+                    item,
+                    callback_high_water=9,
+                    previous_transport_record_hash=rows[-1].record_hash
+                    if rows
+                    else "0" * 64,
+                )
+            )
+        transport = replace(transport, records=tuple(rows))
+        selection = self.select(
+            MarketEventStoreSnapshot.from_audit(
+                self.audit((), transport_snapshot=transport)
+            ),
+            (),
+        )
+        self.assertEqual(
+            selection.completeness.value, "BLOCKED_SEQUENCE_OR_TRANSPORT_INTEGRITY"
+        )
+
+    def test_r4_event_appended_after_final_watermark_cannot_complete_prefix(self):
+        record = self.clock_record(ahead_seconds=-3600, delay_seconds=3602)
+        transport = transport_fixture((self.default_manifest,))
+        audit = self.audit((record,), transport_snapshot=transport)
+        selection = self.select(MarketEventStoreSnapshot.from_audit(audit), (record,))
+        self.assertEqual(
+            selection.completeness.value, "BLOCKED_SEQUENCE_OR_TRANSPORT_INTEGRITY"
+        )
 
 
 if __name__ == "__main__":

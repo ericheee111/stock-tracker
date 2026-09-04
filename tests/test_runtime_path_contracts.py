@@ -56,7 +56,7 @@ from stock_tracker.runtime_evidence.path_contracts import (
 from stock_tracker.runtime_evidence.source_snapshot_contracts import (
     FIXTURE_TRADE_DECODER_POLICY_V1,
     FIXTURE_TRADE_TICK_SCHEMA_V1,
-    MARKET_EVENT_SEQUENCE_POLICY_V2,
+    MARKET_EVENT_SEQUENCE_POLICY_V3,
     CoverageOrigin,
     DecodedTradeTick,
     MarketEventCallbackSequenceScope,
@@ -114,7 +114,7 @@ class RuntimePathContractTestCase(unittest.TestCase):
             source_audit_id=self.source_audit_id,
             source_high_water_append_order=self.source_high_water,
             finding_set_digest=self.source_finding_set_digest,
-            sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V2,
+            sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V3,
             selection_id=_hash("placeholder-selection"),
             selection_verification_id=_hash("placeholder-selection-verification"),
             event_id=_hash(f"event:{label}"),
@@ -217,7 +217,7 @@ class RuntimePathContractTestCase(unittest.TestCase):
                     callback_sequence_scope=MarketEventCallbackSequenceScope.SESSION,
                     provider_sequence_available=False,
                     provider_sequence_scope=MarketEventProviderSequenceScope.UNAVAILABLE,
-                    sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V2,
+                    sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V3,
                     subscription=MarketEventSubscriptionManifest(
                         Market.A, ("600519.SH",), ("TRADE_TICK",)
                     ),
@@ -294,11 +294,18 @@ class RuntimePathContractTestCase(unittest.TestCase):
             catalog_schema_fingerprint=_hash("fixture-catalog"),
             records=records,
         )
+        from tests.test_market_source_snapshot_contracts import transport_fixture
+
+        transport = (
+            transport_fixture(manifests, records)
+            if (source_start_proof and getattr(self, "transport_enabled", True))
+            else None
+        )
         snapshot = MarketEventStoreSnapshot.from_audit(
             MarketEventStoreAudit.create_from_prefix(
                 source_store_id=self.source_store_id,
                 source_schema_id="fixture-store-v4",
-                sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V2,
+                sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V3,
                 audited_at=audited,
                 catalog_schema_fingerprint=_hash("fixture-catalog"),
                 inventory_verification=inventory,
@@ -306,6 +313,7 @@ class RuntimePathContractTestCase(unittest.TestCase):
                 partition_heads=heads,
                 findings=(),
                 source_session_manifests=manifests,
+                transport_snapshot=transport,
             )
         )
 
@@ -382,7 +390,7 @@ class RuntimePathContractTestCase(unittest.TestCase):
             fact_revision=revision,
             authority_append_order=append_order,
             previous_authority_record_hash=previous,
-            policy_id=_hash(f"policy:{kind.value}"),
+            authority_record_policy_id=_hash(f"policy:{kind.value}"),
         )
 
     def session_fact(
@@ -408,7 +416,7 @@ class RuntimePathContractTestCase(unittest.TestCase):
             trading_day=trading_day,
             known_at=known,
             label="calendar",
-            revision=source_order,
+            revision=1,
             fact=calendar,
         )
         security_ref = coverage_ref = None
@@ -444,7 +452,7 @@ class RuntimePathContractTestCase(unittest.TestCase):
                 trading_day=trading_day,
                 known_at=known,
                 label="coverage",
-                revision=source_order,
+                revision=1,
                 fact=coverage,
             )
             security = SecurityStatusFact(
@@ -465,7 +473,7 @@ class RuntimePathContractTestCase(unittest.TestCase):
                 trading_day=trading_day,
                 known_at=known,
                 label="security",
-                revision=source_order,
+                revision=1,
                 fact=security,
             )
             self.calendars[open_session_index] = calendar
@@ -2831,7 +2839,7 @@ class TestR3SemanticClosure(RuntimePathContractTestCase):
             trading_day=date(2026, 9, 1),
             known_at=known,
             label="first",
-            revision=700,
+            revision=1,
         )
         second = self.authority_reference(
             kind=RuntimeAuthorityKind.CALENDAR,
@@ -2918,6 +2926,196 @@ class TestR3SemanticClosure(RuntimePathContractTestCase):
         self.assertEqual(evidence.as_dict()["assurance"], "STRUCTURAL_FIXTURE")
         with self.assertRaises(TypeError):
             replace(summary, assurance="STORE_RESCANNED")
+
+
+class TestR4AuthorityClosure(RuntimePathContractTestCase):
+    def authority_chain(self, *, future=False):
+        first = self.authority_reference(
+            kind=RuntimeAuthorityKind.CALENDAR,
+            trading_day=date(2026, 9, 1),
+            known_at=self.entry_time,
+            label="r4-calendar",
+            revision=1,
+        )
+        second = replace(
+            first,
+            fact=replace(
+                first.fact,
+                segments=(replace(first.fact.segments[0], calendar_fact_id=None),),
+            ),
+            fact_revision=2,
+            authority_append_order=2,
+            previous_authority_record_hash=first.fact_record_hash,
+            previous_entity_fact_id=first.fact_id,
+            supersedes_fact_id=first.fact_id,
+            known_at=self.entry_time + timedelta(days=1 if future else 0),
+            usable_from=self.entry_time + timedelta(days=1 if future else 0),
+        )
+        return first, second
+
+    def authority_inventory(self, facts):
+        snapshot = RuntimeAuthoritySnapshotBinding.from_facts(
+            authority_kind=RuntimeAuthorityKind.CALENDAR,
+            authority_store_id=facts[0].authority_store_id,
+            authority_audited_at=max(f.known_at for f in facts),
+            facts=facts,
+        )
+        return RuntimeAuthorityFactSelection.from_verified_snapshot(
+            snapshot=snapshot,
+            facts=facts,
+            selection_policy_id=_hash("inventory"),
+        )
+
+    def effective(self, facts, cutoff):
+        from stock_tracker.runtime_evidence.path_contracts import (
+            RuntimeAuthorityEffectiveSelection,
+        )
+
+        return RuntimeAuthorityEffectiveSelection(
+            inventory=self.authority_inventory(facts),
+            cutoff=cutoff,
+            symbol="600519.SH",
+            market=Market.A,
+            session_dates=(date(2026, 9, 1),),
+        )
+
+    def test_r4_no_liveness_cannot_timeout(self):
+        self.transport_enabled = False
+        result = resolve_runtime_path(
+            self.window(), self.prefix(self.three_complete_sessions())
+        )
+        self.assertNotEqual(result.state, RuntimePathResolutionState.TIMEOUT)
+
+    def test_r4_latest_usable_calendar_supersedes_old_fact(self):
+        first, second = self.authority_chain()
+        effective = self.effective((first, second), self.entry_time)
+        self.assertEqual(effective.active_fact(first.authority_entity_key), second)
+        self.assertEqual(effective.superseded_fact_ids, (first.fact_id,))
+
+    def test_r4_future_known_revision_keeps_old_active(self):
+        first, second = self.authority_chain(future=True)
+        self.assertEqual(
+            self.effective((first, second), self.entry_time).active_fact(
+                first.authority_entity_key
+            ),
+            first,
+        )
+
+    def test_r4_duplicate_entity_revision_rejected(self):
+        first, second = self.authority_chain()
+        with self.assertRaisesRegex(RuntimePathContractError, "entity"):
+            self.authority_inventory((first, replace(second, fact_revision=1)))
+
+    def test_r4_entity_revision_rollback_rejected(self):
+        first = self.authority_reference(
+            kind=RuntimeAuthorityKind.CALENDAR,
+            trading_day=date(2026, 9, 1),
+            known_at=self.entry_time,
+            label="rollback",
+            revision=2,
+        )
+        second = replace(
+            first,
+            fact_revision=1,
+            authority_append_order=2,
+            previous_authority_record_hash=first.fact_record_hash,
+        )
+        with self.assertRaisesRegex(RuntimePathContractError, "entity"):
+            self.authority_inventory((first, second))
+
+    def test_r4_entity_branch_rejected(self):
+        first, second = self.authority_chain()
+        branch = replace(
+            second,
+            authority_append_order=3,
+            previous_authority_record_hash=second.fact_record_hash,
+        )
+        with self.assertRaisesRegex(RuntimePathContractError, "entity"):
+            self.authority_inventory((first, second, branch))
+
+    def test_r4_missing_entity_predecessor_rejected(self):
+        first, second = self.authority_chain()
+        with self.assertRaisesRegex(RuntimePathContractError, "entity"):
+            self.authority_inventory(
+                (first, replace(second, previous_entity_fact_id=_hash("missing")))
+            )
+
+    def test_r4_stale_calendar_rejected_by_prefix_with_stable_code(self):
+        prefix = self.prefix(self.three_complete_sessions())
+        inventory = next(
+            i
+            for i in prefix.authority_fact_selections
+            if i.snapshot.authority_kind is RuntimeAuthorityKind.CALENDAR
+        )
+        first = inventory.facts[0]
+        newer = replace(
+            first,
+            fact=replace(
+                first.fact,
+                segments=(replace(first.fact.segments[0], calendar_fact_id=None),),
+            ),
+            fact_revision=2,
+            authority_append_order=len(inventory.facts) + 1,
+            previous_authority_record_hash=inventory.facts[-1].fact_record_hash,
+            previous_entity_fact_id=first.fact_id,
+            supersedes_fact_id=first.fact_id,
+            known_at=prefix.frozen_at,
+            usable_from=prefix.frozen_at,
+        )
+        revised = self.authority_inventory((*inventory.facts, newer))
+        with self.assertRaises(RuntimePathContractError) as raised:
+            RuntimeFrozenPathPrefix.from_verified_case_selection(
+                case_selection=prefix.case_selection,
+                market_source_snapshot=prefix.market_source_snapshot,
+                authority_fact_selections=tuple(
+                    revised if i is inventory else i
+                    for i in prefix.authority_fact_selections
+                ),
+                frozen_at=prefix.frozen_at,
+            )
+        self.assertEqual(raised.exception.code, "STALE_AUTHORITY_FACT")
+
+    def test_r4_future_usable_revision_and_unknown_selection_policy(self):
+        first, second = self.authority_chain()
+        future = replace(second, usable_from=self.entry_time + timedelta(days=1))
+        effective = self.effective((first, future), self.entry_time)
+        self.assertEqual(effective.active_fact(first.authority_entity_key), first)
+        with self.assertRaisesRegex(RuntimePathContractError, "policy"):
+            replace(effective, effective_selection_policy_id=_hash("caller-policy"))
+        with self.assertRaises(TypeError):
+            replace(effective, assurance="STORE_RESCANNED")
+
+    def test_r4_coverage_entity_excludes_selection_snapshot_identity(self):
+        calendar = self.calendar(date(2026, 9, 1))
+        first_selection, first_proof, _ = self.market_fixture((calendar,))
+        next_selection, next_proof, _ = self.market_fixture(
+            (calendar,), (("new-trade", self.entry_time, "10"),)
+        )
+        references = []
+        for selection, proof in (
+            (first_selection, first_proof),
+            (next_selection, next_proof),
+        ):
+            coverage = SourceCoverageFact(
+                calendar,
+                selection,
+                proof,
+                calendar.scheduled_close_at,
+                _hash("coverage-policy"),
+            )
+            references.append(
+                self.authority_reference(
+                    kind=RuntimeAuthorityKind.COVERAGE,
+                    trading_day=calendar.trading_day,
+                    known_at=selection.snapshot_audited_at,
+                    label="coverage",
+                    fact=coverage,
+                )
+            )
+        self.assertNotEqual(references[0].fact_id, references[1].fact_id)
+        self.assertEqual(
+            references[0].authority_entity_key, references[1].authority_entity_key
+        )
 
 
 if __name__ == "__main__":

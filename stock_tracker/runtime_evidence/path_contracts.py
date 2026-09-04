@@ -18,7 +18,7 @@ from stock_tracker.core.market_time import (
 from stock_tracker.core.types import Market
 from stock_tracker.runtime_evidence.source_snapshot_contracts import (
     MARKET_EVENT_INTERVAL_BOUNDARY_POLICY_V1,
-    MARKET_EVENT_SEQUENCE_POLICY_V2,
+    MARKET_EVENT_SEQUENCE_POLICY_V3,
     DecodedTradeTick,
     FindingResolutionState,
     MarketEventSelection,
@@ -29,8 +29,8 @@ from stock_tracker.runtime_evidence.source_snapshot_contracts import (
     validate_selection_verification,
 )
 
-RUNTIME_PATH_CONTRACT_SCHEMA = "stage4g1-runtime-path-contract-v4"
-RUNTIME_PATH_PREFIX_SCHEMA = "stage4g1-runtime-path-prefix-v4"
+RUNTIME_PATH_CONTRACT_SCHEMA = "stage4g1-runtime-path-contract-v5"
+RUNTIME_PATH_PREFIX_SCHEMA = "stage4g1-runtime-path-prefix-v5"
 RUNTIME_PATH_RESOLUTION_SCHEMA = "stage4g1-runtime-path-resolution-v3"
 RUNTIME_NO_ENTRY_SCHEMA = "stage4g1-runtime-no-entry-evidence-v3"
 RUNTIME_EXECUTION_SUMMARY_SCHEMA = "stage4g1-runtime-execution-summary-v4"
@@ -341,7 +341,7 @@ class RuntimeSourceReference(StructuralFixture):
             "source_high_water_append_order",
         )
         _require_sha256(self.finding_set_digest, "finding_set_digest")
-        if self.sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V2:
+        if self.sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V3:
             raise RuntimePathContractError("unsupported market-event sequence policy")
         _require_sha256(self.selection_id, "selection_id")
         _require_sha256(self.selection_verification_id, "selection_verification_id")
@@ -740,6 +740,8 @@ class SourceCoverageFact(StructuralFixture):
             state = (
                 RuntimeCoverageState.COMPLETE_SESSION
                 if through == closing
+                and self.selection.transport_certificate is not None
+                and self.selection.transport_certificate.proves_session_close(closing)
                 else RuntimeCoverageState.COMPLETE_PREFIX
             )
         segment_coverage = tuple(
@@ -772,7 +774,10 @@ class SourceCoverageFact(StructuralFixture):
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
             "assurance": self.assurance.value,
-            "schema": "stage4g1-source-coverage-fact-v1",
+            "schema": "stage4g1-source-coverage-fact-v2",
+            "transport_certificate_id": self.selection.transport_certificate.certificate_id
+            if self.selection.transport_certificate is not None
+            else None,
             "symbol": self.calendar_fact.symbol,
             "market": self.calendar_fact.market.value,
             "trading_day": self.calendar_fact.trading_day.isoformat(),
@@ -819,7 +824,10 @@ class RuntimeAuthorityFactReference(StructuralFixture):
     fact_revision: int
     authority_append_order: int
     previous_authority_record_hash: str
-    policy_id: str
+    authority_record_policy_id: str
+    previous_entity_fact_id: str | None = None
+    supersedes_fact_id: str | None = None
+    authority_entity_key: str = field(init=False)
     authority_kind: RuntimeAuthorityKind = field(init=False)
     fact_schema: str = field(init=False)
     effective_session_date: date = field(init=False)
@@ -858,7 +866,11 @@ class RuntimeAuthorityFactReference(StructuralFixture):
         _require_sha256(
             self.previous_authority_record_hash, "previous_authority_record_hash"
         )
-        _require_sha256(self.policy_id, "policy_id")
+        _require_sha256(self.authority_record_policy_id, "authority_record_policy_id")
+        for name in ("previous_entity_fact_id", "supersedes_fact_id"):
+            value = getattr(self, name)
+            if value is not None:
+                _require_sha256(value, name)
         document = self.fact.as_dict()
         calendar = (
             self.fact.calendar_fact
@@ -868,6 +880,24 @@ class RuntimeAuthorityFactReference(StructuralFixture):
         object.__setattr__(self, "authority_kind", kinds[type(self.fact)])
         object.__setattr__(self, "fact_schema", document["schema"])
         object.__setattr__(self, "effective_session_date", calendar.trading_day)
+        scope: dict[str, Any] = {
+            "schema": "stage4g1-authority-entity-v1",
+            "kind": self.authority_kind.value,
+            "symbol": calendar.symbol,
+            "market": calendar.market.value,
+            "trading_day": calendar.trading_day.isoformat(),
+        }
+        if isinstance(self.fact, CalendarSessionFact):
+            scope["business_policy_id"] = self.fact.calendar_policy_id
+        elif isinstance(self.fact, SecurityStatusFact):
+            scope["business_policy_id"] = self.fact.status_policy_id
+        else:
+            scope.update(
+                business_policy_id=self.fact.coverage_policy_id,
+                source_store_id=self.fact.selection.source_store_id,
+                event_types=list(self.fact.selection.allowed_event_types),
+            )
+        object.__setattr__(self, "authority_entity_key", _hash_document(scope))
         object.__setattr__(self, "fact_payload_sha256", _hash_document(document))
         object.__setattr__(
             self, "fact_record_hash", _hash_document(self.fact_document())
@@ -893,7 +923,7 @@ class RuntimeAuthorityFactReference(StructuralFixture):
 
     def fact_document(self) -> dict[str, Any]:
         return {
-            "schema": "stage4g1-runtime-authority-canonical-fact-v2",
+            "schema": "stage4g1-runtime-authority-canonical-fact-v3",
             "assurance": self.assurance.value,
             "authority_kind": self.authority_kind.value,
             "authority_store_id": self.authority_store_id,
@@ -905,7 +935,10 @@ class RuntimeAuthorityFactReference(StructuralFixture):
             "fact_revision": self.fact_revision,
             "authority_append_order": self.authority_append_order,
             "previous_authority_record_hash": self.previous_authority_record_hash,
-            "policy_id": self.policy_id,
+            "authority_record_policy_id": self.authority_record_policy_id,
+            "authority_entity_key": self.authority_entity_key,
+            "previous_entity_fact_id": self.previous_entity_fact_id,
+            "supersedes_fact_id": self.supersedes_fact_id,
             "fact_payload_sha256": self.fact_payload_sha256,
             "business_fact": self.fact.as_dict(),
         }
@@ -913,7 +946,7 @@ class RuntimeAuthorityFactReference(StructuralFixture):
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
             "assurance": self.assurance.value,
-            "schema": "stage4g1-runtime-authority-fact-reference-v3",
+            "schema": "stage4g1-runtime-authority-fact-reference-v4",
             "fact": self.fact_document(),
             "fact_record_hash": self.fact_record_hash,
             "fact_id": self.fact_id,
@@ -962,7 +995,6 @@ class RuntimeAuthoritySnapshotBinding(StructuralFixture):
                 or item.authority_kind is not authority_kind
                 or item.authority_store_id != authority_store_id
                 or item.known_at > audited_at
-                or item.usable_from > audited_at
                 for item in facts
             )
         ):
@@ -972,6 +1004,7 @@ class RuntimeAuthoritySnapshotBinding(StructuralFixture):
         chain = "0" * 64
         previous_record = "0" * 64
         previous_known: datetime | None = None
+        entity_heads: dict[str, RuntimeAuthorityFactReference] = {}
         for order, fact in enumerate(facts, 1):
             if (
                 fact.authority_append_order != order
@@ -984,6 +1017,20 @@ class RuntimeAuthoritySnapshotBinding(StructuralFixture):
                 )
             previous_record = fact.fact_record_hash
             previous_known = fact.known_at
+            previous_entity = entity_heads.get(fact.authority_entity_key)
+            expected_revision = (
+                1 if previous_entity is None else previous_entity.fact_revision + 1
+            )
+            expected_id = None if previous_entity is None else previous_entity.fact_id
+            if (
+                fact.fact_revision != expected_revision
+                or fact.previous_entity_fact_id != expected_id
+                or fact.supersedes_fact_id != expected_id
+            ):
+                raise RuntimePathContractError(
+                    "authority entity revision chain is duplicate, missing, rolled back or branched"
+                )
+            entity_heads[fact.authority_entity_key] = fact
             chain = _hash_document(
                 {
                     "schema": "stage4g1-runtime-authority-fact-manifest-node-v2",
@@ -1030,7 +1077,7 @@ class RuntimeAuthoritySnapshotBinding(StructuralFixture):
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
             "assurance": self.assurance.value,
-            "schema": "stage4g1-runtime-authority-snapshot-binding-v3",
+            "schema": "stage4g1-runtime-authority-snapshot-binding-v4",
             "authority_kind": self.authority_kind.value,
             "authority_store_id": self.authority_store_id,
             "authority_audit_id": self.authority_audit_id,
@@ -1136,6 +1183,109 @@ class RuntimeAuthorityFactSelection(StructuralFixture):
         return document
 
 
+AUTHORITY_EFFECTIVE_SELECTION_POLICY_V1 = (
+    "stage4g1-latest-known-usable-entity-revision-v1"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeAuthorityEffectiveSelection(StructuralFixture):
+    inventory: RuntimeAuthorityFactSelection
+    cutoff: datetime
+    symbol: str
+    market: Market
+    session_dates: tuple[date, ...]
+    effective_selection_policy_id: str = AUTHORITY_EFFECTIVE_SELECTION_POLICY_V1
+    active_facts_by_entity: tuple[tuple[str, RuntimeAuthorityFactReference], ...] = (
+        field(init=False)
+    )
+    superseded_fact_ids: tuple[str, ...] = field(init=False)
+    unresolved_conflicts: tuple[str, ...] = field(init=False, default=())
+    selection_id: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        if type(self.inventory) is not RuntimeAuthorityFactSelection:
+            raise RuntimePathContractError(
+                "effective selection requires full typed authority inventory"
+            )
+        self.inventory.verify()
+        if (
+            type(self.effective_selection_policy_id) is not str
+            or self.effective_selection_policy_id
+            != AUTHORITY_EFFECTIVE_SELECTION_POLICY_V1
+        ):
+            raise RuntimePathContractError("unsupported effective selection policy")
+        object.__setattr__(
+            self, "cutoff", _require_utc(self.cutoff, "authority cutoff")
+        )
+        _require_market(self.market)
+        _require_text(self.symbol, "symbol")
+        if (
+            type(self.session_dates) is not tuple
+            or any(type(day) is not date for day in self.session_dates)
+            or self.session_dates != tuple(sorted(set(self.session_dates)))
+        ):
+            raise RuntimePathContractError(
+                "effective selection dates must be canonical"
+            )
+        active: dict[str, RuntimeAuthorityFactReference] = {}
+        superseded: list[str] = []
+        for reference in self.inventory.facts:
+            fact = (
+                reference.fact.calendar_fact
+                if isinstance(reference.fact, SourceCoverageFact)
+                else reference.fact
+            )
+            if (
+                fact.symbol != self.symbol
+                or fact.market is not self.market
+                or fact.trading_day not in self.session_dates
+                or reference.known_at > self.cutoff
+                or reference.usable_from > self.cutoff
+            ):
+                continue
+            previous = active.get(reference.authority_entity_key)
+            if previous is not None:
+                superseded.append(previous.fact_id)
+            active[reference.authority_entity_key] = reference
+        object.__setattr__(
+            self, "active_facts_by_entity", tuple(sorted(active.items()))
+        )
+        object.__setattr__(self, "superseded_fact_ids", tuple(superseded))
+        object.__setattr__(
+            self, "selection_id", _hash_document(self.as_dict(include_id=False))
+        )
+
+    def active_fact(self, entity_key: str) -> RuntimeAuthorityFactReference | None:
+        _require_sha256(entity_key, "authority_entity_key")
+        return next(
+            (fact for key, fact in self.active_facts_by_entity if key == entity_key),
+            None,
+        )
+
+    def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
+        document = {
+            "schema": "stage4g1-authority-effective-selection-v1",
+            "assurance": self.assurance.value,
+            "authority_snapshot": self.inventory.snapshot.as_dict(),
+            "inventory_selection_id": self.inventory.selection_id,
+            "cutoff": _utc_text(self.cutoff),
+            "effective_selection_policy_id": self.effective_selection_policy_id,
+            "symbol": self.symbol,
+            "market": self.market.value,
+            "session_dates": [day.isoformat() for day in self.session_dates],
+            "active_facts_by_entity": [
+                {"entity_key": key, "fact_id": fact.fact_id}
+                for key, fact in self.active_facts_by_entity
+            ],
+            "superseded_fact_ids": list(self.superseded_fact_ids),
+            "unresolved_conflicts": list(self.unresolved_conflicts),
+        }
+        if include_id:
+            document["selection_id"] = self.selection_id
+        return document
+
+
 @dataclass(frozen=True, slots=True, init=False)
 class RuntimeMarketSourceSnapshotBinding(StructuralFixture):
     source_store_id: str
@@ -1177,7 +1327,7 @@ class RuntimeMarketSourceSnapshotBinding(StructuralFixture):
             raise RuntimePathContractError(
                 "market source binding requires exact selection verification"
             )
-        if selection.sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V2:
+        if selection.sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V3:
             raise RuntimePathContractError("unsupported market-event sequence policy")
         self = object.__new__(cls)
         for name, value in {
@@ -1209,7 +1359,7 @@ class RuntimeMarketSourceSnapshotBinding(StructuralFixture):
             or self.high_water_append_order
             != selection.snapshot_high_water_append_order
             or self.finding_set_digest != selection.snapshot_finding_set_digest
-            or self.sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V2
+            or self.sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V3
             or verification.selection_id != selection.selection_id
             or verification.selection_commitment_id
             != selection.commitment.commitment_id
@@ -2457,6 +2607,7 @@ class RuntimeFrozenPathPrefix(StructuralFixture):
     case_selection: RuntimeCaseFactSelection
     market_source_snapshot: RuntimeMarketSourceSnapshotBinding
     authority_fact_selections: tuple[RuntimeAuthorityFactSelection, ...]
+    authority_effective_selections: tuple[RuntimeAuthorityEffectiveSelection, ...]
     frozen_at: datetime
     facts: tuple[RuntimeFrozenPathFact, ...]
     projection_manifest: PathProjectionManifest
@@ -2554,6 +2705,29 @@ class RuntimeFrozenPathPrefix(StructuralFixture):
         authority_selections = {
             item.snapshot.authority_kind: item for item in authority_fact_selections
         }
+        session_dates = tuple(
+            sorted(
+                {
+                    fact.session_evidence.trading_day
+                    for fact in facts
+                    if fact.session_evidence is not None
+                }
+            )
+        )
+        effective_selections = tuple(
+            RuntimeAuthorityEffectiveSelection(
+                inventory=item,
+                cutoff=frozen_at,
+                symbol=case_selection.symbol,
+                market=case_selection.market,
+                session_dates=session_dates,
+            )
+            for item in authority_fact_selections
+        )
+        effective_by_kind = {
+            item.inventory.snapshot.authority_kind: item
+            for item in effective_selections
+        }
         used_authority_kinds: set[RuntimeAuthorityKind] = set()
         sessions_by_index: dict[int, RuntimeSessionEvidence] = {}
         for fact in facts:
@@ -2602,6 +2776,16 @@ class RuntimeFrozenPathPrefix(StructuralFixture):
                 ):
                     raise RuntimePathContractError(
                         "authority fact or audit was future-known at prefix freeze time"
+                    )
+                if (
+                    effective_by_kind[reference.authority_kind].active_fact(
+                        reference.authority_entity_key
+                    )
+                    != reference
+                ):
+                    raise RuntimePathContractError(
+                        "stale authority fact at prefix freeze",
+                        code="STALE_AUTHORITY_FACT",
                     )
         if set(authority_selections) != used_authority_kinds:
             raise RuntimePathContractError(
@@ -2703,21 +2887,16 @@ class RuntimeFrozenPathPrefix(StructuralFixture):
                     raise RuntimePathContractError(
                         "projection input is absent from the verified raw Selection"
                     )
-        if any(
-            session.coverage_state is RuntimeCoverageState.COMPLETE_SESSION
-            for session in sessions_by_index.values()
+        if (
+            any(
+                session.coverage_state is RuntimeCoverageState.COMPLETE_SESSION
+                for session in sessions_by_index.values()
+            )
+            and market_source_snapshot.selection.relevant_findings
         ):
-            if any(
-                not manifest.has_sequence_start_proof
-                for manifest in market_source_snapshot.selection.source_session_manifests
-            ):
-                raise RuntimePathContractError(
-                    "COMPLETE_SESSION requires source sequence start capability proof"
-                )
-            if market_source_snapshot.selection.relevant_findings:
-                raise RuntimePathContractError(
-                    "COMPLETE_SESSION conflicts with verified source sequence findings"
-                )
+            raise RuntimePathContractError(
+                "COMPLETE_SESSION conflicts with verified source sequence findings"
+            )
         selection = market_source_snapshot.selection
         for session in sessions_by_index.values():
             if (
@@ -2776,6 +2955,7 @@ class RuntimeFrozenPathPrefix(StructuralFixture):
             "case_selection": case_selection,
             "market_source_snapshot": market_source_snapshot,
             "authority_fact_selections": authority_fact_selections,
+            "authority_effective_selections": effective_selections,
             "frozen_at": frozen_at,
             "facts": facts,
             "projection_manifest": PathProjectionManifest(
@@ -2800,6 +2980,9 @@ class RuntimeFrozenPathPrefix(StructuralFixture):
         document = {
             "assurance": self.assurance.value,
             "schema": RUNTIME_PATH_PREFIX_SCHEMA,
+            "authority_effective_selections": [
+                item.as_dict() for item in self.authority_effective_selections
+            ],
             "projection_manifest": self.projection_manifest.as_dict(),
             "case_id": self.case_id,
             "symbol": self.symbol,
