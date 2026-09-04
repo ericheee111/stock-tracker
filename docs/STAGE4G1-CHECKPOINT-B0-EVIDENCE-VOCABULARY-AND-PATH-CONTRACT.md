@@ -1,8 +1,8 @@
 # Stage 4G.1 Checkpoint B0 — Evidence Vocabulary and Path Resolution Contract
 
-状态：`CONTRACT_FROZEN / R2_MEMBERSHIP_CLOSURE_COMMITTED / STORAGE_AND_WORKER_WIRING_PENDING`
+状态：`CONTRACT_FROZEN / R3_SEMANTIC_DERIVATION_CANDIDATE / INDEPENDENT_REVIEW_PENDING / STORAGE_AND_WORKER_WIRING_PENDING`
 
-日期：2026-09-03
+日期：2026-09-04
 
 前置实现：Stage 4G.1 Checkpoint A3 `3e6ad3f73c78f5d4ddd8f0537250ba5b275bd0f2`
 
@@ -202,7 +202,7 @@ session_evidence_id or path_observation_id
 规则：
 
 1. Point 的 `source durable_known_at <= collection_observed_at <= frozen_at`；Session 的 Authority `known_at/usable_from <= collection_observed_at <= frozen_at`。
-2. Market source append order 和 Authority revision 不得超过各自 frozen snapshot high-water mark；这只是必要条件，成员还必须存在于 exact verified Selection。
+2. Market source append order 和 Authority append order 不得超过各自 frozen snapshot high-water mark；entity fact_revision 不作为 Store 高水位。成员还必须存在于 exact verified Selection。
 3. prefix 中的 case collection append order 必须唯一且严格递增，但不要求从 1 连续到 global high-water，因为同一 Store 可包含其他 Case。
 4. `prefix_id` 包含 ordered case facts、Market Source Selection verification、canonical Authority fact selections、Path Store Snapshot、case selection commitment、global high-water 与 audit ID。
 5. Resolver 只允许读取该 prefix。
@@ -581,3 +581,69 @@ tests/test_runtime_evidence.py
 ```
 
 R2 已由同一 Codex 长会话形成 scoped commits；WorkBuddy 只提供 `MECHANICAL_CHECK_COMPLETE` 输入，ChatGPT 持有最终 Review 裁决。Market Event Store v4、B2 Worker、Paper/Manual 和 Trusted Admission 仍未开始，不能由这些纯合同推断为已接线。
+
+## 17. R3 语义派生与覆盖闭合（2026-09-04）
+
+本节取代前文 R1/R2 中“独立填写价格/Session 字段”和“以 revision 作为 Store 高水位”的旧结构说明。R3 是纯结构算法候选，不是 B1 Store 接线；最终 Review 仍待 ChatGPT，WorkBuddy 仅机械复跑。
+
+### 17.1 结构保证而非外部真实性
+
+所有本轮 Source/Path/Authority/Execution/No-entry reference factories 固定
+`assurance=STRUCTURAL_FIXTURE`。`STORE_RESCANNED / PIT_CANDIDATE / TRUSTED_ADMITTED`
+只是预留层级，当前无签发路径。`verified` 命名仅指给定输入的 exact structural rescan；
+tuple/hash、typed payload、签名式命名或重算 ID 都不证明物理 Store 或独立 Authority。
+
+### 17.2 价格只能由字节派生
+
+- 仅支持 `stage4g1-fixture-trade-tick-v1` 与
+  `stage4g1-fixture-trade-decoder-v1`，不实现真实 XTP decoder。
+- payload 必须精确包含 `last_price`、`quantity`；价格为正 decimal text 或实际 integer，
+  数量为正 integer；拒绝 float、bool、缺字段、多余字段、未知 schema/policy 和非有限值。
+- `DecodedTradeTick` 绑定 exact record、Selection、Verification、时点与派生价格。
+- `RuntimePathObservation.from_decoded_trade_tick` 从 tick 和 typed Calendar fact
+  派生价格、时间、标的、市场、Session index；派生字段不接受 constructor/replace 覆盖。
+- Bar factory 接收 exact `[start,end)` trade Selection、Verification、全部 decoded ticks、
+  versioned projection policy 和 typed Coverage authority reference；按
+  `(source_time, append_order)` 排序重算 max/min/last，不接受 caller OHLC。
+  最后 Tick 在 09:30:57 的 `[09:30,09:31)` Bar 合法。空 Selection 不产生 Bar。
+- Bar 必须在单个允许价格事件的 Segment 内；`DAILY_BAR` 也不能绕过午休/HALT。
+  不跨时段生成虚假整日 OHLC；实际多时段聚合需后续独立合同。
+
+### 17.3 Typed Authority 与 Session
+
+`CalendarSessionFact / SecurityStatusFact / SourceCoverageFact` 保存业务字段；
+共同的 Store、known/usable、source、policy、revision 和 append-chain 元数据由
+`RuntimeAuthorityFactReference` 包裹，Reference hash 必须由实际 typed payload 重算。
+
+Security Status 使用 `TRADABLE / SUSPENDED / NO_TRADE / UNKNOWN`，
+分别派生现有 Session 的 `TRADED / SUSPENDED / NO_TRADE / MISSING_DATA`。
+这里的旧 Session 名称 `TRADED` 是允许价格路径的状态，不独立证明存在成交；
+实际成交只来自 decoded Trade Tick。无事件不能反推出停牌。
+
+`TradingSessionSegment` 包含 CONTINUOUS、OPEN_AUCTION、CLOSE_AUCTION、BREAK、HALT、
+半开边界、price/execution permissions、versioned policy 与 typed Calendar fact ID。
+Calendar segments 必须连续分割 Session，半日市/临时中断来自输入 fact，
+production code 不硬编码 A/HK 时刻表。Coverage 输出逐 Segment 的 cutoff/完整性，
+Session close 外包络本身不能证明完整。Entry 也必须处于允许 execution 的 Segment。
+
+`RuntimeSessionEvidence.from_typed_authority_facts` 派生全部 Session 状态和边界，
+不另收 calendar/status/coverage 字段。
+`fact_revision` 是 entity revision；Store 以连续的 `authority_append_order`、
+`previous_authority_record_hash` 与 `authority_high_water_append_order` 表示，
+不得用 max revision 代替。
+
+### 17.4 Reverse completeness
+
+Frozen Prefix 新增 `PathProjectionManifest`，绑定 verified market Selection、
+consumed raw/decoded IDs、produced observation IDs、interval mapping commitment。
+同一 raw member 只能被一个 Tick 或一个 Bar input 消费；重复、越界或 Bar 省略成员拒绝。
+Resolver 在扫描 first-touch 前检查 required interval 内每个 selected trade member；
+遗漏返回 `BLOCKED / UNPROJECTED_SOURCE_MEMBER`，即使已有更晚 TARGET。
+
+无完整订阅/coverage 证明的空 Selection、unresolved global finding、
+queue overflow/drop、缺失 Segment 都不能支持 COMPLETE_SESSION、NO_TRADE 或 TIMEOUT。
+Expiry/cancellation 不改映射；Execution 保留
+`structurally_projectable_to_stage4g_v3`，No-entry 保留所有 reason/audit known-at
+不晚于 decided-at 的要求。
+
+本轮复现与门禁见 [R3 Validation](STAGE4G1-CHECKPOINT-B0-B1-R3-VALIDATION.md)。

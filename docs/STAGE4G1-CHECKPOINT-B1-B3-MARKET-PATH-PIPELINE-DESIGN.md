@@ -1,8 +1,8 @@
 # Stage 4G.1 Checkpoint B1–B3 — Audited Market Path Pipeline Design
 
-状态：`DESIGN_FROZEN / B0_B1_R2_MEMBERSHIP_CLOSURE_COMMITTED / STORE_MIGRATION_AND_WORKER_WIRING_PENDING`
+状态：`DESIGN_FROZEN / B0_B1_R3_SEMANTIC_CANDIDATE / INDEPENDENT_REVIEW_PENDING / STORE_MIGRATION_AND_WORKER_WIRING_PENDING`
 
-日期：2026-09-03
+日期：2026-09-04
 
 依赖：
 
@@ -938,3 +938,72 @@ trusted_outcome_admission = false
 verified = false（Paper/Manual candidate）
 real_scoreboard = INSUFFICIENT_REAL_EVIDENCE
 ```
+
+## 16. B0/B1 R3 对 ReadPort 输入合同的补充（2026-09-04）
+
+本节优先于前文 R1/R2 的 Source/Authority/Projection 对象结构；
+只冻结纯结构算法和未来 on-disk 格式，不实现 Market Event Store v4、migration、
+Path Store、Worker、Collection Bridge 或新的接线。
+
+### 16.1 Source subscription 与 impact
+
+- Source Session Manifest 唯一键为
+  `(source_store_id, session_id, connection_epoch, reconnect_epoch)`，同键冲突拒绝。
+- Manifest 保存 typed subscription 的实际 market/symbol set/event types，
+  scope/root/universe identity，Selection 冻结 symbol membership witness。
+- LIVE 要求 `collector_started_at <= subscription_activated_at <= coverage_start`。
+  REPLAY/BACKFILL 必须携带实际 Selection + Verification 对象，并重新验证完整订阅区间；
+  单独提交 SHA 不构成回补证明。
+- 记录绑定 coverage_start/through、first/last callback、queue overflow/drop 和
+  provider-sequence capability。显式 callback 边界与 prefix 不一致拒绝；
+  非空流缺少已核对边界不能支持完整 coverage。
+- Callback gap 按 SESSION/CONNECTION_EPOCH 产生 global finding；
+  provider 仅在明确 SYMBOL_SESSION/SYMBOL_CONNECTION_EPOCH capability 下按 symbol。
+- Finding 绑定 epoch、append/time impact、affected symbol/event types 与 resolution state。
+  SESSION global 的时间影响跨该 Session 的连接 epoch 合并；Selection 按 impact 交集，
+  不按承载记录是否命中当前股票筛选。
+- 当前 exact rescan 只接受从 prefix 重算的 unresolved finding。
+  `RESOLVED` 和 replay-resolution ID 不提供自报解除缺口的通道。
+- 相交 queue/drop loss 不能由另一个“健康”覆盖区间遮盖。
+  空 Selection 仅在 full interval 订阅、起点、边界、无损失/缺口均成立时为
+  `ZERO_EVENT_PROVEN`；否则为 `EMPTY_NOT_PROVEN`。
+  非空但有 unresolved finding 为 `BLOCKED_SEQUENCE_INTEGRITY`，不支持 Projection/终局。
+
+### 16.2 无自引用的文件格式
+
+`MarketEventSourceRecord.record_content_bytes()` 为 canonical UTF-8 JSON，
+包含实际 payload_json 与 source/sequence/time/previous-chain 元数据，
+排除 file SHA、source_record_id 和 record_content_hash 本身。
+推荐 immutable file 直接使用这些 bytes：
+
+```text
+record_content_hash = SHA256(record_content_bytes)
+record_file_sha256 = record_content_hash
+Catalog = record_storage_key + record_file_sha256 + source_record_id
+```
+
+当前 factory 强制两种 hash 相等；未写入任何实际 Market Event 文件或 Catalog。
+
+### 16.3 显式版本与保证层级
+
+| 对象 | R3 Schema |
+|---|---|
+| Source record / Audit / Snapshot / Selection / ReadPort | v4 |
+| Source Session Manifest / Subscription | v2 / v1 |
+| Sequence Finding / sequence policy | v3 / v2 |
+| Selection Commitment / Membership Witness / Verification | v2 |
+| Decoded Trade Tick / typed Calendar、Status、Coverage、Segment | v1 |
+| Runtime Source Reference / Authority Fact Reference、Snapshot | v3 |
+| Projection Lineage / Projection Artifact | v3 / v2 |
+| Session / Observation / Path Prefix / Resolution | v3 / v4 / v4 / v3 |
+| Execution Summary / No-entry | v4 / v3 |
+
+旧构造参数与旧 decoder/sequence policy 失败关闭，没有兼容性回退。
+所有当前 reference factory 都是 `STRUCTURAL_FIXTURE`；内部 full-prefix rescan
+仍在内存中处理 tuple/set，不是物理 Store receipt、可扩展 Store benchmark 或 Merkle range proof。
+B1 concrete ReadPort 才能在锁定的物理快照中 audit 文件/Catalog/查询并签发
+`STORE_RESCANNED`；更高层仍需未来独立 Authority。
+
+Session 派生、segment coverage、Projection 与反向完整性见
+[B0 R3](STAGE4G1-CHECKPOINT-B0-EVIDENCE-VOCABULARY-AND-PATH-CONTRACT.md#17-r3-语义派生与覆盖闭合2026-09-04)。
+本轮验证见 [R3 Validation](STAGE4G1-CHECKPOINT-B0-B1-R3-VALIDATION.md)。
