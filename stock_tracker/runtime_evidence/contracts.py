@@ -221,7 +221,9 @@ def _require_number(
     positive: bool = False,
     nonnegative: bool = False,
 ) -> int | float:
-    if type(value) not in (int, float) or not math.isfinite(float(value)):
+    if (type(value) is not int and type(value) is not float) or not math.isfinite(
+        float(value)
+    ):
         raise RuntimeEvidenceContractError(f"{name} must be a finite number")
     if positive and value <= 0:
         raise RuntimeEvidenceContractError(f"{name} must be positive")
