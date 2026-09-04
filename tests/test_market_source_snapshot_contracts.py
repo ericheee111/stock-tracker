@@ -4,6 +4,7 @@ import hashlib
 import unittest
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 
 from stock_tracker.core.market_time import (
     MARKET_SESSION_LABEL_POLICY_V1,
@@ -11,8 +12,13 @@ from stock_tracker.core.market_time import (
 )
 from stock_tracker.core.types import Market
 from stock_tracker.runtime_evidence.source_snapshot_contracts import (
+    FIXTURE_TRADE_DECODER_POLICY_V1,
+    FIXTURE_TRADE_TICK_SCHEMA_V1,
     MARKET_EVENT_INTERVAL_BOUNDARY_POLICY_V1,
-    MARKET_EVENT_SEQUENCE_POLICY_V1,
+    MARKET_EVENT_SEQUENCE_POLICY_V2,
+    CoverageOrigin,
+    DecodedTradeTick,
+    FindingResolutionState,
     MarketEventCallbackSequenceScope,
     MarketEventInventoryVerification,
     MarketEventPartitionHead,
@@ -26,6 +32,7 @@ from stock_tracker.runtime_evidence.source_snapshot_contracts import (
     MarketEventSourceSessionManifest,
     MarketEventStoreAudit,
     MarketEventStoreSnapshot,
+    MarketEventSubscriptionManifest,
 )
 
 
@@ -37,6 +44,7 @@ class MarketEventSourceSnapshotTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.store_id = _hash("market-event-store")
         self.base_time = datetime(2026, 9, 2, 1, 30, tzinfo=timezone.utc)
+        self.manifests_by_id = {}
         self.default_manifest = self.manifest()
 
     def manifest(
@@ -50,7 +58,7 @@ class MarketEventSourceSnapshotTestCase(unittest.TestCase):
         provider_sequence_available: bool = False,
         provider_scope: MarketEventProviderSequenceScope = MarketEventProviderSequenceScope.UNAVAILABLE,
     ) -> MarketEventSourceSessionManifest:
-        return MarketEventSourceSessionManifest(
+        manifest = MarketEventSourceSessionManifest(
             source_store_id=self.store_id,
             session_id=session_id,
             connection_epoch=connection_epoch,
@@ -61,8 +69,20 @@ class MarketEventSourceSnapshotTestCase(unittest.TestCase):
             callback_sequence_scope=callback_scope,
             provider_sequence_available=provider_sequence_available,
             provider_sequence_scope=provider_scope,
-            sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V1,
+            sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V2,
+            subscription=MarketEventSubscriptionManifest(
+                Market.A, ("000001.SZ", "600519.SH"), ("ORDER_BOOK", "TRADE_TICK")
+            ),
+            subscription_activated_at=self.base_time - timedelta(hours=1),
+            coverage_through=self.base_time + timedelta(hours=1),
+            coverage_origin=CoverageOrigin.LIVE,
+            queue_overflow_count=0,
+            dropped_callback_count=0,
+            first_callback_seq=None,
+            last_callback_seq=None,
         )
+        self.manifests_by_id[manifest.manifest_id] = manifest
+        return manifest
 
     def record(
         self,
@@ -118,8 +138,7 @@ class MarketEventSourceSnapshotTestCase(unittest.TestCase):
             raw_payload_sha256=_hash(f"raw-{append_order}"),
             payload={"last_price": 10 + append_order, "quantity": 100},
             parser_id="xtp-event-parser-v1",
-            source_schema_id="stock-tracker-xtp-event-v1",
-            record_file_sha256=_hash(f"file-{append_order}"),
+            source_schema_id=FIXTURE_TRADE_TICK_SCHEMA_V1,
         )
 
     def records(self) -> tuple[MarketEventSourceRecord, ...]:
@@ -172,14 +191,10 @@ class MarketEventSourceSnapshotTestCase(unittest.TestCase):
         observed_sequence: int | None,
         detail_code: str,
     ) -> MarketEventSequenceFinding:
-        return MarketEventSequenceFinding(
-            sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V1,
+        return MarketEventSequenceFinding.from_record(
+            record=record,
+            manifest=self.manifests_by_id[record.source_session_manifest_id],
             kind=kind,
-            source_store_id=self.store_id,
-            event_id=record.event_id,
-            session_id=record.session_id,
-            symbol=record.symbol,
-            observed_append_order=record.append_order,
             expected_sequence=expected_sequence,
             observed_sequence=observed_sequence,
             detail_code=detail_code,
@@ -193,9 +208,7 @@ class MarketEventSourceSnapshotTestCase(unittest.TestCase):
         findings: tuple[MarketEventSequenceFinding, ...] = (),
         manifests: tuple[MarketEventSourceSessionManifest, ...] | None = None,
     ) -> MarketEventStoreAudit:
-        actual_manifests = (
-            (self.default_manifest,) if manifests is None else manifests
-        )
+        actual_manifests = (self.default_manifest,) if manifests is None else manifests
         inventory = MarketEventInventoryVerification.create_from_prefix(
             source_store_id=self.store_id,
             catalog_schema_fingerprint=_hash("catalog-schema-v4"),
@@ -204,13 +217,16 @@ class MarketEventSourceSnapshotTestCase(unittest.TestCase):
         return MarketEventStoreAudit.create_from_prefix(
             source_store_id=self.store_id,
             source_schema_id="stock-tracker-market-event-store-v4",
-            sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V1,
-            audited_at=(
-                max(record.durable_known_at for record in records)
-                + timedelta(seconds=1)
-                if records and audited_at is None
-                else audited_at or self.base_time
-            ),
+            sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V2,
+            audited_at=audited_at
+            or max(
+                (
+                    self.base_time,
+                    *(item.durable_known_at for item in records),
+                    *(item.coverage_through for item in actual_manifests),
+                )
+            )
+            + timedelta(seconds=1),
             catalog_schema_fingerprint=_hash("catalog-schema-v4"),
             inventory_verification=inventory,
             partition_heads=self.partition_heads(records),
@@ -310,10 +326,14 @@ class TestMarketEventSourceRecord(MarketEventSourceSnapshotTestCase):
             previous_global="0" * 64,
             previous_partition="0" * 64,
         )
-        with self.assertRaisesRegex(MarketEventSourceContractError, "record_content_hash"):
+        with self.assertRaisesRegex(
+            MarketEventSourceContractError, "record_content_hash"
+        ):
             replace(record, record_content_hash="f" * 64)
         with self.assertRaisesRegex(MarketEventSourceContractError, "partition_key"):
-            replace(record, partition_key="market=A/trading_day=2026-09-02/symbol=000001.SZ")
+            replace(
+                record, partition_key="market=A/trading_day=2026-09-02/symbol=000001.SZ"
+            )
 
     def test_storage_key_is_deterministic_and_part_of_member_identity(self) -> None:
         record = self.record(
@@ -331,7 +351,9 @@ class TestMarketEventSourceRecord(MarketEventSourceSnapshotTestCase):
         self.assertIn("record_storage_key", record.inventory_leaf())
         self.assertIn("record_file_sha256", record.inventory_leaf())
 
-    def test_record_rejects_noncanonical_payload_and_future_durable_identity(self) -> None:
+    def test_record_rejects_noncanonical_payload_and_future_durable_identity(
+        self,
+    ) -> None:
         record = self.record(
             append_order=1,
             symbol="600519.SH",
@@ -370,8 +392,9 @@ class TestMarketEventSourceRecord(MarketEventSourceSnapshotTestCase):
             "records/event.json.",
             "records/event file.json",
         ):
-            with self.subTest(path=path), self.assertRaises(
-                MarketEventSourceContractError
+            with (
+                self.subTest(path=path),
+                self.assertRaises(MarketEventSourceContractError),
             ):
                 replace(record, record_storage_key=path)
 
@@ -452,7 +475,7 @@ class TestMarketEventStoreSnapshot(MarketEventSourceSnapshotTestCase):
             MarketEventStoreAudit.create_from_prefix(
                 source_store_id=self.store_id,
                 source_schema_id="stock-tracker-market-event-store-v4",
-                sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V1,
+                sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V2,
                 audited_at=records[-1].durable_known_at + timedelta(seconds=1),
                 catalog_schema_fingerprint=_hash("catalog-schema-v4"),
                 records=records,
@@ -461,7 +484,9 @@ class TestMarketEventStoreSnapshot(MarketEventSourceSnapshotTestCase):
                 source_session_manifests=(self.default_manifest,),
             )
 
-    def test_inventory_rejects_duplicate_event_record_and_storage_identity(self) -> None:
+    def test_inventory_rejects_duplicate_event_record_and_storage_identity(
+        self,
+    ) -> None:
         first, second, _third = self.records()
         duplicate_event = self.record(
             append_order=2,
@@ -518,7 +543,9 @@ class TestMarketEventStoreSnapshot(MarketEventSourceSnapshotTestCase):
         with self.assertRaisesRegex(MarketEventSourceContractError, "findings"):
             self.snapshot(records=(record,), manifests=(manifest,))
 
-    def test_reconnect_epoch_reset_is_scoped_and_provider_capability_cannot_drift(self) -> None:
+    def test_reconnect_epoch_reset_is_scoped_and_provider_capability_cannot_drift(
+        self,
+    ) -> None:
         first_manifest = self.manifest(
             reconnect_epoch=0,
             callback_scope=MarketEventCallbackSequenceScope.CONNECTION_EPOCH,
@@ -563,7 +590,9 @@ class TestMarketEventStoreSnapshot(MarketEventSourceSnapshotTestCase):
             provider_seq=1,
             manifest=changed_capability,
         )
-        with self.assertRaisesRegex(MarketEventSourceContractError, "capability changes"):
+        with self.assertRaisesRegex(
+            MarketEventSourceContractError, "capability changes"
+        ):
             self.snapshot(
                 records=(first, changed_second),
                 manifests=(first_manifest, changed_capability),
@@ -584,6 +613,7 @@ class TestMarketEventStoreSnapshot(MarketEventSourceSnapshotTestCase):
         )
         snapshot = self.snapshot(records=(record,), manifests=(manifest,))
         self.assertEqual(snapshot.audit.finding_count, 0)
+
     def test_snapshot_rejects_omitted_callback_gap_finding(self) -> None:
         first = self.record(
             append_order=1,
@@ -628,7 +658,9 @@ class TestMarketEventStoreSnapshot(MarketEventSourceSnapshotTestCase):
         )
         records = (first, second)
         self.snapshot(records=records, findings=(finding,))
-        with self.assertRaisesRegex(MarketEventSourceContractError, "fabricated|duplicate"):
+        with self.assertRaisesRegex(
+            MarketEventSourceContractError, "fabricated|duplicate"
+        ):
             self.snapshot(records=records, findings=(finding, finding))
         with self.assertRaisesRegex(MarketEventSourceContractError, "findings"):
             self.snapshot(
@@ -712,7 +744,9 @@ class TestMarketEventStoreSnapshot(MarketEventSourceSnapshotTestCase):
 
     def test_snapshot_rejects_global_gap_or_chain_rewrite(self) -> None:
         first, second, third = self.records()
-        with self.assertRaisesRegex(MarketEventSourceContractError, "global prefix|inventory"):
+        with self.assertRaisesRegex(
+            MarketEventSourceContractError, "global prefix|inventory"
+        ):
             self.snapshot(records=(second, first))
         forged_third = self.record(
             append_order=3,
@@ -919,15 +953,20 @@ class TestMarketEventStoreSnapshot(MarketEventSourceSnapshotTestCase):
         with self.assertRaisesRegex(MarketEventSourceContractError, "exact"):
             self.verify(other, selection, records[:2])
 
-    def test_internal_selection_factory_rejects_foreign_store_or_symbol_records(self) -> None:
+    def test_internal_selection_factory_rejects_foreign_store_or_symbol_records(
+        self,
+    ) -> None:
         records = self.records()
         snapshot = self.snapshot(records)
         foreign_store = self.records()[0]
         object.__setattr__(foreign_store, "source_store_id", _hash("foreign-store"))
         for selected in ((foreign_store,), (records[1],)):
-            with self.subTest(record=selected[0].source_record_id), self.assertRaisesRegex(
-                MarketEventSourceContractError,
-                "outside its exact query",
+            with (
+                self.subTest(record=selected[0].source_record_id),
+                self.assertRaisesRegex(
+                    MarketEventSourceContractError,
+                    "outside its exact query|record_content_hash mismatch",
+                ),
             ):
                 MarketEventSelection._from_verified_snapshot(
                     snapshot=snapshot,
@@ -938,6 +977,7 @@ class TestMarketEventStoreSnapshot(MarketEventSourceSnapshotTestCase):
                     records=selected,
                     findings=(),
                     source_session_manifests=(self.default_manifest,),
+                    coverage_verified_manifest_ids=(),
                     allowed_event_types=("TRADE_TICK",),
                     interval_boundary_policy_id=MARKET_EVENT_INTERVAL_BOUNDARY_POLICY_V1,
                     record_limit=100,
@@ -970,13 +1010,17 @@ class TestMarketEventStoreSnapshot(MarketEventSourceSnapshotTestCase):
                 records=selected,
                 findings=(),
                 source_session_manifests=(self.default_manifest,),
+                coverage_verified_manifest_ids=(),
                 allowed_event_types=("TRADE_TICK",),
                 interval_boundary_policy_id=MARKET_EVENT_INTERVAL_BOUNDARY_POLICY_V1,
                 record_limit=100,
             )
-            with self.subTest(selected=len(selected)), self.assertRaisesRegex(
-                MarketEventSourceContractError,
-                "exact read-port result",
+            with (
+                self.subTest(selected=len(selected)),
+                self.assertRaisesRegex(
+                    MarketEventSourceContractError,
+                    "exact read-port result",
+                ),
             ):
                 self.verify(snapshot, forged, records)
 
@@ -997,6 +1041,258 @@ class TestMarketEventStoreSnapshot(MarketEventSourceSnapshotTestCase):
             allowed_event_types=("ORDER_BOOK",),
         )
         self.assertEqual(order_book.records, (record,))
+
+
+class TestR3SourceClosure(MarketEventSourceSnapshotTestCase):
+    def test_r3_global_gap_on_other_symbol_contaminates_selection(self) -> None:
+        first = self.records()[0]
+        second = self.record(
+            append_order=2,
+            symbol="000001.SZ",
+            previous_global=first.record_content_hash,
+            previous_partition="0" * 64,
+            minute_offset=1,
+            callback_seq=3,
+        )
+        finding = self.finding(
+            second,
+            kind=MarketEventSequenceFindingKind.CALLBACK_SEQUENCE,
+            expected_sequence=2,
+            observed_sequence=3,
+            detail_code="CALLBACK_SEQUENCE_GAP",
+        )
+        records = (first, second)
+        snapshot = self.snapshot(records, findings=(finding,))
+        selection = self.select(snapshot, records, findings=(finding,))
+        self.assertEqual(selection.relevant_findings, (finding,))
+
+    def test_r3_live_coverage_cannot_predate_collector(self) -> None:
+        with self.assertRaises(MarketEventSourceContractError):
+            replace(
+                self.default_manifest,
+                coverage_start=self.default_manifest.collector_started_at
+                - timedelta(hours=1),
+            )
+
+    def test_r3_conflicting_manifest_epoch_is_rejected(self) -> None:
+        conflict = replace(self.default_manifest, expected_first_callback_seq=7)
+        manifests = tuple(
+            sorted((self.default_manifest, conflict), key=lambda item: item.manifest_id)
+        )
+        with self.assertRaises(MarketEventSourceContractError):
+            self.snapshot(records=(), manifests=manifests)
+
+    def test_r3_pure_factory_cannot_claim_store_assurance(self) -> None:
+        self.assertEqual(
+            getattr(self.snapshot(), "assurance", None), "STRUCTURAL_FIXTURE"
+        )
+
+    def test_r3_empty_unsubscribed_selection_is_not_zero_event_proof(self) -> None:
+        records = self.records()
+        selection = self.select(self.snapshot(records), records, symbol="601318.SH")
+        self.assertEqual(getattr(selection, "completeness", None), "EMPTY_NOT_PROVEN")
+
+    def test_r3_queue_loss_is_part_of_coverage_contract(self) -> None:
+        fields = MarketEventSourceSessionManifest.__dataclass_fields__
+        self.assertIn("queue_overflow_count", fields)
+        self.assertIn("dropped_callback_count", fields)
+
+    def decode_payload(self, payload, schema=FIXTURE_TRADE_TICK_SCHEMA_V1):
+        original = self.records()[0]
+        excluded = {
+            "source_record_id",
+            "record_content_hash",
+            "record_storage_key",
+            "record_file_sha256",
+            "payload_json",
+            "payload_sha256",
+        }
+        values = {
+            name: getattr(original, name)
+            for name in original.__dataclass_fields__
+            if name not in excluded
+        }
+        values["source_schema_id"] = schema
+        record = MarketEventSourceRecord.create(**values, payload=payload)
+        snapshot = self.snapshot((record,))
+        selection = self.select(snapshot, (record,))
+        verification = self.verify(snapshot, selection, (record,))
+        return DecodedTradeTick(
+            record, selection, verification, FIXTURE_TRADE_DECODER_POLICY_V1
+        )
+
+    def test_decoder_uses_exact_payload_and_exposes_exact_identity(self):
+        tick = self.decode_payload({"last_price": "10.00", "quantity": 200})
+        self.assertEqual(str(tick.price), "10.00")
+        self.assertEqual(tick.quantity, 200)
+        self.assertEqual(tick.source_record_id, tick.record.source_record_id)
+        self.assertEqual(
+            tick.selection_verification_id, tick.verification.verification_id
+        )
+        self.assertEqual(tick.as_dict()["assurance"], "STRUCTURAL_FIXTURE")
+        with self.assertRaises(TypeError):
+            replace(tick, price=Decimal(12))
+        with self.assertRaises(MarketEventSourceContractError):
+            replace(tick, decoder_policy_id="unknown-decoder")
+        with self.assertRaises(MarketEventSourceContractError):
+            self.decode_payload(
+                {"last_price": "10", "quantity": 1}, "xtp-unimplemented"
+            )
+
+    def test_decoder_rejects_bool_float_missing_extra_and_nonfinite_payloads(self):
+        payloads = (
+            {"last_price": True, "quantity": 1},
+            {"last_price": 10.0, "quantity": 1},
+            {"last_price": "NaN", "quantity": 1},
+            {"last_price": "Infinity", "quantity": 1},
+            {"last_price": "0", "quantity": 1},
+            {"last_price": "-10", "quantity": 1},
+            {"last_price": "10", "quantity": True},
+            {"last_price": "10", "quantity": 1.0},
+            {"quantity": 1},
+            {"last_price": "10", "quantity": 1, "unknown": 0},
+        )
+        for payload in payloads:
+            with (
+                self.subTest(payload=payload),
+                self.assertRaises(MarketEventSourceContractError),
+            ):
+                self.decode_payload(payload)
+
+    def test_record_file_hash_has_no_self_reference(self):
+        record = self.records()[0]
+        content = record.record_content_bytes()
+        self.assertEqual(
+            hashlib.sha256(content).hexdigest(), record.record_content_hash
+        )
+        self.assertEqual(record.record_content_hash, record.record_file_sha256)
+        self.assertIn(b'"payload_json"', content)
+        for key in (
+            b'"record_file_sha256"',
+            b'"source_record_id"',
+            b'"record_content_hash"',
+        ):
+            self.assertNotIn(key, content)
+        with self.assertRaises(MarketEventSourceContractError):
+            replace(record, record_file_sha256="f" * 64)
+
+    def test_zero_event_requires_subscribed_lossless_interval(self):
+        for field in ("queue_overflow_count", "dropped_callback_count"):
+            manifest = replace(self.default_manifest, **{field: 1})
+            snapshot = self.snapshot((), manifests=(manifest,))
+            selection = self.select(snapshot, (), manifests=(manifest,))
+            self.assertFalse(
+                selection.covers_interval(
+                    selection.start_source_time, selection.end_source_time
+                )
+            )
+            self.assertEqual(selection.completeness, "EMPTY_NOT_PROVEN")
+        snapshot = self.snapshot(())
+        selection = self.select(snapshot, ())
+        self.assertEqual(selection.completeness, "ZERO_EVENT_PROVEN")
+        self.assertFalse(
+            selection.covers_interval(
+                selection.start_source_time, self.base_time + timedelta(hours=2)
+            )
+        )
+
+    def test_explicit_callback_bound_drift_is_rejected(self):
+        manifest = replace(
+            self.default_manifest, first_callback_seq=1, last_callback_seq=2
+        )
+        record = self.record(
+            append_order=1,
+            symbol="600519.SH",
+            previous_global="0" * 64,
+            previous_partition="0" * 64,
+            manifest=manifest,
+        )
+        with self.assertRaisesRegex(MarketEventSourceContractError, "callback bounds"):
+            self.snapshot((record,), manifests=(manifest,))
+
+    def test_session_global_gap_crosses_connection_epoch_time_ranges(self):
+        first_manifest = replace(
+            self.default_manifest,
+            coverage_through=self.base_time + timedelta(minutes=30),
+        )
+        second_manifest = replace(
+            self.default_manifest,
+            connection_epoch=2,
+            coverage_start=self.base_time + timedelta(minutes=30),
+        )
+        first = self.record(
+            append_order=1,
+            symbol="600519.SH",
+            previous_global="0" * 64,
+            previous_partition="0" * 64,
+            manifest=first_manifest,
+        )
+        second = self.record(
+            append_order=2,
+            symbol="000001.SZ",
+            previous_global=first.record_content_hash,
+            previous_partition="0" * 64,
+            minute_offset=40,
+            callback_seq=3,
+            manifest=second_manifest,
+        )
+        manifests = (first_manifest, second_manifest)
+        finding = MarketEventSequenceFinding.from_record(
+            record=second,
+            manifest=second_manifest,
+            kind=MarketEventSequenceFindingKind.CALLBACK_SEQUENCE,
+            expected_sequence=2,
+            observed_sequence=3,
+            detail_code="CALLBACK_SEQUENCE_GAP",
+            scope_manifests=manifests,
+        )
+        snapshot = self.snapshot(
+            (first, second), manifests=manifests, findings=(finding,)
+        )
+        selection = self.select(
+            snapshot, (first, second), manifests=manifests, findings=(finding,)
+        )
+        self.assertEqual(selection.records, (first,))
+        self.assertEqual(selection.relevant_findings, (finding,))
+        self.assertEqual(selection.completeness, "BLOCKED_SEQUENCE_INTEGRITY")
+        with self.assertRaises(MarketEventSourceContractError):
+            self.snapshot(
+                (first, second),
+                manifests=manifests,
+                findings=(
+                    replace(
+                        finding,
+                        resolution_state=FindingResolutionState.RESOLVED,
+                        replay_resolution_id=_hash("caller-resolution"),
+                    ),
+                ),
+            )
+
+    def test_backfill_requires_verified_interval_membership_not_hash(self):
+        snapshot = self.snapshot(())
+        selection = self.select(snapshot, ())
+        verification = self.verify(snapshot, selection, ())
+        arguments = {
+            "collector_started_at": self.base_time + timedelta(hours=2),
+            "subscription_activated_at": self.base_time + timedelta(hours=2),
+            "coverage_start": selection.start_source_time,
+            "coverage_through": selection.end_source_time,
+            "coverage_origin": CoverageOrigin.BACKFILL,
+            "subscription": MarketEventSubscriptionManifest(
+                Market.A, ("600519.SH",), ("TRADE_TICK",)
+            ),
+        }
+        with self.assertRaisesRegex(MarketEventSourceContractError, "membership"):
+            replace(self.default_manifest, **arguments)
+        backfill = replace(
+            self.default_manifest,
+            **arguments,
+            replay_selection=selection,
+            replay_verification=verification,
+        )
+        self.assertEqual(backfill.assurance, "STRUCTURAL_FIXTURE")
+        with self.assertRaises(TypeError):
+            replace(backfill, assurance="STORE_RESCANNED")
 
 
 if __name__ == "__main__":

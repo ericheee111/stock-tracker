@@ -14,6 +14,9 @@ from stock_tracker.core.market_time import (
 from stock_tracker.core.types import Market
 from stock_tracker.runtime_evidence.path_contracts import (
     RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
+    TRADE_PROJECTION_POLICY_V1,
+    TRADING_SEGMENT_POLICY_V1,
+    CalendarSessionFact,
     RuntimeAuthorityFactReference,
     RuntimeAuthorityFactSelection,
     RuntimeAuthorityKind,
@@ -41,13 +44,21 @@ from stock_tracker.runtime_evidence.path_contracts import (
     RuntimePathStoreSnapshotBinding,
     RuntimePathWindow,
     RuntimeProjectionArtifactReference,
-    RuntimeProjectionLineage,
+    RuntimeSecurityStatus,
     RuntimeSessionEvidence,
     RuntimeSourceReference,
+    SecurityStatusFact,
+    SourceCoverageFact,
+    TradingSessionSegment,
+    TradingSessionSegmentKind,
     resolve_runtime_path,
 )
 from stock_tracker.runtime_evidence.source_snapshot_contracts import (
-    MARKET_EVENT_SEQUENCE_POLICY_V1,
+    FIXTURE_TRADE_DECODER_POLICY_V1,
+    FIXTURE_TRADE_TICK_SCHEMA_V1,
+    MARKET_EVENT_SEQUENCE_POLICY_V2,
+    CoverageOrigin,
+    DecodedTradeTick,
     MarketEventCallbackSequenceScope,
     MarketEventInventoryVerification,
     MarketEventPartitionHead,
@@ -56,7 +67,15 @@ from stock_tracker.runtime_evidence.source_snapshot_contracts import (
     MarketEventSourceSessionManifest,
     MarketEventStoreAudit,
     MarketEventStoreSnapshot,
+    MarketEventSubscriptionManifest,
 )
+
+
+def _tamper(value, **changes):
+    result = copy.copy(value)
+    for name, changed in changes.items():
+        object.__setattr__(result, name, changed)
+    return result
 
 
 def _hash(label: str) -> str:
@@ -66,6 +85,7 @@ def _hash(label: str) -> str:
 class RuntimePathContractTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.entry_time = datetime(2026, 9, 1, 1, 30, tzinfo=timezone.utc)
+        self.calendars = {}
         self.collection_store_id = _hash("collection-store")
         self.source_store_id = _hash("market-event-store")
         self.case_id = _hash("case")
@@ -85,15 +105,18 @@ class RuntimePathContractTestCase(unittest.TestCase):
         source_time: datetime | None = None,
         event_type: str = "TRADE_TICK",
     ) -> RuntimeSourceReference:
-        source_time = known_at - timedelta(seconds=2) if source_time is None else source_time
+        source_time = (
+            known_at - timedelta(seconds=2) if source_time is None else source_time
+        )
         return RuntimeSourceReference(
             source_store_id=self.source_store_id,
             source_snapshot_id=self.source_snapshot_id,
             source_audit_id=self.source_audit_id,
             source_high_water_append_order=self.source_high_water,
             finding_set_digest=self.source_finding_set_digest,
-            sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V1,
+            sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V2,
             selection_id=_hash("placeholder-selection"),
+            selection_verification_id=_hash("placeholder-selection-verification"),
             event_id=_hash(f"event:{label}"),
             source_session_id="market-session-a",
             symbol="600519.SH",
@@ -116,568 +139,644 @@ class RuntimePathContractTestCase(unittest.TestCase):
             durable_known_at=known_at,
         )
 
+    def calendar(self, trading_day, index=0, *, closed=False):
+        day = datetime.combine(trading_day, datetime.min.time(), tzinfo=timezone.utc)
+        segments = (
+            ()
+            if closed
+            else (
+                TradingSessionSegment(
+                    TradingSessionSegmentKind.CONTINUOUS,
+                    day + timedelta(hours=1),
+                    day + timedelta(hours=3, minutes=30),
+                    True,
+                    True,
+                    TRADING_SEGMENT_POLICY_V1,
+                ),
+                TradingSessionSegment(
+                    TradingSessionSegmentKind.BREAK,
+                    day + timedelta(hours=3, minutes=30),
+                    day + timedelta(hours=5),
+                    False,
+                    False,
+                    TRADING_SEGMENT_POLICY_V1,
+                ),
+                TradingSessionSegment(
+                    TradingSessionSegmentKind.CONTINUOUS,
+                    day + timedelta(hours=5),
+                    day + timedelta(hours=7),
+                    True,
+                    True,
+                    TRADING_SEGMENT_POLICY_V1,
+                ),
+            )
+        )
+        return CalendarSessionFact(
+            "600519.SH",
+            Market.A,
+            trading_day,
+            RuntimeCalendarState.MARKET_CLOSED if closed else RuntimeCalendarState.OPEN,
+            None if closed else index,
+            segments,
+            _hash("fixture-calendar-policy"),
+        )
+
+    def market_fixture(
+        self,
+        calendars,
+        specs=(),
+        *,
+        through_by_day=None,
+        loss_by_day=None,
+        source_start_proof=True,
+    ):
+        through_by_day = through_by_day or {}
+        loss_by_day = loss_by_day or {}
+        specs = tuple(sorted(specs, key=lambda item: item[1]))
+        manifests = []
+        for calendar in sorted(calendars, key=lambda item: item.trading_day):
+            day_specs = [
+                item for item in specs if item[1].date() == calendar.trading_day
+            ]
+            through = through_by_day.get(
+                calendar.trading_day, calendar.scheduled_close_at
+            )
+            through = max(
+                (through, *(item[1] + timedelta(microseconds=1) for item in day_specs))
+            )
+            manifests.append(
+                MarketEventSourceSessionManifest(
+                    source_store_id=self.source_store_id,
+                    session_id=f"fixture-{calendar.trading_day}",
+                    connection_epoch=1,
+                    reconnect_epoch=0,
+                    collector_started_at=calendar.scheduled_open_at,
+                    coverage_start=calendar.scheduled_open_at,
+                    coverage_through=through,
+                    expected_first_callback_seq=1 if source_start_proof else None,
+                    callback_sequence_scope=MarketEventCallbackSequenceScope.SESSION,
+                    provider_sequence_available=False,
+                    provider_sequence_scope=MarketEventProviderSequenceScope.UNAVAILABLE,
+                    sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V2,
+                    subscription=MarketEventSubscriptionManifest(
+                        Market.A, ("600519.SH",), ("TRADE_TICK",)
+                    ),
+                    subscription_activated_at=calendar.scheduled_open_at,
+                    coverage_origin=CoverageOrigin.LIVE,
+                    queue_overflow_count=loss_by_day.get(calendar.trading_day, 0),
+                    dropped_callback_count=0,
+                    first_callback_seq=1 if day_specs else None,
+                    last_callback_seq=len(day_specs) if day_specs else None,
+                )
+            )
+        manifests = tuple(manifests)
+        by_day = {item.coverage_start.date(): item for item in manifests}
+        records, partition_previous, counts = [], {}, {}
+        previous = "0" * 64
+        for order, (label, at, price) in enumerate(specs, 1):
+            manifest = by_day[at.date()]
+            counts[manifest.session_id] = counts.get(manifest.session_id, 0) + 1
+            partition = f"market=A/trading_day={at.date()}/symbol=600519.SH"
+            record = MarketEventSourceRecord.create(
+                source_store_id=self.source_store_id,
+                append_order=order,
+                event_id=_hash(label),
+                session_id=manifest.session_id,
+                source_session_manifest_id=manifest.manifest_id,
+                connection_epoch=manifest.connection_epoch,
+                reconnect_epoch=0,
+                source="fixture-trades",
+                feed_mode="SYNTHETIC",
+                symbol="600519.SH",
+                market=Market.A,
+                event_type="TRADE_TICK",
+                trading_day=at.date(),
+                session_label_policy_id=MARKET_SESSION_LABEL_POLICY_V1,
+                source_time=at,
+                received_at=at + timedelta(microseconds=1),
+                durable_known_at=at + timedelta(microseconds=2),
+                callback_seq=counts[manifest.session_id],
+                provider_seq=None,
+                partition_key=partition,
+                previous_global_record_hash=previous,
+                previous_partition_record_hash=partition_previous.get(
+                    partition, "0" * 64
+                ),
+                raw_payload_sha256=_hash(f"synthetic-raw:{label}:{price}"),
+                payload={"last_price": price, "quantity": 100},
+                parser_id="fixture-parser-v1",
+                source_schema_id=FIXTURE_TRADE_TICK_SCHEMA_V1,
+            )
+            records.append(record)
+            previous = partition_previous[partition] = record.record_content_hash
+        records = tuple(records)
+        grouped = {}
+        for record in records:
+            grouped.setdefault(record.partition_key, []).append(record)
+        heads = tuple(
+            MarketEventPartitionHead(
+                key,
+                len(items),
+                items[0].record_content_hash,
+                items[-1].record_content_hash,
+                _hash(key),
+            )
+            for key, items in sorted(grouped.items())
+        )
+        audited = max(
+            (
+                *(item.coverage_through for item in manifests),
+                *(item.durable_known_at for item in records),
+            )
+        ) + timedelta(microseconds=1)
+        inventory = MarketEventInventoryVerification.create_from_prefix(
+            source_store_id=self.source_store_id,
+            catalog_schema_fingerprint=_hash("fixture-catalog"),
+            records=records,
+        )
+        snapshot = MarketEventStoreSnapshot.from_audit(
+            MarketEventStoreAudit.create_from_prefix(
+                source_store_id=self.source_store_id,
+                source_schema_id="fixture-store-v4",
+                sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V2,
+                audited_at=audited,
+                catalog_schema_fingerprint=_hash("fixture-catalog"),
+                inventory_verification=inventory,
+                records=records,
+                partition_heads=heads,
+                findings=(),
+                source_session_manifests=manifests,
+            )
+        )
+
+        def select(start, end):
+            selection = snapshot.select_from_prefix(
+                records=records,
+                partition_heads=heads,
+                findings=(),
+                source_session_manifests=manifests,
+                symbol="600519.SH",
+                market=Market.A,
+                start_source_time=start,
+                end_source_time=end,
+                allowed_event_types=("TRADE_TICK",),
+                interval_boundary_policy_id=RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
+                record_limit=max(1, len(records)),
+            )
+            verification = snapshot.verify_selection(
+                selection,
+                records=records,
+                partition_heads=heads,
+                findings=(),
+                source_session_manifests=manifests,
+            )
+            return selection, verification
+
+        selection, verification = select(
+            min(item.coverage_start for item in manifests),
+            max(item.coverage_through for item in manifests),
+        )
+        return selection, verification, select
+
     def authority_reference(
         self,
         *,
-        kind: RuntimeAuthorityKind,
-        trading_day: date,
-        known_at: datetime,
-        label: str,
-        revision: int = 1,
-        usable_from: datetime | None = None,
-    ) -> RuntimeAuthorityFactReference:
+        kind,
+        trading_day,
+        known_at,
+        label,
+        revision=1,
+        usable_from=None,
+        fact=None,
+        append_order=1,
+        previous="0" * 64,
+    ):
+        if fact is None:
+            calendar = self.calendar(trading_day)
+            if kind is RuntimeAuthorityKind.CALENDAR:
+                fact = calendar
+            elif kind is RuntimeAuthorityKind.SECURITY_STATUS:
+                fact = SecurityStatusFact(
+                    "600519.SH",
+                    Market.A,
+                    trading_day,
+                    RuntimeSecurityStatus.TRADABLE,
+                    _hash("status-policy"),
+                    label,
+                )
+            else:
+                selection, verification, _ = self.market_fixture((calendar,))
+                fact = SourceCoverageFact(
+                    calendar,
+                    selection,
+                    verification,
+                    calendar.scheduled_close_at,
+                    _hash("coverage-policy"),
+                )
         return RuntimeAuthorityFactReference(
-            authority_kind=kind,
             authority_store_id=_hash(f"authority-store:{kind.value}"),
-            fact_schema=f"stage4g1-{kind.value.lower()}-fact-v1",
-            effective_session_date=trading_day,
+            fact=fact,
             known_at=known_at,
             usable_from=known_at if usable_from is None else usable_from,
-            source=f"test-{kind.value.lower()}",
-            revision=revision,
+            source=f"fixture-{kind.value}",
+            fact_revision=revision,
+            authority_append_order=append_order,
+            previous_authority_record_hash=previous,
             policy_id=_hash(f"policy:{kind.value}"),
-            fact_payload_sha256=_hash(f"payload:{label}"),
         )
 
     def session_fact(
         self,
         *,
-        trading_day: date,
-        collection_order: int,
-        source_order: int,
-        open_session_index: int | None,
-        calendar_state: RuntimeCalendarState = RuntimeCalendarState.OPEN,
-        open_session_state: RuntimeOpenSessionState | None = RuntimeOpenSessionState.TRADED,
-        coverage_state: RuntimeCoverageState = RuntimeCoverageState.COMPLETE_SESSION,
-        session_complete: bool = True,
-        coverage_through: datetime | None = None,
-    ) -> RuntimeFrozenPathFact:
-        day_start = datetime.combine(
-            trading_day,
-            datetime.min.time(),
-            tzinfo=timezone.utc,
-        )
-        scheduled_open = day_start + timedelta(hours=1)
-        scheduled_close = day_start + timedelta(hours=7)
-        known_at = day_start + timedelta(hours=8)
+        trading_day,
+        collection_order,
+        source_order,
+        open_session_index,
+        calendar_state=RuntimeCalendarState.OPEN,
+        open_session_state=RuntimeOpenSessionState.TRADED,
+        coverage_state=RuntimeCoverageState.COMPLETE_SESSION,
+        session_complete=True,
+        coverage_through=None,
+    ):
         closed = calendar_state is RuntimeCalendarState.MARKET_CLOSED
-        calendar_reference = self.authority_reference(
+        calendar = self.calendar(trading_day, open_session_index, closed=closed)
+        known = datetime.combine(
+            trading_day, datetime.min.time(), tzinfo=timezone.utc
+        ) + timedelta(hours=8)
+        calendar_ref = self.authority_reference(
             kind=RuntimeAuthorityKind.CALENDAR,
             trading_day=trading_day,
-            known_at=known_at,
-            label=f"calendar-{trading_day.isoformat()}",
+            known_at=known,
+            label="calendar",
             revision=source_order,
+            fact=calendar,
         )
-        security_reference = (
-            self.authority_reference(
-                kind=RuntimeAuthorityKind.SECURITY_STATUS,
-                trading_day=trading_day,
-                known_at=known_at,
-                label=f"security-{trading_day.isoformat()}",
-                revision=source_order,
+        security_ref = coverage_ref = None
+        if not closed:
+            through = coverage_through or (
+                calendar.scheduled_open_at + timedelta(hours=1)
+                if coverage_state is RuntimeCoverageState.COMPLETE_PREFIX
+                else calendar.scheduled_close_at
             )
-            if open_session_state
-            in {RuntimeOpenSessionState.SUSPENDED, RuntimeOpenSessionState.NO_TRADE}
-            else None
-        )
-        coverage_reference = (
-            None
-            if closed
-            else self.authority_reference(
+            if coverage_state is RuntimeCoverageState.COMPLETE_SESSION and (
+                not session_complete or through != calendar.scheduled_close_at
+            ):
+                raise RuntimePathContractError(
+                    "COMPLETE_SESSION must cover the scheduled session close"
+                )
+            loss = int(
+                coverage_state
+                not in {
+                    RuntimeCoverageState.COMPLETE_PREFIX,
+                    RuntimeCoverageState.COMPLETE_SESSION,
+                }
+            )
+            selection, verification, _ = self.market_fixture(
+                (calendar,),
+                through_by_day={trading_day: through},
+                loss_by_day={trading_day: loss},
+            )
+            coverage = SourceCoverageFact(
+                calendar, selection, verification, through, _hash("coverage-policy")
+            )
+            coverage_ref = self.authority_reference(
                 kind=RuntimeAuthorityKind.COVERAGE,
                 trading_day=trading_day,
-                known_at=known_at,
-                label=f"coverage-{trading_day.isoformat()}",
+                known_at=known,
+                label="coverage",
                 revision=source_order,
+                fact=coverage,
             )
-        )
-        if open_session_index is not None and coverage_reference is not None:
-            self.coverage_fact_by_index[open_session_index] = coverage_reference.fact_id
-        session = RuntimeSessionEvidence(
-            symbol="600519.SH",
-            market=Market.A,
-            trading_day=trading_day,
-            calendar_state=calendar_state,
-            open_session_index=None if closed else open_session_index,
-            open_session_state=None if closed else open_session_state,
-            scheduled_open_at=None if closed else scheduled_open,
-            scheduled_close_at=None if closed else scheduled_close,
-            coverage_state=(
-                RuntimeCoverageState.NOT_APPLICABLE if closed else coverage_state
-            ),
-            session_complete=True if closed else session_complete,
-            coverage_through=(
-                None
-                if closed
-                else (
-                    coverage_through
-                    if coverage_through is not None
-                    else (
-                        scheduled_close
-                        if coverage_state is RuntimeCoverageState.COMPLETE_SESSION
-                        else (
-                            scheduled_open + timedelta(hours=1)
-                            if coverage_state is RuntimeCoverageState.COMPLETE_PREFIX
-                            else None
-                        )
-                    )
-                )
-            ),
-            session_label_policy_id=MARKET_SESSION_LABEL_POLICY_V1,
-            calendar_reference=calendar_reference,
-            security_status_reference=security_reference,
-            coverage_reference=coverage_reference,
+            security = SecurityStatusFact(
+                "600519.SH",
+                Market.A,
+                trading_day,
+                {
+                    RuntimeOpenSessionState.TRADED: RuntimeSecurityStatus.TRADABLE,
+                    RuntimeOpenSessionState.SUSPENDED: RuntimeSecurityStatus.SUSPENDED,
+                    RuntimeOpenSessionState.NO_TRADE: RuntimeSecurityStatus.NO_TRADE,
+                    RuntimeOpenSessionState.MISSING_DATA: RuntimeSecurityStatus.UNKNOWN,
+                }[open_session_state],
+                _hash("status-policy"),
+                "fixture",
+            )
+            security_ref = self.authority_reference(
+                kind=RuntimeAuthorityKind.SECURITY_STATUS,
+                trading_day=trading_day,
+                known_at=known,
+                label="security",
+                revision=source_order,
+                fact=security,
+            )
+            self.calendars[open_session_index] = calendar
+        session = RuntimeSessionEvidence.from_typed_authority_facts(
+            calendar_reference=calendar_ref,
+            security_status_reference=security_ref,
+            coverage_reference=coverage_ref,
         )
         return RuntimeFrozenPathFact(
-            collection_store_id=self.collection_store_id,
-            collection_append_order=collection_order,
-            case_id=self.case_id,
-            collection_fact_id=_hash(f"collection-fact-{collection_order}"),
-            collection_observed_at=known_at + timedelta(seconds=1),
-            kind=RuntimePathFactKind.SESSION,
+            self.collection_store_id,
+            collection_order,
+            self.case_id,
+            _hash(f"collection-fact-{collection_order}"),
+            known + timedelta(seconds=1),
+            RuntimePathFactKind.SESSION,
             session_evidence=session,
         )
 
     def point_fact(
         self,
         *,
-        collection_order: int,
-        source_order: int,
-        session_index: int,
-        interval_start: datetime,
-        interval_end: datetime | None = None,
-        high: str = "10.5",
-        low: str = "9.5",
-        close: str = "10",
-        granularity: RuntimePathGranularity = RuntimePathGranularity.MINUTE_BAR,
-        known_at: datetime | None = None,
-        raw_source_time: datetime | None = None,
-    ) -> RuntimeFrozenPathFact:
-        interval_end = (
-            interval_start + timedelta(minutes=1)
-            if interval_end is None
-            else interval_end
+        collection_order,
+        source_order,
+        session_index,
+        interval_start,
+        interval_end=None,
+        high="10.5",
+        low="9.5",
+        close="10",
+        granularity=RuntimePathGranularity.MINUTE_BAR,
+        known_at=None,
+        raw_source_time=None,
+    ):
+        end = (
+            interval_end
+            if interval_end is not None
+            else interval_start + timedelta(minutes=1)
         )
-        durable_known_at = (
-            interval_end + timedelta(seconds=2) if known_at is None else known_at
+        calendar = self.calendars.get(session_index) or self.calendar(
+            interval_start.date(), session_index
         )
-        actual_source_time = (
-            interval_start
-            if granularity is RuntimePathGranularity.TICK
-            else raw_source_time
-            if raw_source_time is not None
-            else interval_start + (interval_end - interval_start) / 2
-        )
-        self.raw_source_time_by_collection_order[collection_order] = actual_source_time
-        source = self.source_reference(
-            label=f"point-{collection_order}",
-            append_order=source_order,
-            known_at=durable_known_at,
-            source_time=actual_source_time,
-        )
-        projection_lineage = (
-            None
-            if granularity is RuntimePathGranularity.TICK
-            else RuntimeProjectionLineage(
-                projection_policy_id=_hash("projection-policy-v1"),
-                source_store_id=self.source_store_id,
-                source_snapshot_id=self.source_snapshot_id,
-                source_audit_id=self.source_audit_id,
-                source_high_water_append_order=self.source_high_water,
-                finding_set_digest=self.source_finding_set_digest,
-                selection_id=_hash("placeholder-selection"),
-                selection_verification_id=_hash("placeholder-selection-verification"),
-                interval_start=interval_start,
-                interval_end=interval_end,
-                interval_boundary_policy_id=RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
-                coverage_fact_id=self.coverage_fact_by_index.get(
-                    session_index,
-                    _hash(f"missing-coverage:{session_index}"),
-                ),
-                input_event_ids=(source.event_id,),
-                input_source_append_orders=(source.source_append_order,),
-                input_source_record_ids=(source.source_record_id,),
-                input_source_record_hashes=(source.source_record_hash,),
+        if granularity is RuntimePathGranularity.TICK:
+            if not high == low == close or end != interval_start:
+                raise RuntimePathContractError("TICK must be one exact price point")
+            specs = ((f"point-{collection_order}", interval_start, close),)
+            through = interval_start + timedelta(microseconds=3)
+        else:
+            last = (
+                raw_source_time
+                if raw_source_time is not None
+                else end - timedelta(seconds=1)
             )
-        )
-        projection_artifact = (
-            None
-            if projection_lineage is None
-            else RuntimeProjectionArtifactReference.create(
-                projection_policy_id=projection_lineage.projection_policy_id,
-                created_at=durable_known_at,
-                durable_known_at=durable_known_at,
-                symbol="600519.SH",
-                market=Market.A,
-                trading_day=market_session_date(
-                    interval_end - timedelta(microseconds=1),
-                    Market.A,
-                    MARKET_SESSION_LABEL_POLICY_V1,
-                ),
-                interval_start=interval_start,
-                interval_end=interval_end,
-                interval_boundary_policy_id=RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
-                lineage=projection_lineage,
-                high=Decimal(high),
-                low=Decimal(low),
-                close=Decimal(close),
-                coverage_fact_id=projection_lineage.coverage_fact_id,
+            if not interval_start <= last < end:
+                raise RuntimePathContractError(
+                    "projection input outside half-open interval"
+                )
+            specs = tuple(
+                (f"point-{collection_order}-{i}", at, price)
+                for i, (at, price) in enumerate(
+                    (
+                        (interval_start, high),
+                        (interval_start + (last - interval_start) / 2, low),
+                        (last, close),
+                    )
+                )
             )
+            through = end
+        selection, verification, select = self.market_fixture(
+            (calendar,), specs, through_by_day={calendar.trading_day: through}
         )
-        point = RuntimePathObservation(
-            symbol="600519.SH",
-            market=Market.A,
-            open_session_index=session_index,
-            interval_start=interval_start,
-            interval_end=interval_end,
-            high=Decimal(high),
-            low=Decimal(low),
-            close=Decimal(close),
-            granularity=granularity,
-            interval_boundary_policy_id=RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
-            source_reference=(
-                source if granularity is RuntimePathGranularity.TICK else None
-            ),
-            projection_artifact_reference=projection_artifact,
+        created = known_at or max(
+            end + timedelta(seconds=2), selection.snapshot_audited_at
         )
+        if granularity is RuntimePathGranularity.TICK:
+            tick = DecodedTradeTick(
+                selection.records[0],
+                selection,
+                verification,
+                FIXTURE_TRADE_DECODER_POLICY_V1,
+            )
+            observation = RuntimePathObservation.from_decoded_trade_tick(
+                decoded_tick=tick, calendar_fact=calendar
+            )
+        else:
+            coverage = SourceCoverageFact(
+                calendar, selection, verification, through, _hash("coverage-policy")
+            )
+            reference = self.authority_reference(
+                kind=RuntimeAuthorityKind.COVERAGE,
+                trading_day=calendar.trading_day,
+                known_at=selection.snapshot_audited_at,
+                label="projection-coverage",
+                fact=coverage,
+            )
+            bar_selection, bar_verification = select(interval_start, end)
+            ticks = tuple(
+                DecodedTradeTick(
+                    record,
+                    bar_selection,
+                    bar_verification,
+                    FIXTURE_TRADE_DECODER_POLICY_V1,
+                )
+                for record in bar_selection.records
+            )
+            projection = RuntimeProjectionArtifactReference.create(
+                selection=bar_selection,
+                verification=bar_verification,
+                decoded_ticks=ticks,
+                projection_policy_id=TRADE_PROJECTION_POLICY_V1,
+                coverage_fact=reference,
+                interval_start=interval_start,
+                interval_end=end,
+                created_at=created,
+                durable_known_at=created,
+            )
+            observation = RuntimePathObservation.from_projection(
+                projection=projection, calendar_fact=calendar, granularity=granularity
+            )
         return RuntimeFrozenPathFact(
-            collection_store_id=self.collection_store_id,
-            collection_append_order=collection_order,
-            case_id=self.case_id,
-            collection_fact_id=_hash(f"collection-fact-{collection_order}"),
-            collection_observed_at=durable_known_at + timedelta(seconds=1),
-            kind=RuntimePathFactKind.POINT,
-            path_observation=point,
+            self.collection_store_id,
+            collection_order,
+            self.case_id,
+            _hash(f"collection-fact-{collection_order}"),
+            created + timedelta(seconds=1),
+            RuntimePathFactKind.POINT,
+            path_observation=observation,
         )
 
     def prefix(
         self,
-        facts: list[RuntimeFrozenPathFact],
+        facts,
         *,
-        frozen_at: datetime | None = None,
-        eligible_unprojected_source_times: tuple[datetime, ...] = (),
-        source_start_proof: bool = True,
-    ) -> RuntimeFrozenPathPrefix:
+        frozen_at=None,
+        eligible_unprojected_source_times=(),
+        source_start_proof=True,
+    ):
         ordered = tuple(sorted(facts, key=lambda item: item.collection_append_order))
-        last_observed = max(item.collection_observed_at for item in ordered)
-        actual_frozen_at = (
-            last_observed + timedelta(seconds=1)
-            if frozen_at is None
-            else frozen_at
-        )
-
         sessions = {
-            item.session_evidence.open_session_index: item.session_evidence
+            item.session_evidence.trading_day: item.session_evidence
             for item in ordered
             if item.session_evidence is not None
-            and item.session_evidence.open_session_index is not None
         }
-        manifests = tuple(
-            MarketEventSourceSessionManifest(
-                source_store_id=self.source_store_id,
-                session_id=f"market-session-{session.open_session_index}",
-                connection_epoch=session.open_session_index + 1,
-                reconnect_epoch=0,
-                collector_started_at=session.scheduled_open_at,
-                coverage_start=session.scheduled_open_at,
-                expected_first_callback_seq=1 if source_start_proof else None,
-                callback_sequence_scope=MarketEventCallbackSequenceScope.SESSION,
-                provider_sequence_available=False,
-                provider_sequence_scope=MarketEventProviderSequenceScope.UNAVAILABLE,
-                sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V1,
-            )
-            for session in sorted(
-                sessions.values(),
-                key=lambda item: item.open_session_index,
-            )
-        )
-        manifest_by_index = {
-            index: manifest
-            for index, manifest in zip(sorted(sessions), manifests, strict=True)
+        open_sessions = {
+            day: session
+            for day, session in sessions.items()
+            if session.calendar_state is RuntimeCalendarState.OPEN
         }
-        raw_specs: list[tuple[str, int, datetime, int]] = []
-        for item in ordered:
-            observation = item.path_observation
-            if observation is None:
+        specs = []
+        for fact in ordered:
+            point = fact.path_observation
+            if point is None:
                 continue
-            raw_specs.append(
-                (
-                    f"point-{item.collection_append_order}",
-                    item.collection_append_order,
-                    self.raw_source_time_by_collection_order[
-                        item.collection_append_order
-                    ],
-                    observation.open_session_index,
+            ticks = (
+                (point.decoded_trade_tick,)
+                if point.decoded_trade_tick is not None
+                else point.projection_artifact_reference.decoded_ticks
+            )
+            specs.extend(
+                (tick.record.event_id, tick.record.source_time, format(tick.price, "f"))
+                for tick in ticks
+            )
+        specs.extend(
+            (f"eligible-{index}", at, "10")
+            for index, at in enumerate(eligible_unprojected_source_times)
+        )
+        selection, verification, select = self.market_fixture(
+            tuple(item.calendar_reference.fact for item in open_sessions.values()),
+            specs,
+            through_by_day={
+                day: item.coverage_through for day, item in open_sessions.items()
+            },
+            loss_by_day={
+                day: int(
+                    item.coverage_state
+                    not in {
+                        RuntimeCoverageState.COMPLETE_PREFIX,
+                        RuntimeCoverageState.COMPLETE_SESSION,
+                    }
                 )
+                for day, item in open_sessions.items()
+            },
+            source_start_proof=source_start_proof,
+        )
+        known = max(
+            selection.snapshot_audited_at,
+            *(item.collection_observed_at for item in ordered),
+        )
+        refs_by_kind = {}
+        new_sessions = {}
+        for day, session in sorted(sessions.items()):
+            new_refs = []
+            for reference in (
+                session.calendar_reference,
+                session.security_status_reference,
+                session.coverage_reference,
+            ):
+                if reference is None:
+                    new_refs.append(None)
+                    continue
+                payload = reference.fact
+                if reference.authority_kind is RuntimeAuthorityKind.COVERAGE:
+                    payload = SourceCoverageFact(
+                        session.calendar_reference.fact,
+                        selection,
+                        verification,
+                        session.coverage_through,
+                        _hash("coverage-policy"),
+                    )
+                prior = refs_by_kind.setdefault(reference.authority_kind, [])
+                ref = replace(
+                    reference,
+                    fact=payload,
+                    known_at=known,
+                    usable_from=known,
+                    authority_append_order=len(prior) + 1,
+                    previous_authority_record_hash=prior[-1].fact_record_hash
+                    if prior
+                    else "0" * 64,
+                )
+                prior.append(ref)
+                new_refs.append(ref)
+            new_sessions[day] = RuntimeSessionEvidence.from_typed_authority_facts(
+                calendar_reference=new_refs[0],
+                security_status_reference=new_refs[1],
+                coverage_reference=new_refs[2],
             )
-        for index, source_time in enumerate(eligible_unprojected_source_times, 1):
-            session_index = next(
-                index
-                for index, session in sessions.items()
-                if session.scheduled_open_at <= source_time <= session.scheduled_close_at
-            )
-            raw_specs.append((f"eligible-{index}", -index, source_time, session_index))
-        raw_specs.sort(key=lambda item: (item[2], item[0]))
-        source_records: list[MarketEventSourceRecord] = []
-        previous_global = "0" * 64
-        previous_by_partition: dict[str, str] = {}
-        callback_by_session: dict[int, int] = {}
-        record_by_collection_order: dict[int, MarketEventSourceRecord] = {}
-        for append_order, (label, collection_order, source_time, session_index) in enumerate(
-            raw_specs,
-            1,
-        ):
-            manifest = manifest_by_index[session_index]
-            callback_by_session[session_index] = callback_by_session.get(session_index, 0) + 1
-            trading_day = market_session_date(
-                source_time,
-                Market.A,
-                MARKET_SESSION_LABEL_POLICY_V1,
-            )
-            partition_key = (
-                f"market=A/trading_day={trading_day.isoformat()}/symbol=600519.SH"
-            )
-            record = MarketEventSourceRecord.create(
-                source_store_id=self.source_store_id,
-                append_order=append_order,
-                event_id=_hash(f"event:{label}"),
-                session_id=manifest.session_id,
-                source_session_manifest_id=manifest.manifest_id,
-                connection_epoch=manifest.connection_epoch,
-                reconnect_epoch=manifest.reconnect_epoch,
-                source="test-market-event-store",
-                feed_mode="LEVEL2",
-                symbol="600519.SH",
-                market=Market.A,
-                event_type="TRADE_TICK",
-                trading_day=trading_day,
-                session_label_policy_id=MARKET_SESSION_LABEL_POLICY_V1,
-                source_time=source_time,
-                received_at=source_time + timedelta(microseconds=1),
-                durable_known_at=source_time + timedelta(microseconds=2),
-                callback_seq=callback_by_session[session_index],
-                provider_seq=None,
-                partition_key=partition_key,
-                previous_global_record_hash=previous_global,
-                previous_partition_record_hash=previous_by_partition.get(
-                    partition_key,
-                    "0" * 64,
-                ),
-                raw_payload_sha256=_hash(f"raw:{label}"),
-                payload={"last_price": "10", "quantity": 100},
-                parser_id="test-market-event-parser-v1",
-                source_schema_id="test-market-event-record-v1",
-                record_file_sha256=_hash(f"file:{label}"),
-            )
-            source_records.append(record)
-            previous_global = record.record_content_hash
-            previous_by_partition[partition_key] = record.record_content_hash
-            if collection_order > 0:
-                record_by_collection_order[collection_order] = record
-        source_record_tuple = tuple(source_records)
-        grouped: dict[str, list[MarketEventSourceRecord]] = {}
-        for record in source_record_tuple:
-            grouped.setdefault(record.partition_key, []).append(record)
-        partition_heads = tuple(
-            MarketEventPartitionHead(
-                partition_key=partition_key,
-                event_count=len(items),
-                first_record_hash=items[0].record_content_hash,
-                last_record_hash=items[-1].record_content_hash,
-                manifest_sha256=_hash(f"manifest:{partition_key}"),
-            )
-            for partition_key, items in sorted(grouped.items())
-        )
-        inventory = MarketEventInventoryVerification.create_from_prefix(
-            source_store_id=self.source_store_id,
-            catalog_schema_fingerprint=_hash("test-market-catalog-schema-v4"),
-            records=source_record_tuple,
-        )
-        coverage_ends = tuple(
-            session.coverage_through
-            for session in sessions.values()
-            if session.coverage_through is not None
-        )
-        source_audited_at = max(
-            *(item.durable_known_at for item in source_record_tuple),
-            *coverage_ends,
-            *(session.scheduled_open_at for session in sessions.values()),
-        ) + timedelta(microseconds=1)
-        source_audit = MarketEventStoreAudit.create_from_prefix(
-            source_store_id=self.source_store_id,
-            source_schema_id="stock-tracker-market-event-store-v4",
-            sequence_policy_id=MARKET_EVENT_SEQUENCE_POLICY_V1,
-            audited_at=source_audited_at,
-            catalog_schema_fingerprint=_hash("test-market-catalog-schema-v4"),
-            inventory_verification=inventory,
-            records=source_record_tuple,
-            partition_heads=partition_heads,
-            findings=(),
-            source_session_manifests=manifests,
-        )
-        source_snapshot = MarketEventStoreSnapshot.from_audit(source_audit)
-        selection_start = min(
-            session.scheduled_open_at for session in sessions.values()
-        )
-        selection_end = max(
-            *coverage_ends,
-            *(item.source_time for item in source_record_tuple),
-            *(session.scheduled_open_at for session in sessions.values()),
-        ) + timedelta(microseconds=1)
-        source_selection = source_snapshot.select_from_prefix(
-            records=source_record_tuple,
-            partition_heads=partition_heads,
-            findings=(),
-            source_session_manifests=manifests,
-            symbol="600519.SH",
-            market=Market.A,
-            start_source_time=selection_start,
-            end_source_time=selection_end,
-            allowed_event_types=("TRADE_TICK",),
-            interval_boundary_policy_id=RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
-            record_limit=max(1, len(source_record_tuple)),
-        )
-        source_verification = source_snapshot.verify_selection(
-            source_selection,
-            records=source_record_tuple,
-            partition_heads=partition_heads,
-            findings=(),
-            source_session_manifests=manifests,
-        )
-        market_source_binding = RuntimeMarketSourceSnapshotBinding.from_verified_selection(
-            selection=source_selection,
-            verification=source_verification,
-        )
-
-        rebound_facts: list[RuntimeFrozenPathFact] = []
+        rebound = []
         for item in ordered:
-            observation = item.path_observation
-            if observation is None:
-                rebound_facts.append(item)
+            if item.session_evidence is not None:
+                rebound.append(
+                    replace(
+                        item,
+                        session_evidence=new_sessions[
+                            item.session_evidence.trading_day
+                        ],
+                        collection_observed_at=known + timedelta(seconds=1),
+                    )
+                )
                 continue
-            record = record_by_collection_order[item.collection_append_order]
-            source_reference = RuntimeSourceReference.from_verified_selection(
-                record=record,
-                selection=source_selection,
-                verification=source_verification,
-            )
-            if observation.granularity is RuntimePathGranularity.TICK:
-                rebound_observation = replace(
-                    observation,
-                    source_reference=source_reference,
-                    projection_artifact_reference=None,
+            point = item.path_observation
+            session = new_sessions[point.calendar_fact.trading_day]
+            if point.decoded_trade_tick is not None:
+                original = point.decoded_trade_tick.record
+                record = next(
+                    record
+                    for record in selection.records
+                    if record.event_id == _hash(original.event_id)
+                )
+                tick = DecodedTradeTick(
+                    record, selection, verification, FIXTURE_TRADE_DECODER_POLICY_V1
+                )
+                observation = RuntimePathObservation.from_decoded_trade_tick(
+                    decoded_tick=tick, calendar_fact=point.calendar_fact
                 )
             else:
-                session = sessions[observation.open_session_index]
-                assert session.coverage_reference is not None
-                lineage = RuntimeProjectionLineage(
-                    projection_policy_id=_hash("projection-policy-v1"),
-                    source_store_id=self.source_store_id,
-                    source_snapshot_id=source_selection.snapshot_id,
-                    source_audit_id=source_selection.snapshot_audit_id,
-                    source_high_water_append_order=(
-                        source_selection.snapshot_high_water_append_order
-                    ),
-                    finding_set_digest=source_selection.snapshot_finding_set_digest,
-                    selection_id=source_selection.selection_id,
-                    selection_verification_id=source_verification.verification_id,
-                    interval_start=observation.interval_start,
-                    interval_end=observation.interval_end,
-                    interval_boundary_policy_id=RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
-                    coverage_fact_id=session.coverage_reference.fact_id,
-                    input_event_ids=(record.event_id,),
-                    input_source_append_orders=(record.append_order,),
-                    input_source_record_ids=(record.source_record_id,),
-                    input_source_record_hashes=(record.record_content_hash,),
+                bar_selection, bar_verification = select(
+                    point.interval_start, point.interval_end
+                )
+                ticks = tuple(
+                    DecodedTradeTick(
+                        record,
+                        bar_selection,
+                        bar_verification,
+                        FIXTURE_TRADE_DECODER_POLICY_V1,
+                    )
+                    for record in bar_selection.records
                 )
                 projection = RuntimeProjectionArtifactReference.create(
-                    projection_policy_id=lineage.projection_policy_id,
-                    created_at=max(
-                        record.durable_known_at,
-                        observation.interval_end,
-                    ),
-                    durable_known_at=max(
-                        record.durable_known_at,
-                        observation.interval_end,
-                    ),
-                    symbol=observation.symbol,
-                    market=observation.market,
-                    trading_day=record.trading_day,
-                    interval_start=observation.interval_start,
-                    interval_end=observation.interval_end,
-                    interval_boundary_policy_id=RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
-                    lineage=lineage,
-                    high=observation.high,
-                    low=observation.low,
-                    close=observation.close,
-                    coverage_fact_id=lineage.coverage_fact_id,
+                    selection=bar_selection,
+                    verification=bar_verification,
+                    decoded_ticks=ticks,
+                    projection_policy_id=TRADE_PROJECTION_POLICY_V1,
+                    coverage_fact=session.coverage_reference,
+                    interval_start=point.interval_start,
+                    interval_end=point.interval_end,
+                    created_at=known,
+                    durable_known_at=known,
                 )
-                rebound_observation = replace(
-                    observation,
-                    source_reference=None,
-                    projection_artifact_reference=projection,
+                observation = RuntimePathObservation.from_projection(
+                    projection=projection,
+                    calendar_fact=point.calendar_fact,
+                    granularity=point.granularity,
                 )
-            rebound_facts.append(replace(item, path_observation=rebound_observation))
-        ordered = tuple(rebound_facts)
-        authority_references = tuple(
-            reference
-            for item in ordered
-            if item.session_evidence is not None
-            for reference in (
-                item.session_evidence.calendar_reference,
-                item.session_evidence.security_status_reference,
-                item.session_evidence.coverage_reference,
+            rebound.append(
+                replace(
+                    item,
+                    path_observation=observation,
+                    collection_observed_at=known + timedelta(seconds=1),
+                )
             )
-            if reference is not None
-        )
+        ordered = tuple(rebound)
         authority_selections = tuple(
             RuntimeAuthorityFactSelection.from_verified_snapshot(
                 snapshot=RuntimeAuthoritySnapshotBinding.from_facts(
                     authority_kind=kind,
-                    authority_store_id=next(
-                        item.authority_store_id
-                        for item in authority_references
-                        if item.authority_kind is kind
-                    ),
-                    authority_audited_at=max(
-                        item.usable_from
-                        for item in authority_references
-                        if item.authority_kind is kind
-                    )
-                    + timedelta(microseconds=1),
-                    facts=tuple(
-                        sorted(
-                            (
-                                item
-                                for item in authority_references
-                                if item.authority_kind is kind
-                            ),
-                            key=lambda item: (item.revision, item.fact_id),
-                        )
-                    ),
+                    authority_store_id=refs[0].authority_store_id,
+                    authority_audited_at=known + timedelta(microseconds=1),
+                    facts=tuple(refs),
                 ),
-                facts=tuple(
-                    sorted(
-                        (
-                            item
-                            for item in authority_references
-                            if item.authority_kind is kind
-                        ),
-                        key=lambda item: (item.revision, item.fact_id),
-                    )
-                ),
-                selection_policy_id=_hash(f"authority-selection:{kind.value}"),
+                facts=tuple(refs),
+                selection_policy_id=_hash(f"authority-selection:{kind}"),
             )
-            for kind in sorted(
-                {item.authority_kind for item in authority_references},
-                key=lambda item: item.value,
+            for kind, refs in sorted(
+                refs_by_kind.items(), key=lambda item: item[0].value
             )
         )
         path_snapshot = RuntimePathStoreSnapshotBinding.from_prefix(
             path_store_id=self.collection_store_id,
-            path_audited_at=last_observed + timedelta(microseconds=1),
+            path_audited_at=known + timedelta(seconds=2),
             facts=ordered,
-            finding_blocker_digest=_hash("path-findings-and-blockers"),
+            finding_blocker_digest=_hash("path-findings"),
         )
         case_selection = RuntimeCaseFactSelection.from_verified_snapshot(
             path_store_snapshot=path_snapshot,
@@ -689,9 +788,11 @@ class RuntimePathContractTestCase(unittest.TestCase):
         )
         return RuntimeFrozenPathPrefix.from_verified_case_selection(
             case_selection=case_selection,
-            market_source_snapshot=market_source_binding,
+            market_source_snapshot=RuntimeMarketSourceSnapshotBinding.from_verified_selection(
+                selection=selection, verification=verification
+            ),
             authority_fact_selections=authority_selections,
-            frozen_at=actual_frozen_at,
+            frozen_at=frozen_at or known + timedelta(seconds=3),
         )
 
     def window(self, *, horizon_sessions: int = 2) -> RuntimePathWindow:
@@ -722,9 +823,7 @@ class RuntimePathContractTestCase(unittest.TestCase):
             path_store_id=prefix.path_store_snapshot.path_store_id,
             path_audited_at=prefix.path_store_snapshot.path_audited_at,
             facts=facts,
-            finding_blocker_digest=(
-                prefix.path_store_snapshot.finding_blocker_digest
-            ),
+            finding_blocker_digest=(prefix.path_store_snapshot.finding_blocker_digest),
         )
         case_selection = RuntimeCaseFactSelection.from_verified_snapshot(
             path_store_snapshot=path_snapshot,
@@ -828,9 +927,9 @@ class TestRuntimeFirstTouch(RuntimePathContractTestCase):
         self.assertEqual(result.state, RuntimePathResolutionState.TARGET)
 
     def test_bar_starting_at_entry_is_blocked_for_each_bar_granularity(self) -> None:
-        for granularity, interval_end in (
-            (RuntimePathGranularity.MINUTE_BAR, self.entry_time + timedelta(minutes=1)),
-            (RuntimePathGranularity.DAILY_BAR, self.entry_time + timedelta(hours=5)),
+        for granularity in (
+            RuntimePathGranularity.MINUTE_BAR,
+            RuntimePathGranularity.DAILY_BAR,
         ):
             with self.subTest(granularity=granularity.value):
                 facts = self.three_complete_sessions()
@@ -840,7 +939,7 @@ class TestRuntimeFirstTouch(RuntimePathContractTestCase):
                         source_order=4,
                         session_index=0,
                         interval_start=self.entry_time,
-                        interval_end=interval_end,
+                        interval_end=self.entry_time + timedelta(minutes=1),
                         granularity=granularity,
                     )
                 )
@@ -852,30 +951,23 @@ class TestRuntimeFirstTouch(RuntimePathContractTestCase):
                 )
 
     def test_adjacent_closed_boundary_source_input_is_rejected(self) -> None:
-        session = self.session_fact(
-            trading_day=date(2026, 9, 1),
-            collection_order=1,
-            source_order=1,
-            open_session_index=0,
-        )
-        interval_start = self.entry_time + timedelta(minutes=1)
-        interval_end = interval_start + timedelta(minutes=1)
-        bar = self.point_fact(
-            collection_order=2,
-            source_order=2,
-            session_index=0,
-            interval_start=interval_start,
-            interval_end=interval_end,
-            raw_source_time=interval_end,
-        )
-        with self.assertRaisesRegex(RuntimePathContractError, "verified raw Selection"):
-            self.prefix([session, bar])
+        start = self.entry_time + timedelta(minutes=1)
+        with self.assertRaisesRegex(RuntimePathContractError, "half-open"):
+            self.point_fact(
+                collection_order=1,
+                source_order=1,
+                session_index=0,
+                interval_start=start,
+                interval_end=start + timedelta(minutes=1),
+                raw_source_time=start + timedelta(minutes=1),
+            )
 
     def test_window_has_no_caller_ordering_authority_boolean(self) -> None:
         self.assertNotIn(
             "ordering_authority",
             RuntimePathWindow.__dataclass_fields__,
         )
+
     def test_first_target_precedes_later_stop(self) -> None:
         facts = self.three_complete_sessions()
         target = self.point_fact(
@@ -989,7 +1081,9 @@ class TestRuntimeFirstTouch(RuntimePathContractTestCase):
         )
         result = resolve_runtime_path(self.window(), self.prefix(facts))
         self.assertEqual(result.state, RuntimePathResolutionState.TARGET)
-        self.assertEqual(result.first_touch_collection_fact_id, target.collection_fact_id)
+        self.assertEqual(
+            result.first_touch_collection_fact_id, target.collection_fact_id
+        )
 
     def test_timeout_requires_complete_horizon_without_barrier(self) -> None:
         facts = self.three_complete_sessions()
@@ -1177,12 +1271,10 @@ class TestRuntimeFirstTouch(RuntimePathContractTestCase):
                 interval_start=self.entry_time + timedelta(days=1, minutes=1),
             ),
         ]
-        result = resolve_runtime_path(self.window(horizon_sessions=1), self.prefix(facts))
-        self.assertEqual(result.state, RuntimePathResolutionState.BLOCKED)
-        self.assertEqual(
-            result.blocker_codes,
-            (RuntimePathBlockerCode.NONTRADED_SESSION_WITH_POINTS,),
-        )
+        with self.assertRaisesRegex(
+            RuntimePathContractError, "contradict selected trade"
+        ):
+            self.prefix(facts)
 
     def test_entry_time_outside_session_window_fails_closed(self) -> None:
         session = self.session_fact(
@@ -1214,26 +1306,13 @@ class TestRuntimeFirstTouch(RuntimePathContractTestCase):
         )
 
     def test_point_outside_session_window_fails_closed(self) -> None:
-        facts = [
-            self.session_fact(
-                trading_day=date(2026, 9, 1),
+        with self.assertRaisesRegex(RuntimePathContractError, "calendar|segment"):
+            self.point_fact(
                 collection_order=1,
                 source_order=1,
-                open_session_index=0,
-            ),
-            self.point_fact(
-                collection_order=2,
-                source_order=2,
                 session_index=0,
                 interval_start=datetime(2026, 9, 1, 7, 1, tzinfo=timezone.utc),
-            ),
-        ]
-        result = resolve_runtime_path(self.window(), self.prefix(facts))
-        self.assertEqual(result.state, RuntimePathResolutionState.BLOCKED)
-        self.assertEqual(
-            result.blocker_codes,
-            (RuntimePathBlockerCode.POINT_OUTSIDE_SESSION_WINDOW,),
-        )
+            )
 
     def test_point_beyond_claimed_coverage_fails_closed(self) -> None:
         facts = [
@@ -1253,12 +1332,8 @@ class TestRuntimeFirstTouch(RuntimePathContractTestCase):
                 interval_start=self.entry_time + timedelta(minutes=5),
             ),
         ]
-        result = resolve_runtime_path(self.window(), self.prefix(facts))
-        self.assertEqual(result.state, RuntimePathResolutionState.BLOCKED)
-        self.assertEqual(
-            result.blocker_codes,
-            (RuntimePathBlockerCode.POINT_BEYOND_COVERAGE,),
-        )
+        with self.assertRaisesRegex(RuntimePathContractError, "segment coverage"):
+            self.prefix(facts)
 
     def test_overlapping_bars_fail_closed(self) -> None:
         facts = self.three_complete_sessions()
@@ -1280,13 +1355,10 @@ class TestRuntimeFirstTouch(RuntimePathContractTestCase):
                 ),
             ]
         )
-        result = resolve_runtime_path(self.window(), self.prefix(facts))
-        self.assertEqual(result.state, RuntimePathResolutionState.BLOCKED)
-        self.assertEqual(
-            result.blocker_codes,
-            (RuntimePathBlockerCode.OVERLAPPING_PATH_OBSERVATIONS,),
-        )
-
+        with self.assertRaisesRegex(
+            RuntimePathContractError, "consumed more than once"
+        ):
+            self.prefix(facts)
 
     def test_entry_fill_cannot_exist_on_nontraded_session(self) -> None:
         facts = [
@@ -1321,7 +1393,9 @@ class TestRuntimeFirstTouch(RuntimePathContractTestCase):
         self.assertEqual(result.state, RuntimePathResolutionState.OPEN)
         self.assertEqual(result.pending_code.value, "HORIZON_NOT_REACHED")
 
-    def test_entry_complete_prefix_at_fill_without_post_entry_record_is_open(self) -> None:
+    def test_entry_complete_prefix_at_fill_without_post_entry_record_is_open(
+        self,
+    ) -> None:
         session = self.session_fact(
             trading_day=date(2026, 9, 1),
             collection_order=1,
@@ -1352,15 +1426,13 @@ class TestRuntimeFirstTouch(RuntimePathContractTestCase):
         )
         prefix = self.prefix(
             [session],
-            eligible_unprojected_source_times=(
-                self.entry_time + timedelta(minutes=1),
-            ),
+            eligible_unprojected_source_times=(self.entry_time + timedelta(minutes=1),),
         )
         result = resolve_runtime_path(self.window(horizon_sessions=1), prefix)
         self.assertEqual(result.state, RuntimePathResolutionState.BLOCKED)
         self.assertEqual(
             result.blocker_codes,
-            (RuntimePathBlockerCode.TRADED_SESSION_WITHOUT_POINTS,),
+            (RuntimePathBlockerCode.UNPROJECTED_SOURCE_MEMBER,),
         )
 
     def test_post_horizon_ambiguous_point_is_ignored(self) -> None:
@@ -1475,7 +1547,7 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
             ("findings", {"finding_set_digest": _hash("wrong-findings")}),
         ):
             with self.subTest(attack=label):
-                attacked_observation = replace(
+                attacked_observation = _tamper(
                     point.path_observation,
                     source_reference=replace(source, **changes),
                 )
@@ -1492,7 +1564,7 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
                         (prefix.facts[0], attacked_fact),
                     )
 
-        with self.assertRaisesRegex(RuntimePathContractError, "trade-event member"):
+        with self.assertRaisesRegex(TypeError, "init=False"):
             replace(
                 point.path_observation,
                 source_reference=replace(source, event_type="ORDER_BOOK"),
@@ -1502,7 +1574,7 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
             Market.US,
             MARKET_SESSION_LABEL_POLICY_V1,
         )
-        with self.assertRaisesRegex(RuntimePathContractError, "trade-event member"):
+        with self.assertRaisesRegex(TypeError, "init=False"):
             replace(
                 point.path_observation,
                 source_reference=replace(
@@ -1539,9 +1611,12 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
         )
         prefix = self.prefix(facts)
         for label, omitted_index in (("session", 0), ("target", 3), ("stop", 4)):
-            with self.subTest(omission=label), self.assertRaisesRegex(
-                RuntimePathContractError,
-                "prefix",
+            with (
+                self.subTest(omission=label),
+                self.assertRaisesRegex(
+                    RuntimePathContractError,
+                    "prefix",
+                ),
             ):
                 RuntimeCaseFactSelection.from_verified_snapshot(
                     path_store_snapshot=prefix.path_store_snapshot,
@@ -1638,8 +1713,11 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
             source_order=1,
             open_session_index=0,
         )
-        with self.assertRaisesRegex(RuntimePathContractError, "start capability"):
-            self.prefix([fact], source_start_proof=False)
+        prefix = self.prefix([fact], source_start_proof=False)
+        self.assertFalse(prefix.facts[0].session_evidence.session_complete)
+        result = resolve_runtime_path(self.window(), prefix)
+        self.assertEqual(result.state, RuntimePathResolutionState.BLOCKED)
+        self.assertIn(RuntimePathBlockerCode.SESSION_GAP, result.blocker_codes)
 
     def test_prefix_rejects_fact_known_after_freeze(self) -> None:
         fact = self.session_fact(
@@ -1682,30 +1760,21 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
             )
 
     def test_market_closed_session_cannot_fabricate_open_state(self) -> None:
-        calendar_reference = self.authority_reference(
+        calendar = self.calendar(date(2026, 9, 1), closed=True)
+        with self.assertRaisesRegex(RuntimePathContractError, "MARKET_CLOSED"):
+            replace(calendar, open_session_index=0)
+        reference = self.authority_reference(
             kind=RuntimeAuthorityKind.CALENDAR,
-            trading_day=date(2026, 9, 1),
+            trading_day=calendar.trading_day,
             known_at=self.entry_time,
             label="calendar",
+            fact=calendar,
         )
-        with self.assertRaises(RuntimePathContractError):
-            RuntimeSessionEvidence(
-                symbol="600519.SH",
-                market=Market.A,
-                trading_day=date(2026, 9, 1),
-                calendar_state=RuntimeCalendarState.MARKET_CLOSED,
-                open_session_index=0,
-                open_session_state=RuntimeOpenSessionState.NO_TRADE,
-                scheduled_open_at=None,
-                scheduled_close_at=None,
-                coverage_state=RuntimeCoverageState.NOT_APPLICABLE,
-                session_complete=True,
-                coverage_through=None,
-                session_label_policy_id=MARKET_SESSION_LABEL_POLICY_V1,
-                calendar_reference=calendar_reference,
-                security_status_reference=None,
-                coverage_reference=None,
-            )
+        session = RuntimeSessionEvidence.from_typed_authority_facts(
+            calendar_reference=reference
+        )
+        with self.assertRaisesRegex(TypeError, "init=False"):
+            replace(session, open_session_state=RuntimeOpenSessionState.NO_TRADE)
 
     def test_complete_session_must_cover_scheduled_close(self) -> None:
         with self.assertRaisesRegex(
@@ -1721,36 +1790,15 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
             )
 
     def test_suspension_requires_authoritative_status(self) -> None:
-        calendar_reference = self.authority_reference(
-            kind=RuntimeAuthorityKind.CALENDAR,
+        fact = self.session_fact(
             trading_day=date(2026, 9, 1),
-            known_at=self.entry_time,
-            label="calendar",
+            collection_order=1,
+            source_order=1,
+            open_session_index=0,
+            open_session_state=RuntimeOpenSessionState.SUSPENDED,
         )
-        coverage_reference = self.authority_reference(
-            kind=RuntimeAuthorityKind.COVERAGE,
-            trading_day=date(2026, 9, 1),
-            known_at=self.entry_time,
-            label="coverage",
-        )
-        with self.assertRaises(RuntimePathContractError):
-            RuntimeSessionEvidence(
-                symbol="600519.SH",
-                market=Market.A,
-                trading_day=date(2026, 9, 1),
-                calendar_state=RuntimeCalendarState.OPEN,
-                open_session_index=0,
-                open_session_state=RuntimeOpenSessionState.SUSPENDED,
-                scheduled_open_at=self.entry_time - timedelta(hours=1),
-                scheduled_close_at=self.entry_time - timedelta(seconds=1),
-                coverage_state=RuntimeCoverageState.COMPLETE_SESSION,
-                session_complete=True,
-                coverage_through=self.entry_time - timedelta(seconds=1),
-                session_label_policy_id=MARKET_SESSION_LABEL_POLICY_V1,
-                calendar_reference=calendar_reference,
-                security_status_reference=None,
-                coverage_reference=coverage_reference,
-            )
+        with self.assertRaisesRegex(RuntimePathContractError, "security status"):
+            replace(fact.session_evidence, security_status_reference=None)
 
     def test_source_reference_rejects_future_known_time(self) -> None:
         with self.assertRaises(RuntimePathContractError):
@@ -1795,12 +1843,13 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
         )
         assert tick.path_observation is not None
         assert tick.path_observation.source_reference is not None
-        with self.assertRaisesRegex(RuntimePathContractError, "trade-event member"):
+        with self.assertRaisesRegex(TypeError, "init=False"):
             replace(
                 tick.path_observation,
                 source_reference=replace(
                     tick.path_observation.source_reference,
-                    source_time=tick.path_observation.interval_end - timedelta(seconds=1),
+                    source_time=tick.path_observation.interval_end
+                    - timedelta(seconds=1),
                 ),
             )
 
@@ -1826,8 +1875,8 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
             projection.lineage,
             source_snapshot_id=_hash("later-source-snapshot"),
         )
-        rewritten_projection = replace(projection, lineage=rewritten_lineage)
-        rewritten_observation = replace(
+        rewritten_projection = _tamper(projection, lineage=rewritten_lineage)
+        rewritten_observation = _tamper(
             rebound_point.path_observation,
             projection_artifact_reference=rewritten_projection,
         )
@@ -1854,7 +1903,7 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
             item.snapshot.authority_store_id
             for item in prefix.authority_fact_selections
         }
-        self.assertEqual(len(stores), 2)
+        self.assertEqual(len(stores), 3)
         original = prefix.authority_fact_selections[0]
         wrong_store_snapshot = copy.copy(original.snapshot)
         object.__setattr__(
@@ -1892,7 +1941,7 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
                 ),
                 frozen_at=prefix.frozen_at,
             )
-        with self.assertRaisesRegex(RuntimePathContractError, "calendar_reference"):
+        with self.assertRaisesRegex(RuntimePathContractError, "typed authority"):
             replace(
                 fact.session_evidence,
                 calendar_reference=_hash("caller-only-fact"),
@@ -1916,13 +1965,11 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
         )
         for reference in references:
             assert reference is not None
-            attacked_reference = replace(
+            attacked_reference = _tamper(
                 reference,
-                fact_payload_sha256=_hash(
-                    f"caller:{reference.authority_kind.value}"
-                ),
+                fact_payload_sha256=_hash(f"caller:{reference.authority_kind.value}"),
             )
-            attacked_session = replace(
+            attacked_session = _tamper(
                 session,
                 calendar_reference=(
                     attacked_reference
@@ -1931,15 +1978,17 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
                 ),
                 security_status_reference=(
                     attacked_reference
-                    if reference.authority_kind
-                    is RuntimeAuthorityKind.SECURITY_STATUS
+                    if reference.authority_kind is RuntimeAuthorityKind.SECURITY_STATUS
                     else session.security_status_reference
                 ),
             )
             attacked_fact = replace(rebound, session_evidence=attacked_session)
-            with self.subTest(kind=reference.authority_kind.value), self.assertRaisesRegex(
-                RuntimePathContractError,
-                "absent from its verified store selection",
+            with (
+                self.subTest(kind=reference.authority_kind.value),
+                self.assertRaisesRegex(
+                    RuntimePathContractError,
+                    "typed authority|mutated",
+                ),
             ):
                 self.refreeze_case(prefix, (attacked_fact,))
 
@@ -2018,21 +2067,18 @@ class TestRuntimePrefixAndSessionContracts(RuntimePathContractTestCase):
     def test_market_local_entry_and_session_dates_are_enforced(self) -> None:
         with self.assertRaisesRegex(RuntimePathContractError, "entry_trading_day"):
             replace(self.window(), entry_trading_day=date(2026, 8, 31))
-        fact = self.session_fact(
-            trading_day=date(2026, 9, 1),
-            collection_order=1,
-            source_order=1,
-            open_session_index=0,
-        )
-        assert fact.session_evidence is not None
-        with self.assertRaisesRegex(RuntimePathContractError, "market-local"):
+        calendar = self.calendar(date(2026, 9, 1))
+        shifted = tuple(
             replace(
-                fact.session_evidence,
-                scheduled_open_at=fact.session_evidence.scheduled_open_at
-                + timedelta(days=1),
-                scheduled_close_at=fact.session_evidence.scheduled_close_at
-                + timedelta(days=1),
+                item,
+                start=item.start + timedelta(days=1),
+                end=item.end + timedelta(days=1),
+                calendar_fact_id=None,
             )
+            for item in calendar.segments
+        )
+        with self.assertRaisesRegex(RuntimePathContractError, "trading-day mismatch"):
+            replace(calendar, segments=shifted)
 
 
 class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
@@ -2077,9 +2123,7 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
         return RuntimeExecutionFragment(
             intent_id=_hash("intent"),
             execution_id=execution_id,
-            source_fact_id=_hash(
-                source_fact_label or f"execution:{execution_id}"
-            ),
+            source_fact_id=_hash(source_fact_label or f"execution:{execution_id}"),
             source_callback_id=_hash(f"callback:{execution_id}"),
             source_append_order=seconds,
             side=RuntimeExecutionSide.BUY,
@@ -2100,7 +2144,9 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
             execution_stream_complete=True,
         )
 
-    def test_partial_fill_aggregation_is_not_structurally_projectable_to_stage4g_v3(self) -> None:
+    def test_partial_fill_aggregation_is_not_structurally_projectable_to_stage4g_v3(
+        self,
+    ) -> None:
         summary = RuntimeExecutionSummary(
             intent_id=_hash("intent"),
             side=RuntimeExecutionSide.BUY,
@@ -2264,8 +2310,16 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
 
     def test_late_reason_facts_cannot_explain_earlier_no_entry(self) -> None:
         for reason, fact_kind, keyword in (
-            (RuntimeNoEntryReason.USER_CANCELLED, "USER_CANCELLATION", "cancellation_fact_id"),
-            (RuntimeNoEntryReason.ORDER_REJECTED, "ORDER_REJECTION", "rejection_fact_id"),
+            (
+                RuntimeNoEntryReason.USER_CANCELLED,
+                "USER_CANCELLATION",
+                "cancellation_fact_id",
+            ),
+            (
+                RuntimeNoEntryReason.ORDER_REJECTED,
+                "ORDER_REJECTION",
+                "rejection_fact_id",
+            ),
         ):
             fact_id = _hash(f"late:{reason.value}")
             decided_at = self.entry_time + timedelta(minutes=5)
@@ -2293,9 +2347,12 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
                     actor_id="local-user",
                     actor_authentication_fact_id=authentication,
                 )
-            with self.subTest(reason=reason.value), self.assertRaisesRegex(
-                RuntimePathContractError,
-                "predates its execution evidence",
+            with (
+                self.subTest(reason=reason.value),
+                self.assertRaisesRegex(
+                    RuntimePathContractError,
+                    "predates its execution evidence",
+                ),
             ):
                 RuntimeNoEntryEvidence(
                     reason=reason,
@@ -2479,6 +2536,388 @@ class TestRuntimeExecutionAndNoEntry(RuntimePathContractTestCase):
                 evidence_ids=(),
                 entry_window_coverage_complete=True,
             )
+
+
+class TestR3SemanticClosure(RuntimePathContractTestCase):
+    def test_r3_tick_price_cannot_disagree_with_decoded_payload(self) -> None:
+        point = self.point_fact(
+            collection_order=1,
+            source_order=1,
+            session_index=0,
+            interval_start=self.entry_time + timedelta(minutes=1),
+            interval_end=self.entry_time + timedelta(minutes=1),
+            high="10",
+            low="10",
+            close="10",
+            granularity=RuntimePathGranularity.TICK,
+        )
+        with self.assertRaises((ValueError, TypeError)):
+            replace(
+                point.path_observation,
+                high=Decimal(12),
+                low=Decimal(12),
+                close=Decimal(12),
+            )
+
+    def test_r3_projection_factory_does_not_accept_caller_ohlc(self) -> None:
+        import inspect
+
+        parameters = inspect.signature(
+            RuntimeProjectionArtifactReference.create
+        ).parameters
+        self.assertFalse({"high", "low", "close"} & set(parameters))
+        self.assertIn("decoded_ticks", parameters)
+
+    def test_r3_omitted_earlier_member_blocks_later_target(self) -> None:
+        facts = self.three_complete_sessions()
+        facts.append(
+            self.point_fact(
+                collection_order=4,
+                source_order=4,
+                session_index=0,
+                interval_start=self.entry_time + timedelta(minutes=10),
+                high="12.1",
+                close="12",
+            )
+        )
+        prefix = self.prefix(
+            facts,
+            eligible_unprojected_source_times=(self.entry_time + timedelta(minutes=5),),
+        )
+        result = resolve_runtime_path(self.window(), prefix)
+        self.assertEqual(result.state, RuntimePathResolutionState.BLOCKED)
+        self.assertIn("UNPROJECTED_SOURCE_MEMBER", result.blocker_codes)
+
+    def test_r3_same_authority_cannot_support_shifted_session(self) -> None:
+        session = self.three_complete_sessions()[0].session_evidence
+        with self.assertRaises((ValueError, TypeError)):
+            replace(
+                session,
+                scheduled_open_at=session.scheduled_open_at + timedelta(minutes=5),
+                scheduled_close_at=session.scheduled_close_at + timedelta(minutes=5),
+                coverage_through=session.coverage_through + timedelta(minutes=5),
+            )
+
+    def test_r3_fact_revision_is_not_store_high_water(self) -> None:
+        prefix = self.prefix(self.three_complete_sessions())
+        snapshot = prefix.authority_fact_selections[0].snapshot
+        self.assertFalse(hasattr(snapshot, "high_water_revision"))
+        self.assertEqual(
+            snapshot.authority_high_water_append_order, snapshot.fact_count
+        )
+
+    def test_r3_lunch_tick_cannot_trigger_target(self) -> None:
+        facts = self.three_complete_sessions()
+        timestamp = self.entry_time.replace(hour=4, minute=0)
+        try:
+            facts.append(
+                self.point_fact(
+                    collection_order=4,
+                    source_order=4,
+                    session_index=0,
+                    interval_start=timestamp,
+                    interval_end=timestamp,
+                    high="12.1",
+                    low="12.1",
+                    close="12.1",
+                    granularity=RuntimePathGranularity.TICK,
+                )
+            )
+            result = resolve_runtime_path(self.window(), self.prefix(facts))
+        except RuntimePathContractError:
+            return
+        self.assertEqual(result.state, RuntimePathResolutionState.BLOCKED)
+
+    def test_r3_bar_cannot_cross_lunch_break(self) -> None:
+        facts = self.three_complete_sessions()
+        try:
+            facts.append(
+                self.point_fact(
+                    collection_order=4,
+                    source_order=4,
+                    session_index=0,
+                    interval_start=self.entry_time.replace(hour=3, minute=29),
+                    interval_end=self.entry_time.replace(hour=5, minute=1),
+                )
+            )
+            result = resolve_runtime_path(self.window(), self.prefix(facts))
+        except RuntimePathContractError:
+            return
+        self.assertEqual(result.state, RuntimePathResolutionState.BLOCKED)
+
+    def test_r3_segment_coverage_and_projection_manifest_are_required(self) -> None:
+        prefix = self.prefix(self.three_complete_sessions())
+        self.assertTrue(hasattr(prefix, "projection_manifest"))
+        self.assertTrue(hasattr(prefix.facts[0].session_evidence, "segments"))
+
+    def test_r3_projection_recomputes_prices_and_all_interval_members(self):
+        bar = self.point_fact(
+            collection_order=1,
+            source_order=1,
+            session_index=0,
+            interval_start=self.entry_time + timedelta(minutes=1),
+            high="11",
+            low="11",
+            close="11",
+        )
+        projection = bar.path_observation.projection_artifact_reference
+        self.assertEqual(
+            (projection.high, projection.low, projection.close), (Decimal(11),) * 3
+        )
+        self.assertEqual(len(projection.decoded_ticks), 3)
+        with self.assertRaisesRegex(TypeError, "init=False"):
+            replace(projection, high=Decimal(99))
+        with self.assertRaisesRegex(RuntimePathContractError, "every interval member"):
+            replace(projection, decoded_ticks=projection.decoded_ticks[:-1])
+        with self.assertRaises(RuntimePathContractError):
+            replace(projection, decoded_ticks=(projection.decoded_ticks[0],) * 3)
+        self.assertEqual(projection.as_dict()["assurance"], "STRUCTURAL_FIXTURE")
+
+    def test_r3_queue_and_drop_block_session_projection_and_timeout(self):
+        calendar = self.calendar(date(2026, 9, 1))
+        selection, verification, select = self.market_fixture(
+            (calendar,),
+            (("trade", self.entry_time + timedelta(minutes=1), "12"),),
+            loss_by_day={calendar.trading_day: 1},
+        )
+        coverage = SourceCoverageFact(
+            calendar,
+            selection,
+            verification,
+            calendar.scheduled_close_at,
+            _hash("coverage"),
+        )
+        self.assertFalse(coverage.session_complete)
+        self.assertEqual(coverage.coverage_state, RuntimeCoverageState.INCOMPLETE_GAP)
+        reference = self.authority_reference(
+            kind=RuntimeAuthorityKind.COVERAGE,
+            trading_day=calendar.trading_day,
+            known_at=selection.snapshot_audited_at,
+            label="coverage",
+            fact=coverage,
+        )
+        bar_selection, bar_verification = select(
+            self.entry_time, self.entry_time + timedelta(minutes=2)
+        )
+        ticks = tuple(
+            DecodedTradeTick(
+                record, bar_selection, bar_verification, FIXTURE_TRADE_DECODER_POLICY_V1
+            )
+            for record in bar_selection.records
+        )
+        with self.assertRaisesRegex(RuntimePathContractError, "segment coverage"):
+            RuntimeProjectionArtifactReference.create(
+                selection=bar_selection,
+                verification=bar_verification,
+                decoded_ticks=ticks,
+                projection_policy_id=TRADE_PROJECTION_POLICY_V1,
+                coverage_fact=reference,
+                interval_start=bar_selection.start_source_time,
+                interval_end=bar_selection.end_source_time,
+                created_at=selection.snapshot_audited_at,
+                durable_known_at=selection.snapshot_audited_at,
+            )
+        session = self.session_fact(
+            trading_day=calendar.trading_day,
+            collection_order=1,
+            source_order=1,
+            open_session_index=0,
+            coverage_state=RuntimeCoverageState.INCOMPLETE_GAP,
+            session_complete=False,
+        )
+        result = resolve_runtime_path(self.window(), self.prefix([session]))
+        self.assertEqual(result.state, RuntimePathResolutionState.BLOCKED)
+        self.assertIn(RuntimePathBlockerCode.SESSION_GAP, result.blocker_codes)
+
+    def test_r3_afternoon_segment_gap_cannot_complete_session(self):
+        calendar = self.calendar(date(2026, 9, 1))
+        selection, verification, _ = self.market_fixture(
+            (calendar,), through_by_day={calendar.trading_day: calendar.segments[0].end}
+        )
+        coverage = SourceCoverageFact(
+            calendar,
+            selection,
+            verification,
+            calendar.segments[0].end,
+            _hash("coverage"),
+        )
+        self.assertEqual(coverage.coverage_state, RuntimeCoverageState.COMPLETE_PREFIX)
+        self.assertFalse(coverage.session_complete)
+        with self.assertRaisesRegex(RuntimePathContractError, "audit bounds"):
+            replace(coverage, coverage_through=calendar.scheduled_close_at)
+
+    def test_r3_halt_disallows_prices_and_halfday_derives_from_calendar(self):
+        day = date(2026, 9, 1)
+        full = self.calendar(day)
+        half = replace(
+            full, segments=(replace(full.segments[0], calendar_fact_id=None),)
+        )
+        selection, verification, _ = self.market_fixture((half,))
+        coverage = SourceCoverageFact(
+            half, selection, verification, half.scheduled_close_at, _hash("coverage")
+        )
+        known = selection.snapshot_audited_at
+        calendar_ref = self.authority_reference(
+            kind=RuntimeAuthorityKind.CALENDAR,
+            trading_day=day,
+            known_at=known,
+            label="halfday",
+            fact=half,
+        )
+        status_ref = self.authority_reference(
+            kind=RuntimeAuthorityKind.SECURITY_STATUS,
+            trading_day=day,
+            known_at=known,
+            label="status",
+            fact=SecurityStatusFact(
+                "600519.SH",
+                Market.A,
+                day,
+                RuntimeSecurityStatus.NO_TRADE,
+                _hash("status"),
+                "zero verified fixture interval",
+            ),
+        )
+        coverage_ref = self.authority_reference(
+            kind=RuntimeAuthorityKind.COVERAGE,
+            trading_day=day,
+            known_at=known,
+            label="coverage",
+            fact=coverage,
+        )
+        session = RuntimeSessionEvidence.from_typed_authority_facts(
+            calendar_reference=calendar_ref,
+            security_status_reference=status_ref,
+            coverage_reference=coverage_ref,
+        )
+        self.assertEqual(session.scheduled_close_at, half.segments[0].end)
+        self.assertTrue(session.session_complete)
+        self.assertTrue(
+            all(
+                item.calendar_fact_id == half.calendar_fact_id
+                for item in session.segments
+            )
+        )
+        halted = replace(
+            half,
+            segments=(
+                TradingSessionSegment(
+                    TradingSessionSegmentKind.HALT,
+                    half.scheduled_open_at,
+                    half.scheduled_close_at,
+                    False,
+                    False,
+                    TRADING_SEGMENT_POLICY_V1,
+                ),
+            ),
+        )
+        source, proof, _ = self.market_fixture(
+            (halted,), (("illegal-trade", self.entry_time, "12"),)
+        )
+        tick = DecodedTradeTick(
+            source.records[0], source, proof, FIXTURE_TRADE_DECODER_POLICY_V1
+        )
+        with self.assertRaisesRegex(RuntimePathContractError, "BREAK/HALT"):
+            RuntimePathObservation.from_decoded_trade_tick(
+                decoded_tick=tick, calendar_fact=halted
+            )
+        with self.assertRaisesRegex(RuntimePathContractError, "BREAK/HALT"):
+            replace(halted.segments[0], price_events_allowed=True)
+
+    def test_r3_revision_and_append_chain_are_independent(self):
+        known = self.entry_time + timedelta(days=3)
+        first = self.authority_reference(
+            kind=RuntimeAuthorityKind.CALENDAR,
+            trading_day=date(2026, 9, 1),
+            known_at=known,
+            label="first",
+            revision=700,
+        )
+        second = self.authority_reference(
+            kind=RuntimeAuthorityKind.CALENDAR,
+            trading_day=date(2026, 9, 2),
+            known_at=known,
+            label="second",
+            revision=1,
+            append_order=2,
+            previous=first.fact_record_hash,
+        )
+        snapshot = RuntimeAuthoritySnapshotBinding.from_facts(
+            authority_kind=RuntimeAuthorityKind.CALENDAR,
+            authority_store_id=first.authority_store_id,
+            authority_audited_at=known,
+            facts=(first, second),
+        )
+        self.assertEqual(snapshot.authority_high_water_append_order, 2)
+        for invalid in (
+            replace(second, authority_append_order=4),
+            replace(second, previous_authority_record_hash="0" * 64),
+        ):
+            with self.assertRaisesRegex(RuntimePathContractError, "append chain"):
+                RuntimeAuthoritySnapshotBinding.from_facts(
+                    authority_kind=RuntimeAuthorityKind.CALENDAR,
+                    authority_store_id=first.authority_store_id,
+                    authority_audited_at=known,
+                    facts=(first, invalid),
+                )
+
+    def test_r3_projection_manifest_rejects_duplicate_raw_consumption(self):
+        session = self.session_fact(
+            trading_day=date(2026, 9, 1),
+            collection_order=1,
+            source_order=1,
+            open_session_index=0,
+        )
+        point = self.point_fact(
+            collection_order=2,
+            source_order=2,
+            session_index=0,
+            interval_start=self.entry_time + timedelta(minutes=1),
+            interval_end=self.entry_time + timedelta(minutes=1),
+            high="10",
+            low="10",
+            close="10",
+            granularity=RuntimePathGranularity.TICK,
+        )
+        prefix = self.prefix([session, point])
+        manifest = prefix.projection_manifest
+        with self.assertRaisesRegex(
+            RuntimePathContractError, "consumed more than once"
+        ):
+            replace(manifest, observations=manifest.observations * 2)
+        attacked = _tamper(
+            prefix, projection_manifest=_tamper(manifest, consumed_source_record_ids=())
+        )
+        with self.assertRaises(RuntimePathContractError):
+            resolve_runtime_path(self.window(), attacked)
+
+    def test_r3_execution_and_no_entry_remain_structural(self):
+        fixture = TestRuntimeExecutionAndNoEntry()
+        fixture.setUp()
+        summary = fixture.zero_fill_summary()
+        fact_id = _hash("coverage")
+        reference = fixture.evidence_reference(
+            fact_id,
+            source_append_order=1,
+            known_at=self.entry_time,
+            fact_kind="ENTRY_WINDOW_COVERAGE",
+        )
+        evidence = RuntimeNoEntryEvidence(
+            reason=RuntimeNoEntryReason.ENTRY_EXPIRED,
+            execution_summary=summary,
+            entry_window_start=self.entry_time,
+            entry_window_end=self.entry_time + timedelta(hours=1),
+            decided_at=self.entry_time + timedelta(hours=1),
+            execution_policy_id=_hash("policy"),
+            evidence_references=(reference,),
+            evidence_ids=(fact_id,),
+            entry_window_coverage_complete=True,
+            entry_window_coverage_fact_id=fact_id,
+        )
+        self.assertEqual(summary.as_dict()["assurance"], "STRUCTURAL_FIXTURE")
+        self.assertEqual(evidence.as_dict()["assurance"], "STRUCTURAL_FIXTURE")
+        with self.assertRaises(TypeError):
+            replace(summary, assurance="STORE_RESCANNED")
 
 
 if __name__ == "__main__":

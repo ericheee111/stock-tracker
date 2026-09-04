@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_EVEN, Context, Decimal, localcontext
 from enum import StrEnum
@@ -18,17 +18,22 @@ from stock_tracker.core.market_time import (
 from stock_tracker.core.types import Market
 from stock_tracker.runtime_evidence.source_snapshot_contracts import (
     MARKET_EVENT_INTERVAL_BOUNDARY_POLICY_V1,
-    MARKET_EVENT_SEQUENCE_POLICY_V1,
+    MARKET_EVENT_SEQUENCE_POLICY_V2,
+    DecodedTradeTick,
+    FindingResolutionState,
     MarketEventSelection,
     MarketEventSelectionVerification,
+    MarketEventSequenceFindingKind,
     MarketEventSourceRecord,
+    StructuralFixture,
+    validate_selection_verification,
 )
 
-RUNTIME_PATH_CONTRACT_SCHEMA = "stage4g1-runtime-path-contract-v3"
-RUNTIME_PATH_PREFIX_SCHEMA = "stage4g1-runtime-path-prefix-v3"
-RUNTIME_PATH_RESOLUTION_SCHEMA = "stage4g1-runtime-path-resolution-v2"
-RUNTIME_NO_ENTRY_SCHEMA = "stage4g1-runtime-no-entry-evidence-v2"
-RUNTIME_EXECUTION_SUMMARY_SCHEMA = "stage4g1-runtime-execution-summary-v3"
+RUNTIME_PATH_CONTRACT_SCHEMA = "stage4g1-runtime-path-contract-v4"
+RUNTIME_PATH_PREFIX_SCHEMA = "stage4g1-runtime-path-prefix-v4"
+RUNTIME_PATH_RESOLUTION_SCHEMA = "stage4g1-runtime-path-resolution-v3"
+RUNTIME_NO_ENTRY_SCHEMA = "stage4g1-runtime-no-entry-evidence-v3"
+RUNTIME_EXECUTION_SUMMARY_SCHEMA = "stage4g1-runtime-execution-summary-v4"
 RUNTIME_INTERVAL_BOUNDARY_POLICY_V1 = MARKET_EVENT_INTERVAL_BOUNDARY_POLICY_V1
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -39,7 +44,9 @@ _DECIMAL_CONTEXT = Context(prec=50, rounding=ROUND_HALF_EVEN)
 class RuntimePathContractError(ValueError):
     """Raised when path, session, execution, or no-entry evidence is malformed."""
 
-    def __init__(self, message: str, *, code: str = "RUNTIME_PATH_CONTRACT_INVALID") -> None:
+    def __init__(
+        self, message: str, *, code: str = "RUNTIME_PATH_CONTRACT_INVALID"
+    ) -> None:
         super().__init__(message)
         self.code = code
 
@@ -54,6 +61,13 @@ class RuntimeOpenSessionState(StrEnum):
     SUSPENDED = "SUSPENDED"
     NO_TRADE = "NO_TRADE"
     MISSING_DATA = "MISSING_DATA"
+
+
+class RuntimeSecurityStatus(StrEnum):
+    TRADABLE = "TRADABLE"
+    SUSPENDED = "SUSPENDED"
+    NO_TRADE = "NO_TRADE"
+    UNKNOWN = "UNKNOWN"
 
 
 class RuntimeCoverageState(StrEnum):
@@ -95,6 +109,7 @@ class RuntimePathPendingCode(StrEnum):
 
 
 class RuntimePathBlockerCode(StrEnum):
+    UNPROJECTED_SOURCE_MEMBER = "UNPROJECTED_SOURCE_MEMBER"
     CALENDAR_COVERAGE_GAP = "CALENDAR_COVERAGE_GAP"
     ENTRY_SESSION_MISSING = "ENTRY_SESSION_MISSING"
     ENTRY_SESSION_MISMATCH = "ENTRY_SESSION_MISMATCH"
@@ -220,8 +235,10 @@ def _require_utc(value: object, name: str) -> datetime:
 
 
 def _utc_text(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat(timespec="microseconds").replace(
-        "+00:00", "Z"
+    return (
+        value.astimezone(timezone.utc)
+        .isoformat(timespec="microseconds")
+        .replace("+00:00", "Z")
     )
 
 
@@ -288,7 +305,7 @@ def _ohlc_output_hash(
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimeSourceReference:
+class RuntimeSourceReference(StructuralFixture):
     source_store_id: str
     source_snapshot_id: str
     source_audit_id: str
@@ -296,6 +313,7 @@ class RuntimeSourceReference:
     finding_set_digest: str
     sequence_policy_id: str
     selection_id: str
+    selection_verification_id: str
     event_id: str
     source_session_id: str
     symbol: str
@@ -323,20 +341,17 @@ class RuntimeSourceReference:
             "source_high_water_append_order",
         )
         _require_sha256(self.finding_set_digest, "finding_set_digest")
-        if self.sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V1:
-            raise RuntimePathContractError(
-                "unsupported market-event sequence policy"
-            )
+        if self.sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V2:
+            raise RuntimePathContractError("unsupported market-event sequence policy")
         _require_sha256(self.selection_id, "selection_id")
+        _require_sha256(self.selection_verification_id, "selection_verification_id")
         _require_sha256(self.event_id, "event_id")
         market = _require_market(self.market)
         _require_symbol(self.symbol, market)
         _require_text(self.event_type, "event_type", maximum=128)
         _require_date(self.trading_day, "trading_day")
         if self.session_label_policy_id != MARKET_SESSION_LABEL_POLICY_V1:
-            raise RuntimePathContractError(
-                "unsupported market session label policy"
-            )
+            raise RuntimePathContractError("unsupported market session label policy")
         source_time = _require_utc(self.source_time, "source_time")
         received_at = _require_utc(self.received_at, "received_at")
         durable_known_at = _require_utc(self.durable_known_at, "durable_known_at")
@@ -376,6 +391,7 @@ class RuntimeSourceReference:
         selection: MarketEventSelection,
         verification: MarketEventSelectionVerification,
     ) -> RuntimeSourceReference:
+        validate_selection_verification(selection, verification)
         if (
             type(record) is not MarketEventSourceRecord
             or type(selection) is not MarketEventSelection
@@ -395,6 +411,7 @@ class RuntimeSourceReference:
             finding_set_digest=selection.snapshot_finding_set_digest,
             sequence_policy_id=selection.sequence_policy_id,
             selection_id=selection.selection_id,
+            selection_verification_id=verification.verification_id,
             event_id=record.event_id,
             source_session_id=record.session_id,
             symbol=record.symbol,
@@ -415,7 +432,9 @@ class RuntimeSourceReference:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-runtime-source-reference-v2",
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-runtime-source-reference-v3",
+            "selection_verification_id": self.selection_verification_id,
             "source_store_id": self.source_store_id,
             "source_snapshot_id": self.source_snapshot_id,
             "source_audit_id": self.source_audit_id,
@@ -445,54 +464,423 @@ class RuntimeSourceReference:
         return document
 
 
+class TradingSessionSegmentKind(StrEnum):
+    CONTINUOUS = "CONTINUOUS"
+    OPEN_AUCTION = "OPEN_AUCTION"
+    CLOSE_AUCTION = "CLOSE_AUCTION"
+    BREAK = "BREAK"
+    HALT = "HALT"
+
+
+TRADING_SEGMENT_POLICY_V1 = "stage4g1-fixture-trading-segments-v1"
+TRADE_PROJECTION_POLICY_V1 = "stage4g1-fixture-trade-ohlc-v1"
+PATH_PROJECTION_POLICY_V1 = "stage4g1-exact-trade-consumption-v1"
+
+
 @dataclass(frozen=True, slots=True)
-class RuntimeAuthorityFactReference:
-    authority_kind: RuntimeAuthorityKind
+class TradingSessionSegment(StructuralFixture):
+    kind: TradingSessionSegmentKind
+    start: datetime
+    end: datetime
+    price_events_allowed: bool
+    execution_allowed: bool
+    segment_policy_id: str
+    calendar_fact_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.kind) is not TradingSessionSegmentKind:
+            raise RuntimePathContractError("typed segment kind is required")
+        start = _require_utc(self.start, "segment start")
+        end = _require_utc(self.end, "segment end")
+        if end <= start:
+            raise RuntimePathContractError("segment interval must be non-empty")
+        object.__setattr__(self, "start", start)
+        object.__setattr__(self, "end", end)
+        _require_bool(self.price_events_allowed, "price_events_allowed")
+        _require_bool(self.execution_allowed, "execution_allowed")
+        if self.segment_policy_id != TRADING_SEGMENT_POLICY_V1:
+            raise RuntimePathContractError("unsupported segment policy")
+        if self.kind in {
+            TradingSessionSegmentKind.BREAK,
+            TradingSessionSegmentKind.HALT,
+        } and (self.price_events_allowed or self.execution_allowed):
+            raise RuntimePathContractError(
+                "BREAK/HALT cannot carry normal price or execution events"
+            )
+        if self.execution_allowed and not self.price_events_allowed:
+            raise RuntimePathContractError("execution requires observable price events")
+        if self.calendar_fact_id is not None:
+            _require_sha256(self.calendar_fact_id, "calendar_fact_id")
+
+    def as_dict(self, *, include_binding: bool = True) -> dict[str, Any]:
+        document: dict[str, Any] = {
+            "schema": "stage4g1-trading-session-segment-v1",
+            "assurance": self.assurance.value,
+            "kind": self.kind.value,
+            "start": _utc_text(self.start),
+            "end": _utc_text(self.end),
+            "price_events_allowed": self.price_events_allowed,
+            "execution_allowed": self.execution_allowed,
+            "segment_policy_id": self.segment_policy_id,
+        }
+        if include_binding:
+            document["calendar_fact_id"] = self.calendar_fact_id
+        return document
+
+
+@dataclass(frozen=True, slots=True)
+class CalendarSessionFact(StructuralFixture):
+    symbol: str
+    market: Market
+    trading_day: date
+    calendar_state: RuntimeCalendarState
+    open_session_index: int | None
+    segments: tuple[TradingSessionSegment, ...]
+    calendar_policy_id: str
+    session_label_policy_id: str = MARKET_SESSION_LABEL_POLICY_V1
+    calendar_fact_id: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        _require_symbol(self.symbol, _require_market(self.market))
+        _require_date(self.trading_day, "trading_day")
+        _require_sha256(self.calendar_policy_id, "calendar_policy_id")
+        if self.session_label_policy_id != MARKET_SESSION_LABEL_POLICY_V1:
+            raise RuntimePathContractError("unsupported Calendar session label policy")
+        if type(self.calendar_state) is not RuntimeCalendarState:
+            raise RuntimePathContractError("typed calendar state is required")
+        if type(self.segments) is not tuple or any(
+            type(item) is not TradingSessionSegment for item in self.segments
+        ):
+            raise RuntimePathContractError("typed calendar segments are required")
+        if self.calendar_state is RuntimeCalendarState.MARKET_CLOSED:
+            if self.open_session_index is not None or self.segments:
+                raise RuntimePathContractError(
+                    "MARKET_CLOSED cannot contain open segments/index"
+                )
+        else:
+            _require_int(self.open_session_index, "open_session_index")
+            if not self.segments:
+                raise RuntimePathContractError("OPEN requires exact calendar segments")
+        for segment in self.segments:
+            segment.__post_init__()
+            if any(
+                market_session_date(value, self.market, MARKET_SESSION_LABEL_POLICY_V1)
+                != self.trading_day
+                for value in (segment.start, segment.end - timedelta(microseconds=1))
+            ):
+                raise RuntimePathContractError("calendar segment trading-day mismatch")
+        if any(left.end != right.start for left, right in pairwise(self.segments)):
+            raise RuntimePathContractError(
+                "calendar segments must partition the session without gaps or overlap"
+            )
+        fact_id = _hash_document(self.as_dict(include_id=False, include_bindings=False))
+        if any(item.calendar_fact_id not in (None, fact_id) for item in self.segments):
+            raise RuntimePathContractError("segment belongs to another calendar fact")
+        object.__setattr__(self, "calendar_fact_id", fact_id)
+        object.__setattr__(
+            self,
+            "segments",
+            tuple(replace(item, calendar_fact_id=fact_id) for item in self.segments),
+        )
+
+    @property
+    def scheduled_open_at(self) -> datetime | None:
+        return self.segments[0].start if self.segments else None
+
+    @property
+    def scheduled_close_at(self) -> datetime | None:
+        return self.segments[-1].end if self.segments else None
+
+    def permits_price_interval(self, start: datetime, end: datetime) -> bool:
+        return any(
+            item.price_events_allowed
+            and item.start <= start < item.end
+            and (end == start or end <= item.end)
+            for item in self.segments
+        )
+
+    def as_dict(
+        self, *, include_id: bool = True, include_bindings: bool = True
+    ) -> dict[str, Any]:
+        document = {
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-calendar-session-fact-v1",
+            "symbol": self.symbol,
+            "market": self.market.value,
+            "trading_day": self.trading_day.isoformat(),
+            "calendar_state": self.calendar_state.value,
+            "open_session_index": self.open_session_index,
+            "calendar_policy_id": self.calendar_policy_id,
+            "session_label_policy_id": self.session_label_policy_id,
+            "segments": [
+                item.as_dict(include_binding=include_bindings) for item in self.segments
+            ],
+        }
+        if include_id:
+            document["calendar_fact_id"] = self.calendar_fact_id
+        return document
+
+
+@dataclass(frozen=True, slots=True)
+class SecurityStatusFact(StructuralFixture):
+    symbol: str
+    market: Market
+    trading_day: date
+    status: RuntimeSecurityStatus
+    status_policy_id: str
+    status_reason: str
+    security_status_fact_id: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        _require_symbol(self.symbol, _require_market(self.market))
+        _require_date(self.trading_day, "trading_day")
+        if type(self.status) is not RuntimeSecurityStatus:
+            raise RuntimePathContractError("typed security status is required")
+        _require_sha256(self.status_policy_id, "status_policy_id")
+        _require_text(self.status_reason, "status_reason")
+        object.__setattr__(
+            self,
+            "security_status_fact_id",
+            _hash_document(self.as_dict(include_id=False)),
+        )
+
+    def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
+        document = {
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-security-status-fact-v1",
+            "symbol": self.symbol,
+            "market": self.market.value,
+            "trading_day": self.trading_day.isoformat(),
+            "status": self.status.value,
+            "status_policy_id": self.status_policy_id,
+            "status_reason": self.status_reason,
+        }
+        if include_id:
+            document["security_status_fact_id"] = self.security_status_fact_id
+        return document
+
+
+@dataclass(frozen=True, slots=True)
+class SourceCoverageFact(StructuralFixture):
+    calendar_fact: CalendarSessionFact
+    selection: MarketEventSelection
+    verification: MarketEventSelectionVerification
+    coverage_through: datetime
+    coverage_policy_id: str
+    coverage_state: RuntimeCoverageState = field(init=False)
+    session_complete: bool = field(init=False)
+    segment_coverage: tuple[tuple[TradingSessionSegment, datetime, bool], ...] = field(
+        init=False
+    )
+    coverage_fact_id: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        if type(self.calendar_fact) is not CalendarSessionFact:
+            raise RuntimePathContractError("coverage requires a typed Calendar fact")
+        validate_selection_verification(self.selection, self.verification)
+        calendar = self.calendar_fact
+        if replace(calendar) != calendar:
+            raise RuntimePathContractError("coverage calendar fact was mutated")
+        if calendar.calendar_state is not RuntimeCalendarState.OPEN:
+            raise RuntimePathContractError(
+                "market-closed day cannot claim source coverage"
+            )
+        if (
+            self.selection.symbol != calendar.symbol
+            or self.selection.market is not calendar.market
+            or self.selection.allowed_event_types != ("TRADE_TICK",)
+        ):
+            raise RuntimePathContractError(
+                "coverage query must match calendar symbol and trade event type"
+            )
+        through = _require_utc(self.coverage_through, "coverage_through")
+        _require_sha256(self.coverage_policy_id, "coverage_policy_id")
+        opening, closing = calendar.scheduled_open_at, calendar.scheduled_close_at
+        assert opening is not None and closing is not None
+        if (
+            not opening <= through <= closing
+            or through > self.selection.snapshot_audited_at
+        ):
+            raise RuntimePathContractError(
+                "coverage_through is outside calendar/audit bounds"
+            )
+        object.__setattr__(self, "coverage_through", through)
+        intervals = tuple(
+            (item.start, min(item.end, through))
+            for item in calendar.segments
+            if item.kind is not TradingSessionSegmentKind.BREAK and item.start < through
+        )
+        covered = bool(intervals) and all(
+            self.selection.covers_interval(start, end) for start, end in intervals
+        )
+        relevant = tuple(
+            item
+            for item in self.selection.relevant_findings
+            if item.resolution_state is FindingResolutionState.UNRESOLVED
+            and item.intersects(
+                calendar.symbol, calendar.market, opening, through, ("TRADE_TICK",)
+            )
+        )
+        if relevant:
+            state = (
+                RuntimeCoverageState.INCOMPLETE_OUT_OF_ORDER
+                if any(
+                    item.kind
+                    in {
+                        MarketEventSequenceFindingKind.OUT_OF_ORDER,
+                        MarketEventSequenceFindingKind.SOURCE_TIME_REGRESSION,
+                    }
+                    for item in relevant
+                )
+                else RuntimeCoverageState.INCOMPLETE_GAP
+            )
+        elif not covered:
+            state = RuntimeCoverageState.INCOMPLETE_GAP
+        else:
+            state = (
+                RuntimeCoverageState.COMPLETE_SESSION
+                if through == closing
+                else RuntimeCoverageState.COMPLETE_PREFIX
+            )
+        segment_coverage = tuple(
+            (
+                segment,
+                min(max(through, segment.start), segment.end),
+                self.selection.covers_interval(segment.start, min(through, segment.end))
+                if through > segment.start
+                else False,
+            )
+            for segment in calendar.segments
+            if segment.kind is not TradingSessionSegmentKind.BREAK
+        )
+        object.__setattr__(self, "segment_coverage", segment_coverage)
+        object.__setattr__(self, "coverage_state", state)
+        object.__setattr__(
+            self, "session_complete", state is RuntimeCoverageState.COMPLETE_SESSION
+        )
+        object.__setattr__(
+            self, "coverage_fact_id", _hash_document(self.as_dict(include_id=False))
+        )
+
+    def proves_interval(self, start: datetime, end: datetime) -> bool:
+        return (
+            self.calendar_fact.permits_price_interval(start, end)
+            and end <= self.coverage_through
+            and self.selection.covers_interval(start, end)
+        )
+
+    def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
+        document = {
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-source-coverage-fact-v1",
+            "symbol": self.calendar_fact.symbol,
+            "market": self.calendar_fact.market.value,
+            "trading_day": self.calendar_fact.trading_day.isoformat(),
+            "coverage_start": _utc_text(self.calendar_fact.segments[0].start),
+            "source_store_id": self.selection.source_store_id,
+            "source_snapshot_id": self.selection.snapshot_id,
+            "source_audit_id": self.selection.snapshot_audit_id,
+            "subscription_manifests": [
+                item.as_dict() for item in self.selection.source_session_manifests
+            ],
+            "finding_digest": self.selection.relevant_finding_set_digest,
+            "segment_coverage": [
+                {
+                    "schema": "stage4g1-source-segment-coverage-v1",
+                    "segment": segment.as_dict(),
+                    "coverage_through": _utc_text(through),
+                    "covered_prefix": covered,
+                    "segment_complete": covered and through == segment.end,
+                    "selection_id": self.selection.selection_id,
+                    "verification_id": self.verification.verification_id,
+                }
+                for segment, through, covered in self.segment_coverage
+            ],
+            "calendar_fact": self.calendar_fact.as_dict(),
+            "selection_id": self.selection.selection_id,
+            "selection_verification_id": self.verification.verification_id,
+            "coverage_policy_id": self.coverage_policy_id,
+            "coverage_through": _utc_text(self.coverage_through),
+            "coverage_state": self.coverage_state.value,
+            "session_complete": self.session_complete,
+        }
+        if include_id:
+            document["coverage_fact_id"] = self.coverage_fact_id
+        return document
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeAuthorityFactReference(StructuralFixture):
     authority_store_id: str
-    fact_schema: str
-    effective_session_date: date
+    fact: CalendarSessionFact | SecurityStatusFact | SourceCoverageFact
     known_at: datetime
     usable_from: datetime
     source: str
-    revision: int
+    fact_revision: int
+    authority_append_order: int
+    previous_authority_record_hash: str
     policy_id: str
-    fact_payload_sha256: str
+    authority_kind: RuntimeAuthorityKind = field(init=False)
+    fact_schema: str = field(init=False)
+    effective_session_date: date = field(init=False)
+    fact_payload_sha256: str = field(init=False)
     fact_record_hash: str = field(init=False)
     fact_id: str = field(init=False)
     authority_reference_id: str = field(init=False)
 
     def __post_init__(self) -> None:
-        if type(self.authority_kind) is not RuntimeAuthorityKind:
+        kinds = {
+            CalendarSessionFact: RuntimeAuthorityKind.CALENDAR,
+            SecurityStatusFact: RuntimeAuthorityKind.SECURITY_STATUS,
+            SourceCoverageFact: RuntimeAuthorityKind.COVERAGE,
+        }
+        if type(self.fact) not in kinds or replace(self.fact) != self.fact:
             raise RuntimePathContractError(
-                "authority_kind must be RuntimeAuthorityKind"
+                "authority requires an exact, valid typed business fact"
             )
         _require_sha256(self.authority_store_id, "authority_store_id")
-        _require_text(self.fact_schema, "fact_schema", maximum=256)
-        _require_date(self.effective_session_date, "effective_session_date")
         known_at = _require_utc(self.known_at, "known_at")
         usable_from = _require_utc(self.usable_from, "usable_from")
         if known_at > usable_from:
             raise RuntimePathContractError("authority known_at exceeds usable_from")
+        if (
+            isinstance(self.fact, SourceCoverageFact)
+            and known_at < self.fact.selection.snapshot_audited_at
+        ):
+            raise RuntimePathContractError(
+                "coverage cannot be known before its selection audit"
+            )
         object.__setattr__(self, "known_at", known_at)
         object.__setattr__(self, "usable_from", usable_from)
         _require_text(self.source, "source", maximum=256)
-        _require_int(self.revision, "revision", minimum=1)
+        _require_int(self.fact_revision, "fact_revision", minimum=1)
+        _require_int(self.authority_append_order, "authority_append_order", minimum=1)
+        _require_sha256(
+            self.previous_authority_record_hash, "previous_authority_record_hash"
+        )
         _require_sha256(self.policy_id, "policy_id")
-        _require_sha256(self.fact_payload_sha256, "fact_payload_sha256")
+        document = self.fact.as_dict()
+        calendar = (
+            self.fact.calendar_fact
+            if isinstance(self.fact, SourceCoverageFact)
+            else self.fact
+        )
+        object.__setattr__(self, "authority_kind", kinds[type(self.fact)])
+        object.__setattr__(self, "fact_schema", document["schema"])
+        object.__setattr__(self, "effective_session_date", calendar.trading_day)
+        object.__setattr__(self, "fact_payload_sha256", _hash_document(document))
         object.__setattr__(
-            self,
-            "fact_record_hash",
-            _hash_document(self.fact_document()),
+            self, "fact_record_hash", _hash_document(self.fact_document())
         )
         object.__setattr__(
             self,
             "fact_id",
             _hash_document(
                 {
-                    "schema": "stage4g1-runtime-authority-fact-id-v1",
+                    "schema": "stage4g1-runtime-authority-fact-id-v2",
                     "authority_kind": self.authority_kind.value,
                     "authority_store_id": self.authority_store_id,
-                    "revision": self.revision,
+                    "authority_append_order": self.authority_append_order,
                     "fact_record_hash": self.fact_record_hash,
                 }
             ),
@@ -505,7 +893,8 @@ class RuntimeAuthorityFactReference:
 
     def fact_document(self) -> dict[str, Any]:
         return {
-            "schema": "stage4g1-runtime-authority-canonical-fact-v1",
+            "schema": "stage4g1-runtime-authority-canonical-fact-v2",
+            "assurance": self.assurance.value,
             "authority_kind": self.authority_kind.value,
             "authority_store_id": self.authority_store_id,
             "fact_schema": self.fact_schema,
@@ -513,14 +902,18 @@ class RuntimeAuthorityFactReference:
             "known_at": _utc_text(self.known_at),
             "usable_from": _utc_text(self.usable_from),
             "source": self.source,
-            "revision": self.revision,
+            "fact_revision": self.fact_revision,
+            "authority_append_order": self.authority_append_order,
+            "previous_authority_record_hash": self.previous_authority_record_hash,
             "policy_id": self.policy_id,
             "fact_payload_sha256": self.fact_payload_sha256,
+            "business_fact": self.fact.as_dict(),
         }
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-runtime-authority-fact-reference-v2",
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-runtime-authority-fact-reference-v3",
             "fact": self.fact_document(),
             "fact_record_hash": self.fact_record_hash,
             "fact_id": self.fact_id,
@@ -531,12 +924,12 @@ class RuntimeAuthorityFactReference:
 
 
 @dataclass(frozen=True, slots=True, init=False)
-class RuntimeAuthoritySnapshotBinding:
+class RuntimeAuthoritySnapshotBinding(StructuralFixture):
     authority_kind: RuntimeAuthorityKind
     authority_store_id: str
     authority_audit_id: str
     authority_audited_at: datetime
-    high_water_revision: int
+    authority_high_water_append_order: int
     fact_count: int
     fact_manifest_digest: str
     authority_snapshot_id: str
@@ -561,46 +954,58 @@ class RuntimeAuthoritySnapshotBinding:
             )
         _require_sha256(authority_store_id, "authority_store_id")
         audited_at = _require_utc(authority_audited_at, "authority_audited_at")
-        if type(facts) is not tuple or not facts or any(
-            type(item) is not RuntimeAuthorityFactReference
-            or item.authority_kind is not authority_kind
-            or item.authority_store_id != authority_store_id
-            or item.known_at > audited_at
-            or item.usable_from > audited_at
-            for item in facts
+        if (
+            type(facts) is not tuple
+            or not facts
+            or any(
+                type(item) is not RuntimeAuthorityFactReference
+                or item.authority_kind is not authority_kind
+                or item.authority_store_id != authority_store_id
+                or item.known_at > audited_at
+                or item.usable_from > audited_at
+                for item in facts
+            )
         ):
             raise RuntimePathContractError(
                 "authority snapshot facts are invalid or future-known"
             )
-        ordered = tuple(sorted(facts, key=lambda item: (item.revision, item.fact_id)))
-        if ordered != facts or len({item.revision for item in facts}) != len(facts):
-            raise RuntimePathContractError(
-                "authority facts must have unique canonically ordered revisions"
-            )
         chain = "0" * 64
-        for fact in facts:
+        previous_record = "0" * 64
+        previous_known: datetime | None = None
+        for order, fact in enumerate(facts, 1):
+            if (
+                fact.authority_append_order != order
+                or fact.previous_authority_record_hash != previous_record
+                or (previous_known is not None and fact.known_at < previous_known)
+                or replace(fact) != fact
+            ):
+                raise RuntimePathContractError(
+                    "authority append chain is not a contiguous exact prefix"
+                )
+            previous_record = fact.fact_record_hash
+            previous_known = fact.known_at
             chain = _hash_document(
                 {
-                    "schema": "stage4g1-runtime-authority-fact-manifest-node-v1",
+                    "schema": "stage4g1-runtime-authority-fact-manifest-node-v2",
                     "previous": chain,
                     "fact_id": fact.fact_id,
                     "fact_record_hash": fact.fact_record_hash,
-                    "revision": fact.revision,
+                    "authority_append_order": fact.authority_append_order,
                 }
             )
         fact_manifest_digest = _hash_document(
             {
-                "schema": "stage4g1-runtime-authority-fact-manifest-root-v1",
+                "schema": "stage4g1-runtime-authority-fact-manifest-root-v2",
                 "fact_count": len(facts),
                 "chain_head": chain,
             }
         )
         audit_document = {
-            "schema": "stage4g1-runtime-authority-audit-v1",
+            "schema": "stage4g1-runtime-authority-audit-v2",
             "authority_kind": authority_kind.value,
             "authority_store_id": authority_store_id,
             "authority_audited_at": _utc_text(audited_at),
-            "high_water_revision": max(item.revision for item in facts),
+            "authority_high_water_append_order": len(facts),
             "fact_count": len(facts),
             "fact_manifest_digest": fact_manifest_digest,
         }
@@ -610,7 +1015,7 @@ class RuntimeAuthoritySnapshotBinding:
             "authority_store_id": authority_store_id,
             "authority_audit_id": _hash_document(audit_document),
             "authority_audited_at": audited_at,
-            "high_water_revision": max(item.revision for item in facts),
+            "authority_high_water_append_order": len(facts),
             "fact_count": len(facts),
             "fact_manifest_digest": fact_manifest_digest,
         }.items():
@@ -624,12 +1029,13 @@ class RuntimeAuthoritySnapshotBinding:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-runtime-authority-snapshot-binding-v2",
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-runtime-authority-snapshot-binding-v3",
             "authority_kind": self.authority_kind.value,
             "authority_store_id": self.authority_store_id,
             "authority_audit_id": self.authority_audit_id,
             "authority_audited_at": _utc_text(self.authority_audited_at),
-            "high_water_revision": self.high_water_revision,
+            "authority_high_water_append_order": self.authority_high_water_append_order,
             "fact_count": self.fact_count,
             "fact_manifest_digest": self.fact_manifest_digest,
         }
@@ -639,7 +1045,7 @@ class RuntimeAuthoritySnapshotBinding:
 
 
 @dataclass(frozen=True, slots=True, init=False)
-class RuntimeAuthorityFactSelection:
+class RuntimeAuthorityFactSelection(StructuralFixture):
     snapshot: RuntimeAuthoritySnapshotBinding
     facts: tuple[RuntimeAuthorityFactReference, ...]
     selection_policy_id: str
@@ -703,7 +1109,10 @@ class RuntimeAuthorityFactSelection:
             authority_audited_at=self.snapshot.authority_audited_at,
             facts=self.facts,
         )
-        if expected_snapshot != self.snapshot or self.verification_mode != "FULL_PREFIX_RESCAN":
+        if (
+            expected_snapshot != self.snapshot
+            or self.verification_mode != "FULL_PREFIX_RESCAN"
+        ):
             raise RuntimePathContractError(
                 "authority fact selection no longer matches its exact snapshot"
             )
@@ -712,7 +1121,8 @@ class RuntimeAuthorityFactSelection:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-runtime-authority-fact-selection-v1",
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-runtime-authority-fact-selection-v2",
             "snapshot": self.snapshot.as_dict(),
             "selection_policy_id": self.selection_policy_id,
             "verification_mode": self.verification_mode,
@@ -727,7 +1137,7 @@ class RuntimeAuthorityFactSelection:
 
 
 @dataclass(frozen=True, slots=True, init=False)
-class RuntimeMarketSourceSnapshotBinding:
+class RuntimeMarketSourceSnapshotBinding(StructuralFixture):
     source_store_id: str
     source_snapshot_id: str
     source_audit_id: str
@@ -750,6 +1160,7 @@ class RuntimeMarketSourceSnapshotBinding:
         selection: MarketEventSelection,
         verification: MarketEventSelectionVerification,
     ) -> RuntimeMarketSourceSnapshotBinding:
+        validate_selection_verification(selection, verification)
         if (
             type(selection) is not MarketEventSelection
             or type(verification) is not MarketEventSelectionVerification
@@ -766,10 +1177,8 @@ class RuntimeMarketSourceSnapshotBinding:
             raise RuntimePathContractError(
                 "market source binding requires exact selection verification"
             )
-        if selection.sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V1:
-            raise RuntimePathContractError(
-                "unsupported market-event sequence policy"
-            )
+        if selection.sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V2:
+            raise RuntimePathContractError("unsupported market-event sequence policy")
         self = object.__new__(cls)
         for name, value in {
             "source_store_id": selection.source_store_id,
@@ -792,7 +1201,7 @@ class RuntimeMarketSourceSnapshotBinding:
     def verify(self) -> None:
         selection = self.selection
         verification = self.selection_verification
-        selection._validate_contents()
+        validate_selection_verification(selection, verification)
         if (
             self.source_store_id != selection.source_store_id
             or self.source_snapshot_id != selection.snapshot_id
@@ -800,7 +1209,7 @@ class RuntimeMarketSourceSnapshotBinding:
             or self.high_water_append_order
             != selection.snapshot_high_water_append_order
             or self.finding_set_digest != selection.snapshot_finding_set_digest
-            or self.sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V1
+            or self.sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V2
             or verification.selection_id != selection.selection_id
             or verification.selection_commitment_id
             != selection.commitment.commitment_id
@@ -819,7 +1228,8 @@ class RuntimeMarketSourceSnapshotBinding:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-runtime-market-source-snapshot-binding-v2",
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-runtime-market-source-snapshot-binding-v3",
             "source_store_id": self.source_store_id,
             "source_snapshot_id": self.source_snapshot_id,
             "source_audit_id": self.source_audit_id,
@@ -837,7 +1247,7 @@ class RuntimeMarketSourceSnapshotBinding:
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimeProjectionLineage:
+class RuntimeProjectionLineage(StructuralFixture):
     projection_policy_id: str
     source_store_id: str
     source_snapshot_id: str
@@ -857,7 +1267,8 @@ class RuntimeProjectionLineage:
     projection_lineage_id: str = field(init=False)
 
     def __post_init__(self) -> None:
-        _require_sha256(self.projection_policy_id, "projection_policy_id")
+        if self.projection_policy_id != TRADE_PROJECTION_POLICY_V1:
+            raise RuntimePathContractError("unsupported projection policy")
         _require_sha256(self.source_store_id, "source_store_id")
         _require_sha256(self.source_snapshot_id, "source_snapshot_id")
         _require_sha256(self.source_audit_id, "source_audit_id")
@@ -891,8 +1302,13 @@ class RuntimeProjectionLineage:
             raise RuntimePathContractError(
                 "projection input event IDs must be SHA-256 tuples"
             )
-        if type(self.input_source_append_orders) is not tuple or not self.input_source_append_orders:
-            raise RuntimePathContractError("projection input append orders are required")
+        if (
+            type(self.input_source_append_orders) is not tuple
+            or not self.input_source_append_orders
+        ):
+            raise RuntimePathContractError(
+                "projection input append orders are required"
+            )
         orders = tuple(
             _require_int(item, "input_source_append_order", minimum=1)
             for item in self.input_source_append_orders
@@ -940,7 +1356,8 @@ class RuntimeProjectionLineage:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-runtime-projection-lineage-v2",
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-runtime-projection-lineage-v3",
             "projection_policy_id": self.projection_policy_id,
             "source_store_id": self.source_store_id,
             "source_snapshot_id": self.source_snapshot_id,
@@ -964,115 +1381,194 @@ class RuntimeProjectionLineage:
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimeProjectionArtifactReference:
+class RuntimeProjectionArtifactReference(StructuralFixture):
+    selection: MarketEventSelection
+    verification: MarketEventSelectionVerification
+    decoded_ticks: tuple[DecodedTradeTick, ...]
     projection_policy_id: str
-    created_at: datetime
-    durable_known_at: datetime
-    symbol: str
-    market: Market
-    trading_day: date
+    coverage_fact: RuntimeAuthorityFactReference
     interval_start: datetime
     interval_end: datetime
-    interval_boundary_policy_id: str
-    lineage: RuntimeProjectionLineage
-    output_ohlc_sha256: str
-    coverage_fact_id: str
+    created_at: datetime
+    durable_known_at: datetime
+    symbol: str = field(init=False)
+    market: Market = field(init=False)
+    trading_day: date = field(init=False)
+    high: Decimal = field(init=False)
+    low: Decimal = field(init=False)
+    close: Decimal = field(init=False)
+    interval_boundary_policy_id: str = field(init=False)
+    lineage: RuntimeProjectionLineage = field(init=False)
+    output_ohlc_sha256: str = field(init=False)
+    coverage_fact_id: str = field(init=False)
     projection_artifact_id: str = field(init=False)
 
     @classmethod
     def create(
         cls,
         *,
+        selection: MarketEventSelection,
+        verification: MarketEventSelectionVerification,
+        decoded_ticks: tuple[DecodedTradeTick, ...],
         projection_policy_id: str,
-        created_at: datetime,
-        durable_known_at: datetime,
-        symbol: str,
-        market: Market,
-        trading_day: date,
+        coverage_fact: RuntimeAuthorityFactReference,
         interval_start: datetime,
         interval_end: datetime,
-        interval_boundary_policy_id: str,
-        lineage: RuntimeProjectionLineage,
-        high: Decimal,
-        low: Decimal,
-        close: Decimal,
-        coverage_fact_id: str,
+        created_at: datetime,
+        durable_known_at: datetime,
     ) -> RuntimeProjectionArtifactReference:
         return cls(
-            projection_policy_id=projection_policy_id,
-            created_at=created_at,
-            durable_known_at=durable_known_at,
-            symbol=symbol,
-            market=market,
-            trading_day=trading_day,
-            interval_start=interval_start,
-            interval_end=interval_end,
-            interval_boundary_policy_id=interval_boundary_policy_id,
-            lineage=lineage,
-            output_ohlc_sha256=_ohlc_output_hash(
-                symbol=symbol,
-                market=market,
-                interval_start=interval_start,
-                interval_end=interval_end,
+            selection,
+            verification,
+            decoded_ticks,
+            projection_policy_id,
+            coverage_fact,
+            interval_start,
+            interval_end,
+            created_at,
+            durable_known_at,
+        )
+
+    def __post_init__(self) -> None:
+        validate_selection_verification(self.selection, self.verification)
+        if self.projection_policy_id != TRADE_PROJECTION_POLICY_V1:
+            raise RuntimePathContractError("unsupported trade projection policy")
+        start, end = (
+            _require_utc(self.interval_start, "interval_start"),
+            _require_utc(self.interval_end, "interval_end"),
+        )
+        created, known = (
+            _require_utc(self.created_at, "created_at"),
+            _require_utc(self.durable_known_at, "durable_known_at"),
+        )
+        if not start < end <= created <= known:
+            raise RuntimePathContractError(
+                "projection interval/creation/durable causal order is invalid"
+            )
+        for name, value in (
+            ("interval_start", start),
+            ("interval_end", end),
+            ("created_at", created),
+            ("durable_known_at", known),
+        ):
+            object.__setattr__(self, name, value)
+        selection = self.selection
+        if (
+            selection.start_source_time != start
+            or selection.end_source_time != end
+            or selection.allowed_event_types != ("TRADE_TICK",)
+        ):
+            raise RuntimePathContractError(
+                "projection requires the exact half-open trade interval Selection"
+            )
+        if (
+            not selection.records
+            or type(self.decoded_ticks) is not tuple
+            or not self.decoded_ticks
+        ):
+            raise RuntimePathContractError("empty Selection cannot produce a bar")
+        if any(type(item) is not DecodedTradeTick for item in self.decoded_ticks):
+            raise RuntimePathContractError("projection requires typed decoded ticks")
+        for tick in self.decoded_ticks:
+            tick.validate()
+            if tick.selection != selection or tick.verification != self.verification:
+                raise RuntimePathContractError(
+                    "projection tick belongs to another verified Selection"
+                )
+        ordered = tuple(
+            sorted(
+                self.decoded_ticks,
+                key=lambda tick: (tick.record.source_time, tick.record.append_order),
+            )
+        )
+        if ordered != self.decoded_ticks:
+            raise RuntimePathContractError(
+                "decoded ticks must be ordered by source time and append order"
+            )
+        if len(ordered) != len(selection.records) or {
+            item.record.source_record_id for item in ordered
+        } != {item.source_record_id for item in selection.records}:
+            raise RuntimePathContractError(
+                "projection must consume every interval member exactly once"
+            )
+        reference = self.coverage_fact
+        if (
+            type(reference) is not RuntimeAuthorityFactReference
+            or reference.authority_kind is not RuntimeAuthorityKind.COVERAGE
+            or type(reference.fact) is not SourceCoverageFact
+            or replace(reference) != reference
+        ):
+            raise RuntimePathContractError(
+                "projection requires a typed coverage authority fact"
+            )
+        coverage = reference.fact
+        if (
+            coverage.selection.snapshot_id != selection.snapshot_id
+            or coverage.selection.snapshot_audit_id != selection.snapshot_audit_id
+            or not coverage.proves_interval(start, end)
+            or not selection.covers_interval(start, end)
+        ):
+            raise RuntimePathContractError("projection lacks complete segment coverage")
+        if created < max(
+            selection.snapshot_audited_at,
+            reference.usable_from,
+            *(tick.record.durable_known_at for tick in ordered),
+        ):
+            raise RuntimePathContractError(
+                "projection was created before its input/coverage/audit known-at"
+            )
+        high, low, close = (
+            max(tick.price for tick in ordered),
+            min(tick.price for tick in ordered),
+            ordered[-1].price,
+        )
+        day = ordered[0].record.trading_day
+        if any(tick.record.trading_day != day for tick in ordered):
+            raise RuntimePathContractError("projection cannot cross trading days")
+        for name, value in {
+            "symbol": selection.symbol,
+            "market": selection.market,
+            "trading_day": day,
+            "high": high,
+            "low": low,
+            "close": close,
+            "interval_boundary_policy_id": RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
+            "coverage_fact_id": reference.fact_id,
+            "output_ohlc_sha256": _ohlc_output_hash(
+                symbol=selection.symbol,
+                market=selection.market,
+                interval_start=start,
+                interval_end=end,
                 high=high,
                 low=low,
                 close=close,
             ),
-            coverage_fact_id=coverage_fact_id,
-        )
-
-    def __post_init__(self) -> None:
-        _require_sha256(self.projection_policy_id, "projection_policy_id")
-        created_at = _require_utc(self.created_at, "created_at")
-        durable_known_at = _require_utc(
-            self.durable_known_at,
-            "durable_known_at",
-        )
-        if created_at > durable_known_at:
-            raise RuntimePathContractError(
-                "projection creation time is outside its causal interval"
-            )
-        object.__setattr__(self, "created_at", created_at)
-        object.__setattr__(self, "durable_known_at", durable_known_at)
-        market = _require_market(self.market)
-        _require_symbol(self.symbol, market)
-        _require_date(self.trading_day, "trading_day")
-        start = _require_utc(self.interval_start, "interval_start")
-        end = _require_utc(self.interval_end, "interval_end")
-        if end <= start or end > durable_known_at or created_at < end:
-            raise RuntimePathContractError(
-                "projection interval is invalid at durable-known time"
-            )
-        object.__setattr__(self, "interval_start", start)
-        object.__setattr__(self, "interval_end", end)
-        if (
-            self.interval_boundary_policy_id != RUNTIME_INTERVAL_BOUNDARY_POLICY_V1
-            or market_session_date(
-                end - timedelta(microseconds=1),
-                market,
-                MARKET_SESSION_LABEL_POLICY_V1,
-            )
-            != self.trading_day
-        ):
-            raise RuntimePathContractError(
-                "projection interval policy or trading-day label is invalid"
-            )
-        if type(self.lineage) is not RuntimeProjectionLineage or (
-            self.lineage.projection_policy_id != self.projection_policy_id
-            or self.lineage.interval_start != start
-            or self.lineage.interval_end != end
-            or self.lineage.interval_boundary_policy_id
-            != self.interval_boundary_policy_id
-        ):
-            raise RuntimePathContractError(
-                "projection artifact and lineage disagree"
-            )
-        _require_sha256(self.output_ohlc_sha256, "output_ohlc_sha256")
-        _require_sha256(self.coverage_fact_id, "coverage_fact_id")
-        if self.lineage.coverage_fact_id != self.coverage_fact_id:
-            raise RuntimePathContractError(
-                "projection coverage reference disagrees with lineage"
-            )
+            "lineage": RuntimeProjectionLineage(
+                projection_policy_id=self.projection_policy_id,
+                source_store_id=selection.source_store_id,
+                source_snapshot_id=selection.snapshot_id,
+                source_audit_id=selection.snapshot_audit_id,
+                source_high_water_append_order=selection.snapshot_high_water_append_order,
+                finding_set_digest=selection.snapshot_finding_set_digest,
+                selection_id=selection.selection_id,
+                selection_verification_id=self.verification.verification_id,
+                interval_start=start,
+                interval_end=end,
+                interval_boundary_policy_id=RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
+                coverage_fact_id=reference.fact_id,
+                input_event_ids=tuple(item.record.event_id for item in ordered),
+                input_source_append_orders=tuple(
+                    item.record.append_order for item in ordered
+                ),
+                input_source_record_ids=tuple(
+                    item.record.source_record_id for item in ordered
+                ),
+                input_source_record_hashes=tuple(
+                    item.record.record_content_hash for item in ordered
+                ),
+            ),
+        }.items():
+            object.__setattr__(self, name, value)
         object.__setattr__(
             self,
             "projection_artifact_id",
@@ -1081,7 +1577,8 @@ class RuntimeProjectionArtifactReference:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-runtime-projection-artifact-reference-v1",
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-runtime-projection-artifact-reference-v2",
             "projection_policy_id": self.projection_policy_id,
             "created_at": _utc_text(self.created_at),
             "durable_known_at": _utc_text(self.durable_known_at),
@@ -1092,6 +1589,13 @@ class RuntimeProjectionArtifactReference:
             "interval_end": _utc_text(self.interval_end),
             "interval_boundary_policy_id": self.interval_boundary_policy_id,
             "lineage": self.lineage.as_dict(),
+            "decoder_policy_id": self.decoded_ticks[0].decoder_policy_id,
+            "ordered_decoded_tick_ids": [
+                item.decoded_tick_id for item in self.decoded_ticks
+            ],
+            "high": _decimal_text(self.high),
+            "low": _decimal_text(self.low),
+            "close": _decimal_text(self.close),
             "output_ohlc_sha256": self.output_ohlc_sha256,
             "coverage_fact_id": self.coverage_fact_id,
         }
@@ -1101,238 +1605,181 @@ class RuntimeProjectionArtifactReference:
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimeSessionEvidence:
-    symbol: str
-    market: Market
-    trading_day: date
-    calendar_state: RuntimeCalendarState
-    open_session_index: int | None
-    open_session_state: RuntimeOpenSessionState | None
-    scheduled_open_at: datetime | None
-    scheduled_close_at: datetime | None
-    coverage_state: RuntimeCoverageState
-    session_complete: bool
-    coverage_through: datetime | None
-    session_label_policy_id: str
+class RuntimeSessionEvidence(StructuralFixture):
     calendar_reference: RuntimeAuthorityFactReference
-    security_status_reference: RuntimeAuthorityFactReference | None
-    coverage_reference: RuntimeAuthorityFactReference | None
+    security_status_reference: RuntimeAuthorityFactReference | None = None
+    coverage_reference: RuntimeAuthorityFactReference | None = None
+    symbol: str = field(init=False)
+    market: Market = field(init=False)
+    trading_day: date = field(init=False)
+    calendar_state: RuntimeCalendarState = field(init=False)
+    open_session_index: int | None = field(init=False)
+    open_session_state: RuntimeOpenSessionState | None = field(init=False)
+    scheduled_open_at: datetime | None = field(init=False)
+    scheduled_close_at: datetime | None = field(init=False)
+    coverage_state: RuntimeCoverageState = field(init=False)
+    session_complete: bool = field(init=False)
+    coverage_through: datetime | None = field(init=False)
+    session_label_policy_id: str = field(init=False)
+    segments: tuple[TradingSessionSegment, ...] = field(init=False)
     session_evidence_id: str = field(init=False)
 
+    @classmethod
+    def from_typed_authority_facts(
+        cls,
+        *,
+        calendar_reference: RuntimeAuthorityFactReference,
+        security_status_reference: RuntimeAuthorityFactReference | None = None,
+        coverage_reference: RuntimeAuthorityFactReference | None = None,
+    ) -> RuntimeSessionEvidence:
+        return cls(calendar_reference, security_status_reference, coverage_reference)
+
     def __post_init__(self) -> None:
-        market = _require_market(self.market)
-        _require_symbol(self.symbol, market)
-        _require_date(self.trading_day, "trading_day")
-        if type(self.calendar_state) is not RuntimeCalendarState:
-            raise RuntimePathContractError("calendar_state must be RuntimeCalendarState")
-        if type(self.coverage_state) is not RuntimeCoverageState:
-            raise RuntimePathContractError("coverage_state must be RuntimeCoverageState")
-        _require_bool(self.session_complete, "session_complete")
-        if self.session_label_policy_id != MARKET_SESSION_LABEL_POLICY_V1:
-            raise RuntimePathContractError(
-                "unsupported market session label policy"
-            )
-        if type(self.calendar_reference) is not RuntimeAuthorityFactReference:
-            raise RuntimePathContractError(
-                "calendar_reference must be RuntimeAuthorityFactReference"
-            )
-        if self.calendar_reference.authority_kind is not RuntimeAuthorityKind.CALENDAR:
-            raise RuntimePathContractError("calendar_reference kind is invalid")
-        security_status = self.security_status_reference
-        if security_status is not None and (
-            type(security_status) is not RuntimeAuthorityFactReference
-            or security_status.authority_kind is not RuntimeAuthorityKind.SECURITY_STATUS
-        ):
-            raise RuntimePathContractError("security_status_reference kind is invalid")
-        coverage_reference = self.coverage_reference
-        if coverage_reference is not None and (
-            type(coverage_reference) is not RuntimeAuthorityFactReference
-            or coverage_reference.authority_kind is not RuntimeAuthorityKind.COVERAGE
-        ):
-            raise RuntimePathContractError("coverage_reference kind is invalid")
-        for reference in (
+        references = (
             self.calendar_reference,
-            security_status,
-            coverage_reference,
-        ):
-            if reference is not None and reference.effective_session_date != self.trading_day:
-                raise RuntimePathContractError(
-                    "authority reference session date disagrees with trading_day"
-                )
-        scheduled_open = (
-            None
-            if self.scheduled_open_at is None
-            else _require_utc(self.scheduled_open_at, "scheduled_open_at")
+            self.security_status_reference,
+            self.coverage_reference,
         )
-        scheduled_close = (
-            None
-            if self.scheduled_close_at is None
-            else _require_utc(self.scheduled_close_at, "scheduled_close_at")
-        )
-        if (scheduled_open is None) != (scheduled_close is None):
-            raise RuntimePathContractError(
-                "scheduled session boundaries must be present together"
-            )
-        if (
-            scheduled_open is not None
-            and scheduled_close is not None
-            and scheduled_close <= scheduled_open
-        ):
-            raise RuntimePathContractError(
-                "scheduled_close_at must be after scheduled_open_at"
-            )
-        if scheduled_open is not None and scheduled_close is not None and (
-            market_session_date(
-                scheduled_open,
-                market,
-                self.session_label_policy_id,
-            )
-            != self.trading_day
-            or market_session_date(
-                scheduled_close,
-                market,
-                self.session_label_policy_id,
-            )
-            != self.trading_day
-        ):
-            raise RuntimePathContractError(
-                "scheduled session boundaries disagree with market-local trading_day"
-            )
-        object.__setattr__(self, "scheduled_open_at", scheduled_open)
-        object.__setattr__(self, "scheduled_close_at", scheduled_close)
-        coverage_through = (
-            None
-            if self.coverage_through is None
-            else _require_utc(self.coverage_through, "coverage_through")
-        )
-        if (
-            coverage_through is not None
-            and coverage_reference is not None
-            and coverage_through > coverage_reference.usable_from
-        ):
-            raise RuntimePathContractError(
-                "coverage_through cannot exceed coverage authority usable_from"
-            )
-        object.__setattr__(self, "coverage_through", coverage_through)
-        if self.calendar_state is RuntimeCalendarState.MARKET_CLOSED:
-            if (
-                self.open_session_index is not None
-                or self.open_session_state is not None
-                or scheduled_open is not None
-                or scheduled_close is not None
-                or self.coverage_state is not RuntimeCoverageState.NOT_APPLICABLE
-                or not self.session_complete
-                or coverage_through is not None
-                or security_status is not None
-                or coverage_reference is not None
+        for reference in references:
+            if reference is not None and (
+                type(reference) is not RuntimeAuthorityFactReference
+                or replace(reference) != reference
             ):
                 raise RuntimePathContractError(
-                    "MARKET_CLOSED cannot carry an open-session index, status, or market data"
+                    "session requires valid typed authority references"
+                )
+        calendar = self.calendar_reference.fact
+        if type(calendar) is not CalendarSessionFact:
+            raise RuntimePathContractError("calendar_reference kind is invalid")
+        for reference in references:
+            if (
+                reference is not None
+                and reference.effective_session_date != calendar.trading_day
+            ):
+                raise RuntimePathContractError(
+                    "authority reference session date mismatch"
+                )
+        status: RuntimeOpenSessionState | None = None
+        through: datetime | None = None
+        state = RuntimeCoverageState.NOT_APPLICABLE
+        complete = True
+        if calendar.calendar_state is RuntimeCalendarState.MARKET_CLOSED:
+            if (
+                self.security_status_reference is not None
+                or self.coverage_reference is not None
+            ):
+                raise RuntimePathContractError(
+                    "MARKET_CLOSED cannot carry status/coverage facts"
                 )
         else:
-            _require_int(self.open_session_index, "open_session_index")
-            if scheduled_open is None or scheduled_close is None:
-                raise RuntimePathContractError(
-                    "OPEN calendar day requires scheduled session boundaries"
-                )
-            if type(self.open_session_state) is not RuntimeOpenSessionState:
-                raise RuntimePathContractError(
-                    "OPEN calendar day requires RuntimeOpenSessionState"
-                )
-            if self.coverage_state is RuntimeCoverageState.NOT_APPLICABLE:
-                raise RuntimePathContractError(
-                    "OPEN calendar day requires a market-data coverage state"
-                )
-            if coverage_reference is None:
-                raise RuntimePathContractError(
-                    "OPEN calendar day requires coverage_reference"
-                )
-            if self.coverage_state in {
-                RuntimeCoverageState.COMPLETE_PREFIX,
-                RuntimeCoverageState.COMPLETE_SESSION,
-            } and coverage_through is None:
-                raise RuntimePathContractError(
-                    "complete coverage requires an explicit coverage_through time"
-                )
-            if coverage_through is not None and not (
-                scheduled_open <= coverage_through <= scheduled_close
+            if (
+                self.security_status_reference is None
+                or self.coverage_reference is None
             ):
                 raise RuntimePathContractError(
-                    "coverage_through is outside the scheduled session window"
+                    "OPEN requires typed security status and coverage facts"
                 )
-            if self.coverage_state is RuntimeCoverageState.COMPLETE_PREFIX:
-                if (
-                    coverage_through is None
-                    or self.session_complete
-                    or coverage_through >= scheduled_close
-                ):
-                    raise RuntimePathContractError(
-                        "COMPLETE_PREFIX must stop before the scheduled session close"
-                    )
-            elif self.coverage_state is RuntimeCoverageState.COMPLETE_SESSION and (
-                not self.session_complete or coverage_through != scheduled_close
+            security, coverage = (
+                self.security_status_reference.fact,
+                self.coverage_reference.fact,
+            )
+            if (
+                type(security) is not SecurityStatusFact
+                or type(coverage) is not SourceCoverageFact
             ):
                 raise RuntimePathContractError(
-                    "COMPLETE_SESSION must cover the scheduled session close"
+                    "session status/coverage authority kinds are invalid"
                 )
-            if self.open_session_state in {
+            if (
+                security.symbol != calendar.symbol
+                or security.market is not calendar.market
+                or coverage.calendar_fact != calendar
+            ):
+                raise RuntimePathContractError(
+                    "authority business facts do not describe the same session"
+                )
+            status = {
+                RuntimeSecurityStatus.TRADABLE: RuntimeOpenSessionState.TRADED,
+                RuntimeSecurityStatus.SUSPENDED: RuntimeOpenSessionState.SUSPENDED,
+                RuntimeSecurityStatus.NO_TRADE: RuntimeOpenSessionState.NO_TRADE,
+                RuntimeSecurityStatus.UNKNOWN: RuntimeOpenSessionState.MISSING_DATA,
+            }[security.status]
+            through = coverage.coverage_through
+            state, complete = coverage.coverage_state, coverage.session_complete
+            if status in {
                 RuntimeOpenSessionState.SUSPENDED,
                 RuntimeOpenSessionState.NO_TRADE,
-            } and (
-                security_status is None
-                or self.coverage_state is not RuntimeCoverageState.COMPLETE_SESSION
-                or not self.session_complete
-            ):
-                raise RuntimePathContractError(
-                    "SUSPENDED/NO_TRADE require authoritative status and complete-session coverage"
-                )
-            if self.open_session_state is RuntimeOpenSessionState.MISSING_DATA and self.coverage_state in {
+            }:
+                if not complete:
+                    raise RuntimePathContractError(
+                        "SUSPENDED/NO_TRADE require complete-session coverage"
+                    )
+                if any(
+                    item.trading_day == calendar.trading_day
+                    for item in coverage.selection.records
+                ):
+                    raise RuntimePathContractError(
+                        "SUSPENDED/NO_TRADE contradict selected trade events"
+                    )
+            if status is RuntimeOpenSessionState.MISSING_DATA and state in {
                 RuntimeCoverageState.COMPLETE_PREFIX,
                 RuntimeCoverageState.COMPLETE_SESSION,
             }:
                 raise RuntimePathContractError(
                     "MISSING_DATA cannot claim complete market-data coverage"
                 )
+        for name, value in {
+            "symbol": calendar.symbol,
+            "market": calendar.market,
+            "trading_day": calendar.trading_day,
+            "calendar_state": calendar.calendar_state,
+            "open_session_index": calendar.open_session_index,
+            "open_session_state": status,
+            "scheduled_open_at": calendar.scheduled_open_at,
+            "scheduled_close_at": calendar.scheduled_close_at,
+            "coverage_state": state,
+            "session_complete": complete,
+            "coverage_through": through,
+            "session_label_policy_id": MARKET_SESSION_LABEL_POLICY_V1,
+            "segments": calendar.segments,
+        }.items():
+            object.__setattr__(self, name, value)
         object.__setattr__(
-            self,
-            "session_evidence_id",
-            _hash_document(self.as_dict(include_id=False)),
+            self, "session_evidence_id", _hash_document(self.as_dict(include_id=False))
         )
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-runtime-session-evidence-v2",
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-runtime-session-evidence-v3",
             "symbol": self.symbol,
             "market": self.market.value,
             "trading_day": self.trading_day.isoformat(),
             "calendar_state": self.calendar_state.value,
             "open_session_index": self.open_session_index,
-            "open_session_state": (
-                None if self.open_session_state is None else self.open_session_state.value
-            ),
-            "scheduled_open_at": (
-                None if self.scheduled_open_at is None else _utc_text(self.scheduled_open_at)
-            ),
-            "scheduled_close_at": (
-                None if self.scheduled_close_at is None else _utc_text(self.scheduled_close_at)
-            ),
+            "open_session_state": None
+            if self.open_session_state is None
+            else self.open_session_state.value,
+            "scheduled_open_at": None
+            if self.scheduled_open_at is None
+            else _utc_text(self.scheduled_open_at),
+            "scheduled_close_at": None
+            if self.scheduled_close_at is None
+            else _utc_text(self.scheduled_close_at),
+            "segments": [item.as_dict() for item in self.segments],
             "coverage_state": self.coverage_state.value,
             "session_complete": self.session_complete,
-            "coverage_through": (
-                None if self.coverage_through is None else _utc_text(self.coverage_through)
-            ),
+            "coverage_through": None
+            if self.coverage_through is None
+            else _utc_text(self.coverage_through),
             "session_label_policy_id": self.session_label_policy_id,
             "calendar_reference": self.calendar_reference.as_dict(),
-            "security_status_reference": (
-                None
-                if self.security_status_reference is None
-                else self.security_status_reference.as_dict()
-            ),
-            "coverage_reference": (
-                None
-                if self.coverage_reference is None
-                else self.coverage_reference.as_dict()
-            ),
+            "security_status_reference": None
+            if self.security_status_reference is None
+            else self.security_status_reference.as_dict(),
+            "coverage_reference": None
+            if self.coverage_reference is None
+            else self.coverage_reference.as_dict(),
         }
         if include_id:
             document["session_evidence_id"] = self.session_evidence_id
@@ -1340,111 +1787,119 @@ class RuntimeSessionEvidence:
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimePathObservation:
-    symbol: str
-    market: Market
-    open_session_index: int
-    interval_start: datetime
-    interval_end: datetime
-    high: Decimal
-    low: Decimal
-    close: Decimal
+class RuntimePathObservation(StructuralFixture):
+    calendar_fact: CalendarSessionFact
     granularity: RuntimePathGranularity
-    interval_boundary_policy_id: str
-    source_reference: RuntimeSourceReference | None
-    projection_artifact_reference: RuntimeProjectionArtifactReference | None
+    decoded_trade_tick: DecodedTradeTick | None = None
+    projection_artifact_reference: RuntimeProjectionArtifactReference | None = None
+    symbol: str = field(init=False)
+    market: Market = field(init=False)
+    open_session_index: int = field(init=False)
+    interval_start: datetime = field(init=False)
+    interval_end: datetime = field(init=False)
+    high: Decimal = field(init=False)
+    low: Decimal = field(init=False)
+    close: Decimal = field(init=False)
+    interval_boundary_policy_id: str = field(init=False)
+    source_reference: RuntimeSourceReference | None = field(init=False)
     path_observation_id: str = field(init=False)
 
+    @classmethod
+    def from_decoded_trade_tick(
+        cls, *, decoded_tick: DecodedTradeTick, calendar_fact: CalendarSessionFact
+    ) -> RuntimePathObservation:
+        return cls(calendar_fact, RuntimePathGranularity.TICK, decoded_tick)
+
+    @classmethod
+    def from_projection(
+        cls,
+        *,
+        projection: RuntimeProjectionArtifactReference,
+        calendar_fact: CalendarSessionFact,
+        granularity: RuntimePathGranularity = RuntimePathGranularity.MINUTE_BAR,
+    ) -> RuntimePathObservation:
+        return cls(calendar_fact, granularity, projection_artifact_reference=projection)
+
     def __post_init__(self) -> None:
-        market = _require_market(self.market)
-        _require_symbol(self.symbol, market)
-        _require_int(self.open_session_index, "open_session_index")
-        interval_start = _require_utc(self.interval_start, "interval_start")
-        interval_end = _require_utc(self.interval_end, "interval_end")
-        if interval_end < interval_start:
-            raise RuntimePathContractError("path interval_end precedes interval_start")
-        object.__setattr__(self, "interval_start", interval_start)
-        object.__setattr__(self, "interval_end", interval_end)
-        high = _require_decimal(self.high, "high", positive=True)
-        low = _require_decimal(self.low, "low", positive=True)
-        close = _require_decimal(self.close, "close", positive=True)
-        if low > min(high, close) or high < max(low, close):
-            raise RuntimePathContractError("path OHLC values are inconsistent")
-        if type(self.granularity) is not RuntimePathGranularity:
+        if (
+            type(self.calendar_fact) is not CalendarSessionFact
+            or replace(self.calendar_fact) != self.calendar_fact
+        ):
             raise RuntimePathContractError(
-                "granularity must be RuntimePathGranularity"
+                "observation requires a valid typed calendar fact"
             )
-        if self.interval_boundary_policy_id != RUNTIME_INTERVAL_BOUNDARY_POLICY_V1:
+        calendar = self.calendar_fact
+        if calendar.calendar_state is not RuntimeCalendarState.OPEN:
             raise RuntimePathContractError(
-                "unsupported runtime interval boundary policy"
+                "price observation cannot exist on MARKET_CLOSED day"
             )
+        source: RuntimeSourceReference | None = None
         if self.granularity is RuntimePathGranularity.TICK:
+            tick = self.decoded_trade_tick
             if (
-                interval_start != interval_end
-                or not (high == low == close)
-                or type(self.source_reference) is not RuntimeSourceReference
+                type(tick) is not DecodedTradeTick
                 or self.projection_artifact_reference is not None
             ):
                 raise RuntimePathContractError(
-                    "TICK evidence requires one exact source point without projection"
+                    "TICK requires exactly one decoded trade tick"
                 )
-            source_reference = self.source_reference
-            if (
-                source_reference.symbol != self.symbol
-                or source_reference.market is not self.market
-                or source_reference.event_type != "TRADE_TICK"
-                or source_reference.source_time != interval_start
-                or source_reference.trading_day
-                != market_session_date(
-                    interval_start,
-                    market,
-                    source_reference.session_label_policy_id,
-                )
-                or interval_end > source_reference.durable_known_at
-            ):
-                raise RuntimePathContractError(
-                    "TICK observation disagrees with its verified trade-event member"
-                )
+            tick.validate()
+            symbol, market = tick.record.symbol, tick.record.market
+            start = end = tick.record.source_time
+            high = low = close = tick.price
+            source = RuntimeSourceReference.from_verified_selection(
+                record=tick.record,
+                selection=tick.selection,
+                verification=tick.verification,
+            )
         else:
-            if interval_start == interval_end:
-                raise RuntimePathContractError("bar evidence requires a non-zero interval")
-            if self.source_reference is not None or type(
-                self.projection_artifact_reference
-            ) is not RuntimeProjectionArtifactReference:
-                raise RuntimePathContractError(
-                    "bar evidence requires one immutable projection artifact"
-                )
             projection = self.projection_artifact_reference
             if (
-                projection.symbol != self.symbol
-                or projection.market is not self.market
-                or projection.interval_start != interval_start
-                or projection.interval_end != interval_end
-                or projection.interval_boundary_policy_id
-                != self.interval_boundary_policy_id
-                or projection.output_ohlc_sha256
-                != _ohlc_output_hash(
-                    symbol=self.symbol,
-                    market=self.market,
-                    interval_start=interval_start,
-                    interval_end=interval_end,
-                    high=high,
-                    low=low,
-                    close=close,
-                )
+                self.granularity
+                not in {
+                    RuntimePathGranularity.MINUTE_BAR,
+                    RuntimePathGranularity.DAILY_BAR,
+                }
+                or type(projection) is not RuntimeProjectionArtifactReference
+                or self.decoded_trade_tick is not None
+                or replace(projection) != projection
             ):
                 raise RuntimePathContractError(
-                    "projection artifact disagrees with the observation output"
+                    "bar requires exactly one valid deterministic projection"
                 )
+            symbol, market = projection.symbol, projection.market
+            start, end = projection.interval_start, projection.interval_end
+            high, low, close = projection.high, projection.low, projection.close
+        if (
+            symbol != calendar.symbol
+            or market is not calendar.market
+            or not calendar.permits_price_interval(start, end)
+        ):
+            raise RuntimePathContractError(
+                "price event is outside an allowed calendar segment (BREAK/HALT excluded)"
+            )
+        index = _require_int(calendar.open_session_index, "open_session_index")
+        for name, value in {
+            "symbol": symbol,
+            "market": market,
+            "open_session_index": index,
+            "interval_start": start,
+            "interval_end": end,
+            "high": high,
+            "low": low,
+            "close": close,
+            "source_reference": source,
+            "interval_boundary_policy_id": RUNTIME_INTERVAL_BOUNDARY_POLICY_V1,
+        }.items():
+            object.__setattr__(self, name, value)
         object.__setattr__(
-            self,
-            "path_observation_id",
-            _hash_document(self.as_dict(include_id=False)),
+            self, "path_observation_id", _hash_document(self.as_dict(include_id=False))
         )
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-runtime-path-observation-v3",
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-runtime-path-observation-v4",
             "symbol": self.symbol,
             "market": self.market.value,
             "open_session_index": self.open_session_index,
@@ -1455,16 +1910,16 @@ class RuntimePathObservation:
             "close": _decimal_text(self.close),
             "granularity": self.granularity.value,
             "interval_boundary_policy_id": self.interval_boundary_policy_id,
-            "source_reference": (
-                None
-                if self.source_reference is None
-                else self.source_reference.as_dict()
-            ),
-            "projection_artifact_reference": (
-                None
-                if self.projection_artifact_reference is None
-                else self.projection_artifact_reference.as_dict()
-            ),
+            "calendar_fact_id": self.calendar_fact.calendar_fact_id,
+            "decoded_tick_id": None
+            if self.decoded_trade_tick is None
+            else self.decoded_trade_tick.decoded_tick_id,
+            "source_reference": None
+            if self.source_reference is None
+            else self.source_reference.as_dict(),
+            "projection_artifact_reference": None
+            if self.projection_artifact_reference is None
+            else self.projection_artifact_reference.as_dict(),
         }
         if include_id:
             document["path_observation_id"] = self.path_observation_id
@@ -1472,7 +1927,7 @@ class RuntimePathObservation:
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimeFrozenPathFact:
+class RuntimeFrozenPathFact(StructuralFixture):
     collection_store_id: str
     collection_append_order: int
     case_id: str
@@ -1573,7 +2028,8 @@ class RuntimeFrozenPathFact:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-runtime-frozen-path-fact-v2",
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-runtime-frozen-path-fact-v3",
             "collection_store_id": self.collection_store_id,
             "collection_append_order": self.collection_append_order,
             "case_id": self.case_id,
@@ -1597,7 +2053,7 @@ class RuntimeFrozenPathFact:
 
 
 @dataclass(frozen=True, slots=True, init=False)
-class RuntimePathStoreSnapshotBinding:
+class RuntimePathStoreSnapshotBinding(StructuralFixture):
     path_store_id: str
     path_snapshot_id: str
     path_audit_id: str
@@ -1628,9 +2084,7 @@ class RuntimePathStoreSnapshotBinding:
         if type(facts) is not tuple or any(
             type(item) is not RuntimeFrozenPathFact for item in facts
         ):
-            raise RuntimePathContractError(
-                "path snapshot facts must be an exact tuple"
-            )
+            raise RuntimePathContractError("path snapshot facts must be an exact tuple")
         orders = tuple(item.collection_append_order for item in facts)
         if orders != tuple(range(1, len(facts) + 1)) or any(
             item.collection_store_id != path_store_id
@@ -1696,6 +2150,7 @@ class RuntimePathStoreSnapshotBinding:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
+            "assurance": self.assurance.value,
             "schema": "stage4g1-runtime-path-store-snapshot-binding-v1",
             "path_store_id": self.path_store_id,
             "path_audit_id": self.path_audit_id,
@@ -1712,7 +2167,7 @@ class RuntimePathStoreSnapshotBinding:
 
 
 @dataclass(frozen=True, slots=True, init=False)
-class RuntimeCaseFactSelection:
+class RuntimeCaseFactSelection(StructuralFixture):
     path_store_snapshot: RuntimePathStoreSnapshotBinding
     case_id: str
     symbol: str
@@ -1810,8 +2265,7 @@ class RuntimeCaseFactSelection:
             item.case_id != self.case_id
             or item.symbol != self.symbol
             or item.market is not self.market
-            or item.collection_store_id
-            != self.path_store_snapshot.path_store_id
+            or item.collection_store_id != self.path_store_snapshot.path_store_id
             or item.collection_append_order
             > self.path_store_snapshot.global_high_water_append_order
             for item in self.facts
@@ -1850,18 +2304,15 @@ class RuntimeCaseFactSelection:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-runtime-case-fact-selection-v1",
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-runtime-case-fact-selection-v2",
             "path_store_snapshot": self.path_store_snapshot.as_dict(),
             "case_id": self.case_id,
             "symbol": self.symbol,
             "market": self.market.value,
             "selection_policy_id": self.selection_policy_id,
-            "ordered_case_fact_ids": [
-                item.collection_fact_id for item in self.facts
-            ],
-            "ordered_case_record_hashes": [
-                item.frozen_fact_id for item in self.facts
-            ],
+            "ordered_case_fact_ids": [item.collection_fact_id for item in self.facts],
+            "ordered_case_record_hashes": [item.frozen_fact_id for item in self.facts],
             "case_manifest_commitment": self.case_manifest_commitment,
             "verification_mode": self.verification_mode,
             "finding_blocker_digest": self.finding_blocker_digest,
@@ -1880,11 +2331,9 @@ def _source_reference_matches_record(
         reference.source_store_id == binding.source_store_id == record.source_store_id
         and reference.source_snapshot_id == binding.source_snapshot_id
         and reference.source_audit_id == binding.source_audit_id
-        and reference.source_high_water_append_order
-        == binding.high_water_append_order
+        and reference.source_high_water_append_order == binding.high_water_append_order
         and reference.finding_set_digest == binding.finding_set_digest
         and reference.sequence_policy_id == binding.sequence_policy_id
-        and reference.selection_id == binding.selection.selection_id
         and reference.event_id == record.event_id
         and reference.source_session_id == record.session_id
         and reference.symbol == record.symbol
@@ -1904,8 +2353,103 @@ def _source_reference_matches_record(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class PathProjectionManifest(StructuralFixture):
+    selection: MarketEventSelection
+    verification: MarketEventSelectionVerification
+    observations: tuple[RuntimePathObservation, ...]
+    path_projection_policy_id: str = PATH_PROJECTION_POLICY_V1
+    consumed_source_record_ids: tuple[str, ...] = field(init=False)
+    consumed_decoded_tick_ids: tuple[str, ...] = field(init=False)
+    produced_path_observation_ids: tuple[str, ...] = field(init=False)
+    interval_coverage: tuple[tuple[datetime, datetime], ...] = field(init=False)
+    mapping_commitment: str = field(init=False)
+    projection_manifest_id: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        validate_selection_verification(self.selection, self.verification)
+        if self.path_projection_policy_id != PATH_PROJECTION_POLICY_V1:
+            raise RuntimePathContractError("unsupported path projection policy")
+        if type(self.observations) is not tuple:
+            raise RuntimePathContractError(
+                "manifest observations must be an exact tuple"
+            )
+        mappings: list[dict[str, Any]] = []
+        source_ids: list[str] = []
+        tick_ids: list[str] = []
+        for point in self.observations:
+            if type(point) is not RuntimePathObservation or replace(point) != point:
+                raise RuntimePathContractError(
+                    "manifest observation is invalid or mutated"
+                )
+            ticks = (
+                (point.decoded_trade_tick,)
+                if point.decoded_trade_tick is not None
+                else point.projection_artifact_reference.decoded_ticks
+                if point.projection_artifact_reference is not None
+                else ()
+            )
+            for tick in ticks:
+                if tick.record not in self.selection.records:
+                    raise RuntimePathContractError(
+                        "path input is outside verified source Selection"
+                    )
+                source_ids.append(tick.record.source_record_id)
+                tick_ids.append(tick.decoded_tick_id)
+                mappings.append(
+                    {
+                        "source_record_id": tick.record.source_record_id,
+                        "decoded_tick_id": tick.decoded_tick_id,
+                        "path_observation_id": point.path_observation_id,
+                        "interval_start": _utc_text(point.interval_start),
+                        "interval_end": _utc_text(point.interval_end),
+                    }
+                )
+        if len(source_ids) != len(set(source_ids)):
+            raise RuntimePathContractError("source member was consumed more than once")
+        for name, value in {
+            "consumed_source_record_ids": tuple(source_ids),
+            "consumed_decoded_tick_ids": tuple(tick_ids),
+            "produced_path_observation_ids": tuple(
+                item.path_observation_id for item in self.observations
+            ),
+            "interval_coverage": tuple(
+                (item.interval_start, item.interval_end) for item in self.observations
+            ),
+            "mapping_commitment": _hash_document(
+                {"schema": "stage4g1-path-projection-mapping-v1", "mappings": mappings}
+            ),
+        }.items():
+            object.__setattr__(self, name, value)
+        object.__setattr__(
+            self,
+            "projection_manifest_id",
+            _hash_document(self.as_dict(include_id=False)),
+        )
+
+    def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
+        document = {
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-path-projection-manifest-v1",
+            "path_projection_policy_id": self.path_projection_policy_id,
+            "selection_id": self.selection.selection_id,
+            "selection_verification_id": self.verification.verification_id,
+            "consumed_source_record_ids": list(self.consumed_source_record_ids),
+            "consumed_decoded_tick_ids": list(self.consumed_decoded_tick_ids),
+            "produced_path_observation_ids": list(self.produced_path_observation_ids),
+            "interval_coverage": [
+                [_utc_text(start), _utc_text(end)]
+                for start, end in self.interval_coverage
+            ],
+            "mapping_commitment": self.mapping_commitment,
+        }
+        if include_id:
+            document["projection_manifest_id"] = self.projection_manifest_id
+        return document
+
+
 @dataclass(frozen=True, slots=True, init=False)
-class RuntimeFrozenPathPrefix:
+class RuntimeFrozenPathPrefix(StructuralFixture):
     case_id: str
     symbol: str
     market: Market
@@ -1915,12 +2459,11 @@ class RuntimeFrozenPathPrefix:
     authority_fact_selections: tuple[RuntimeAuthorityFactSelection, ...]
     frozen_at: datetime
     facts: tuple[RuntimeFrozenPathFact, ...]
+    projection_manifest: PathProjectionManifest
     prefix_id: str
 
     def __init__(self) -> None:
-        raise TypeError(
-            "RuntimeFrozenPathPrefix requires a verified case selection"
-        )
+        raise TypeError("RuntimeFrozenPathPrefix requires a verified case selection")
 
     @classmethod
     def from_verified_case_selection(
@@ -1944,8 +2487,7 @@ class RuntimeFrozenPathPrefix:
         if (
             market_source_snapshot.selection.symbol != case_selection.symbol
             or market_source_snapshot.selection.market is not case_selection.market
-            or "TRADE_TICK"
-            not in market_source_snapshot.selection.allowed_event_types
+            or "TRADE_TICK" not in market_source_snapshot.selection.allowed_event_types
         ):
             raise RuntimePathContractError(
                 "market source Selection does not cover the frozen case identity"
@@ -1991,8 +2533,7 @@ class RuntimeFrozenPathPrefix:
                 "case fact exceeds path-store high-water mark"
             )
         if any(
-            item.collection_store_id
-            != case_selection.path_store_snapshot.path_store_id
+            item.collection_store_id != case_selection.path_store_snapshot.path_store_id
             or item.case_id != case_selection.case_id
             or item.symbol != case_selection.symbol
             or item.market is not case_selection.market
@@ -2006,9 +2547,12 @@ class RuntimeFrozenPathPrefix:
             raise RuntimePathContractError(
                 "path-store audit is future-known at prefix freeze time"
             )
+        if market_source_snapshot.selection.snapshot_audited_at > frozen_at:
+            raise RuntimePathContractError(
+                "market-source audit is future-known at prefix freeze time"
+            )
         authority_selections = {
-            item.snapshot.authority_kind: item
-            for item in authority_fact_selections
+            item.snapshot.authority_kind: item for item in authority_fact_selections
         }
         used_authority_kinds: set[RuntimeAuthorityKind] = set()
         sessions_by_index: dict[int, RuntimeSessionEvidence] = {}
@@ -2016,6 +2560,19 @@ class RuntimeFrozenPathPrefix:
             if fact.session_evidence is None:
                 continue
             session = fact.session_evidence
+            if replace(session) != session:
+                raise RuntimePathContractError("derived session was mutated")
+            coverage_reference = session.coverage_reference
+            if coverage_reference is not None:
+                coverage = coverage_reference.fact
+                if (
+                    type(coverage) is not SourceCoverageFact
+                    or coverage.selection.snapshot_id
+                    != market_source_snapshot.source_snapshot_id
+                ):
+                    raise RuntimePathContractError(
+                        "session coverage is outside frozen market-source snapshot"
+                    )
             if session.open_session_index is not None:
                 sessions_by_index[session.open_session_index] = session
             for reference in (
@@ -2031,8 +2588,8 @@ class RuntimeFrozenPathPrefix:
                     selection is None
                     or reference.authority_store_id
                     != selection.snapshot.authority_store_id
-                    or reference.revision
-                    > selection.snapshot.high_water_revision
+                    or reference.authority_append_order
+                    > selection.snapshot.authority_high_water_append_order
                     or not selection.contains(reference)
                 ):
                     raise RuntimePathContractError(
@@ -2059,6 +2616,14 @@ class RuntimeFrozenPathPrefix:
             observation = fact.path_observation
             if observation is None:
                 continue
+            session = sessions_by_index.get(observation.open_session_index)
+            if (
+                session is None
+                or observation.calendar_fact != session.calendar_reference.fact
+            ):
+                raise RuntimePathContractError(
+                    "observation is outside exact session Calendar fact"
+                )
             source_reference = observation.source_reference
             if source_reference is not None:
                 record = selected_records.get(source_reference.source_record_id)
@@ -2068,9 +2633,9 @@ class RuntimeFrozenPathPrefix:
                     or session is None
                     or record.trading_day != session.trading_day
                     or not _source_reference_matches_record(
-                    source_reference,
-                    record,
-                    market_source_snapshot,
+                        source_reference,
+                        record,
+                        market_source_snapshot,
                     )
                 ):
                     raise RuntimePathContractError(
@@ -2081,23 +2646,28 @@ class RuntimeFrozenPathPrefix:
             assert projection is not None
             lineage = projection.lineage
             if (
-                lineage.source_store_id
-                != market_source_snapshot.source_store_id
+                lineage.source_store_id != market_source_snapshot.source_store_id
                 or lineage.source_snapshot_id
                 != market_source_snapshot.source_snapshot_id
-                or lineage.source_audit_id
-                != market_source_snapshot.source_audit_id
+                or lineage.source_audit_id != market_source_snapshot.source_audit_id
                 or lineage.source_high_water_append_order
                 != market_source_snapshot.high_water_append_order
                 or lineage.finding_set_digest
                 != market_source_snapshot.finding_set_digest
-                or lineage.selection_id
-                != market_source_snapshot.selection.selection_id
-                or lineage.selection_verification_id
-                != market_source_snapshot.selection_verification.verification_id
             ):
                 raise RuntimePathContractError(
                     "projection lineage disagrees with frozen market source snapshot"
+                )
+            expected_interval_records = tuple(
+                item
+                for item in market_source_snapshot.selection.records
+                if projection.interval_start
+                <= item.source_time
+                < projection.interval_end
+            )
+            if projection.selection.records != expected_interval_records:
+                raise RuntimePathContractError(
+                    "projection omitted an eligible frozen interval member"
                 )
             session = sessions_by_index.get(observation.open_session_index)
             if (
@@ -2162,9 +2732,8 @@ class RuntimeFrozenPathPrefix:
                 continue
             if (
                 selection.start_source_time > session.scheduled_open_at
-                or selection.end_source_time <= session.coverage_through
-                or selection.snapshot_audit_id
-                != market_source_snapshot.source_audit_id
+                or selection.end_source_time < session.coverage_through
+                or selection.snapshot_audit_id != market_source_snapshot.source_audit_id
             ):
                 raise RuntimePathContractError(
                     "market source Selection does not cover the claimed session interval"
@@ -2209,6 +2778,15 @@ class RuntimeFrozenPathPrefix:
             "authority_fact_selections": authority_fact_selections,
             "frozen_at": frozen_at,
             "facts": facts,
+            "projection_manifest": PathProjectionManifest(
+                market_source_snapshot.selection,
+                market_source_snapshot.selection_verification,
+                tuple(
+                    item.path_observation
+                    for item in facts
+                    if item.path_observation is not None
+                ),
+            ),
         }.items():
             object.__setattr__(self, name, value)
         object.__setattr__(
@@ -2220,7 +2798,9 @@ class RuntimeFrozenPathPrefix:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
+            "assurance": self.assurance.value,
             "schema": RUNTIME_PATH_PREFIX_SCHEMA,
+            "projection_manifest": self.projection_manifest.as_dict(),
             "case_id": self.case_id,
             "symbol": self.symbol,
             "market": self.market.value,
@@ -2239,7 +2819,7 @@ class RuntimeFrozenPathPrefix:
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimePathWindow:
+class RuntimePathWindow(StructuralFixture):
     case_id: str
     symbol: str
     market: Market
@@ -2263,18 +2843,19 @@ class RuntimePathWindow:
         object.__setattr__(self, "entry_filled_at", entry_filled_at)
         _require_date(self.entry_trading_day, "entry_trading_day")
         if self.session_label_policy_id != MARKET_SESSION_LABEL_POLICY_V1:
-            raise RuntimePathContractError(
-                "unsupported market session label policy"
-            )
+            raise RuntimePathContractError("unsupported market session label policy")
         if self.interval_boundary_policy_id != RUNTIME_INTERVAL_BOUNDARY_POLICY_V1:
             raise RuntimePathContractError(
                 "unsupported runtime interval boundary policy"
             )
-        if market_session_date(
-            entry_filled_at,
-            market,
-            self.session_label_policy_id,
-        ) != self.entry_trading_day:
+        if (
+            market_session_date(
+                entry_filled_at,
+                market,
+                self.session_label_policy_id,
+            )
+            != self.entry_trading_day
+        ):
             raise RuntimePathContractError(
                 "entry_trading_day disagrees with market-local entry time"
             )
@@ -2300,6 +2881,7 @@ class RuntimePathWindow:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
+            "assurance": self.assurance.value,
             "schema": "stage4g1-runtime-path-window-v2",
             "case_id": self.case_id,
             "symbol": self.symbol,
@@ -2321,7 +2903,7 @@ class RuntimePathWindow:
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimePathResolution:
+class RuntimePathResolution(StructuralFixture):
     state: RuntimePathResolutionState
     window_id: str
     prefix_id: str
@@ -2335,20 +2917,20 @@ class RuntimePathResolution:
 
     def __post_init__(self) -> None:
         if type(self.state) is not RuntimePathResolutionState:
-            raise RuntimePathContractError(
-                "state must be RuntimePathResolutionState"
-            )
+            raise RuntimePathContractError("state must be RuntimePathResolutionState")
         _require_sha256(self.window_id, "window_id")
         _require_sha256(self.prefix_id, "prefix_id")
-        if self.terminal_reason is not None and type(
-            self.terminal_reason
-        ) is not RuntimePathTerminalReason:
+        if (
+            self.terminal_reason is not None
+            and type(self.terminal_reason) is not RuntimePathTerminalReason
+        ):
             raise RuntimePathContractError(
                 "terminal_reason must be RuntimePathTerminalReason or None"
             )
-        if self.pending_code is not None and type(
-            self.pending_code
-        ) is not RuntimePathPendingCode:
+        if (
+            self.pending_code is not None
+            and type(self.pending_code) is not RuntimePathPendingCode
+        ):
             raise RuntimePathContractError(
                 "pending_code must be RuntimePathPendingCode or None"
             )
@@ -2358,7 +2940,10 @@ class RuntimePathResolution:
             raise RuntimePathContractError(
                 "blocker_codes must be a tuple of RuntimePathBlockerCode"
             )
-        if tuple(sorted(set(self.blocker_codes), key=lambda item: item.value)) != self.blocker_codes:
+        if (
+            tuple(sorted(set(self.blocker_codes), key=lambda item: item.value))
+            != self.blocker_codes
+        ):
             raise RuntimePathContractError(
                 "blocker_codes must be unique and canonically ordered"
             )
@@ -2402,14 +2987,21 @@ class RuntimePathResolution:
                 raise RuntimePathContractError(
                     "terminal resolution fields are inconsistent"
                 )
-            if self.state in {
-                RuntimePathResolutionState.TARGET,
-                RuntimePathResolutionState.STOP,
-            } and first_fact is None:
+            if (
+                self.state
+                in {
+                    RuntimePathResolutionState.TARGET,
+                    RuntimePathResolutionState.STOP,
+                }
+                and first_fact is None
+            ):
                 raise RuntimePathContractError(
                     "barrier resolution requires first-touch evidence"
                 )
-            if self.state is RuntimePathResolutionState.TIMEOUT and first_fact is not None:
+            if (
+                self.state is RuntimePathResolutionState.TIMEOUT
+                and first_fact is not None
+            ):
                 raise RuntimePathContractError(
                     "TIMEOUT cannot claim first-touch evidence"
                 )
@@ -2420,7 +3012,9 @@ class RuntimePathResolution:
                 or self.blocker_codes
                 or first_fact is not None
             ):
-                raise RuntimePathContractError("OPEN resolution fields are inconsistent")
+                raise RuntimePathContractError(
+                    "OPEN resolution fields are inconsistent"
+                )
         else:
             if (
                 self.terminal_reason is not None
@@ -2439,6 +3033,7 @@ class RuntimePathResolution:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
+            "assurance": self.assurance.value,
             "schema": RUNTIME_PATH_RESOLUTION_SCHEMA,
             "state": self.state.value,
             "window_id": self.window_id,
@@ -2507,6 +3102,14 @@ def resolve_runtime_path(
         raise RuntimePathContractError("window must be RuntimePathWindow")
     if type(prefix) is not RuntimeFrozenPathPrefix:
         raise RuntimePathContractError("prefix must be RuntimeFrozenPathPrefix")
+    expected_prefix = RuntimeFrozenPathPrefix.from_verified_case_selection(
+        case_selection=prefix.case_selection,
+        market_source_snapshot=prefix.market_source_snapshot,
+        authority_fact_selections=prefix.authority_fact_selections,
+        frozen_at=prefix.frozen_at,
+    )
+    if expected_prefix != prefix:
+        raise RuntimePathContractError("frozen path prefix was mutated")
     if (
         prefix.case_id != window.case_id
         or prefix.symbol != window.symbol
@@ -2581,6 +3184,11 @@ def resolve_runtime_path(
             <= window.entry_filled_at
             <= entry_session.scheduled_close_at
         )
+        or not any(
+            segment.execution_allowed
+            and segment.start <= window.entry_filled_at < segment.end
+            for segment in entry_session.segments
+        )
     ):
         return _blocked_resolution(
             window,
@@ -2652,16 +3260,12 @@ def resolve_runtime_path(
                 RuntimePathBlockerCode.POINT_OUTSIDE_SESSION_WINDOW,
                 effective_session_index=index,
             )
-        if (
-            session.coverage_state
-            in {
-                RuntimeCoverageState.COMPLETE_PREFIX,
-                RuntimeCoverageState.COMPLETE_SESSION,
-            }
-            and (
-                session.coverage_through is None
-                or observation.interval_end > session.coverage_through
-            )
+        if session.coverage_state in {
+            RuntimeCoverageState.COMPLETE_PREFIX,
+            RuntimeCoverageState.COMPLETE_SESSION,
+        } and (
+            session.coverage_through is None
+            or observation.interval_end > session.coverage_through
         ):
             return _blocked_resolution(
                 window,
@@ -2706,6 +3310,25 @@ def resolve_runtime_path(
     max_known_open_index = (
         max(session_by_index) if session_by_index else window.entry_session_index - 1
     )
+    manifest = prefix.projection_manifest
+    if replace(manifest) != manifest:
+        raise RuntimePathContractError("projection manifest was mutated")
+    consumed = set(manifest.consumed_source_record_ids)
+    horizon_session_for_membership = session_by_index.get(horizon_index)
+    source_cutoff = (
+        horizon_session_for_membership.scheduled_close_at
+        if horizon_session_for_membership is not None
+        else prefix.market_source_snapshot.selection.end_source_time
+    )
+    assert source_cutoff is not None
+    if any(
+        window.entry_filled_at <= record.source_time < source_cutoff
+        and record.source_record_id not in consumed
+        for record in prefix.market_source_snapshot.selection.records
+    ):
+        return _blocked_resolution(
+            window, prefix, RuntimePathBlockerCode.UNPROJECTED_SOURCE_MEMBER
+        )
     for session_index in range(
         window.entry_session_index,
         min(max_known_open_index, horizon_index) + 1,
@@ -2769,6 +3392,7 @@ def resolve_runtime_path(
                     first_touch_observation_id=None,
                     effective_session_index=session_index,
                 )
+
         def point_order_key(
             item: RuntimeFrozenPathFact,
         ) -> tuple[datetime, datetime, int, str]:
@@ -2890,7 +3514,7 @@ def resolve_runtime_path(
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimeExecutionFragment:
+class RuntimeExecutionFragment(StructuralFixture):
     intent_id: str
     execution_id: str
     source_fact_id: str
@@ -2911,7 +3535,9 @@ class RuntimeExecutionFragment:
         _require_sha256(self.source_callback_id, "source_callback_id")
         _require_int(self.source_append_order, "source_append_order", minimum=1)
         if type(self.side) is not RuntimeExecutionSide:
-            raise RuntimePathContractError("side must be the exact RuntimeExecutionSide type")
+            raise RuntimePathContractError(
+                "side must be the exact RuntimeExecutionSide type"
+            )
         timestamp = _require_utc(self.timestamp, "execution timestamp")
         known_at = _require_utc(self.durable_known_at, "execution durable_known_at")
         if timestamp > known_at:
@@ -2931,6 +3557,7 @@ class RuntimeExecutionFragment:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
+            "assurance": self.assurance.value,
             "schema": "stage4g1-runtime-execution-fragment-v2",
             "intent_id": self.intent_id,
             "execution_id": self.execution_id,
@@ -2950,7 +3577,7 @@ class RuntimeExecutionFragment:
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimeExecutionSummary:
+class RuntimeExecutionSummary(StructuralFixture):
     intent_id: str
     side: RuntimeExecutionSide
     requested_quantity: int
@@ -2973,7 +3600,9 @@ class RuntimeExecutionSummary:
     def __post_init__(self) -> None:
         _require_sha256(self.intent_id, "intent_id")
         if type(self.side) is not RuntimeExecutionSide:
-            raise RuntimePathContractError("side must be the exact RuntimeExecutionSide type")
+            raise RuntimePathContractError(
+                "side must be the exact RuntimeExecutionSide type"
+            )
         _require_int(self.requested_quantity, "requested_quantity", minimum=1)
         for name in (
             "execution_source_store_id",
@@ -3044,9 +3673,7 @@ class RuntimeExecutionSummary:
         object.__setattr__(self, "fragments", ordered)
         filled_quantity = sum(item.quantity for item in ordered)
         if filled_quantity > self.requested_quantity:
-            raise RuntimePathContractError(
-                "filled quantity exceeds requested quantity"
-            )
+            raise RuntimePathContractError("filled quantity exceeds requested quantity")
         with localcontext(_DECIMAL_CONTEXT):
             total_explicit_cost = sum(
                 (item.explicit_cost for item in ordered),
@@ -3087,6 +3714,7 @@ class RuntimeExecutionSummary:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
+            "assurance": self.assurance.value,
             "schema": RUNTIME_EXECUTION_SUMMARY_SCHEMA,
             "intent_id": self.intent_id,
             "side": self.side.value,
@@ -3119,7 +3747,7 @@ class RuntimeExecutionSummary:
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimeExecutionEvidenceReference:
+class RuntimeExecutionEvidenceReference(StructuralFixture):
     fact_id: str
     fact_kind: str
     source_append_order: int
@@ -3145,6 +3773,7 @@ class RuntimeExecutionEvidenceReference:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
+            "assurance": self.assurance.value,
             "schema": "stage4g1-runtime-execution-evidence-reference-v1",
             "fact_id": self.fact_id,
             "fact_kind": self.fact_kind,
@@ -3158,7 +3787,7 @@ class RuntimeExecutionEvidenceReference:
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimeNoEntryEvidence:
+class RuntimeNoEntryEvidence(StructuralFixture):
     reason: RuntimeNoEntryReason
     execution_summary: RuntimeExecutionSummary
     entry_window_start: datetime
@@ -3203,9 +3832,7 @@ class RuntimeNoEntryEvidence:
             type(item) is not RuntimeExecutionEvidenceReference
             for item in self.evidence_references
         ):
-            raise RuntimePathContractError(
-                "evidence_references must be an exact tuple"
-            )
+            raise RuntimePathContractError("evidence_references must be an exact tuple")
         references = tuple(
             sorted(
                 self.evidence_references,
@@ -3216,14 +3843,17 @@ class RuntimeNoEntryEvidence:
             raise RuntimePathContractError(
                 "execution evidence fact identities must be unique"
             )
-        if any(
-            item.membership_verification_id
-            != self.execution_summary.membership_verification_id
-            or item.source_append_order
-            > self.execution_summary.execution_high_water_append_order
-            or item.known_at > decided_at
-            for item in references
-        ) or self.execution_summary.execution_audited_at > decided_at:
+        if (
+            any(
+                item.membership_verification_id
+                != self.execution_summary.membership_verification_id
+                or item.source_append_order
+                > self.execution_summary.execution_high_water_append_order
+                or item.known_at > decided_at
+                for item in references
+            )
+            or self.execution_summary.execution_audited_at > decided_at
+        ):
             raise RuntimePathContractError(
                 "no-entry decision predates its execution evidence or audit"
             )
@@ -3379,6 +4009,7 @@ class RuntimeNoEntryEvidence:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
+            "assurance": self.assurance.value,
             "schema": RUNTIME_NO_ENTRY_SCHEMA,
             "reason": self.reason.value,
             "execution_summary": self.execution_summary.as_dict(),
@@ -3404,11 +4035,16 @@ class RuntimeNoEntryEvidence:
 
 
 __all__ = [
+    "PATH_PROJECTION_POLICY_V1",
     "RUNTIME_EXECUTION_SUMMARY_SCHEMA",
     "RUNTIME_NO_ENTRY_SCHEMA",
     "RUNTIME_PATH_CONTRACT_SCHEMA",
     "RUNTIME_PATH_PREFIX_SCHEMA",
     "RUNTIME_PATH_RESOLUTION_SCHEMA",
+    "TRADE_PROJECTION_POLICY_V1",
+    "TRADING_SEGMENT_POLICY_V1",
+    "CalendarSessionFact",
+    "PathProjectionManifest",
     "RuntimeAuthorityFactReference",
     "RuntimeAuthorityKind",
     "RuntimeAuthoritySnapshotBinding",
@@ -3435,7 +4071,12 @@ __all__ = [
     "RuntimePathTerminalReason",
     "RuntimePathWindow",
     "RuntimeProjectionLineage",
+    "RuntimeSecurityStatus",
     "RuntimeSessionEvidence",
     "RuntimeSourceReference",
+    "SecurityStatusFact",
+    "SourceCoverageFact",
+    "TradingSessionSegment",
+    "TradingSessionSegmentKind",
     "resolve_runtime_path",
 ]

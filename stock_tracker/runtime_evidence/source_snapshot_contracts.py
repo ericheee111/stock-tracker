@@ -5,8 +5,9 @@ import json
 import re
 import unicodedata
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Protocol
 
@@ -16,12 +17,14 @@ from stock_tracker.core.market_time import (
 )
 from stock_tracker.core.types import Market
 
-MARKET_EVENT_SOURCE_RECORD_SCHEMA = "stage4g1-market-event-source-record-v3"
-MARKET_EVENT_STORE_AUDIT_SCHEMA = "stage4g1-market-event-store-audit-v3"
-MARKET_EVENT_STORE_SNAPSHOT_SCHEMA = "stage4g1-market-event-store-snapshot-v3"
-MARKET_EVENT_SELECTION_SCHEMA = "stage4g1-market-event-selection-v3"
-MARKET_EVENT_READ_PORT_SCHEMA = "stage4g1-market-event-read-port-v3"
-MARKET_EVENT_SEQUENCE_POLICY_V1 = "stage4g1-market-event-sequence-policy-v1"
+MARKET_EVENT_SOURCE_RECORD_SCHEMA = "stage4g1-market-event-source-record-v4"
+MARKET_EVENT_STORE_AUDIT_SCHEMA = "stage4g1-market-event-store-audit-v4"
+MARKET_EVENT_STORE_SNAPSHOT_SCHEMA = "stage4g1-market-event-store-snapshot-v4"
+MARKET_EVENT_SELECTION_SCHEMA = "stage4g1-market-event-selection-v4"
+MARKET_EVENT_READ_PORT_SCHEMA = "stage4g1-market-event-read-port-v4"
+MARKET_EVENT_SEQUENCE_POLICY_V2 = "stage4g1-market-event-sequence-policy-v2"
+FIXTURE_TRADE_TICK_SCHEMA_V1 = "stage4g1-fixture-trade-tick-v1"
+FIXTURE_TRADE_DECODER_POLICY_V1 = "stage4g1-fixture-trade-decoder-v1"
 MARKET_EVENT_INTERVAL_BOUNDARY_POLICY_V1 = (
     "stage4g1-market-event-left-closed-right-open-v1"
 )
@@ -39,6 +42,49 @@ _WINDOWS_RESERVED = frozenset(
     | {f"COM{index}" for index in range(1, 10)}
     | {f"LPT{index}" for index in range(1, 10)}
 )
+
+
+class EvidenceAssurance(StrEnum):
+    STRUCTURAL_FIXTURE = "STRUCTURAL_FIXTURE"
+    STORE_RESCANNED = "STORE_RESCANNED"
+    PIT_CANDIDATE = "PIT_CANDIDATE"
+    TRUSTED_ADMITTED = "TRUSTED_ADMITTED"
+
+
+class StructuralFixture:
+    """Pure reference algorithms never issue physical-store or admission receipts."""
+
+    __slots__ = ()
+
+    @property
+    def assurance(self) -> EvidenceAssurance:
+        return EvidenceAssurance.STRUCTURAL_FIXTURE
+
+
+class FindingImpactScope(StrEnum):
+    SOURCE_SESSION_GLOBAL = "SOURCE_SESSION_GLOBAL"
+    CONNECTION_EPOCH_GLOBAL = "CONNECTION_EPOCH_GLOBAL"
+    SYMBOL_SESSION = "SYMBOL_SESSION"
+    SYMBOL_CONNECTION_EPOCH = "SYMBOL_CONNECTION_EPOCH"
+
+
+class FindingResolutionState(StrEnum):
+    UNRESOLVED = "UNRESOLVED"
+    RESOLVED = "RESOLVED"
+
+
+class CoverageOrigin(StrEnum):
+    LIVE = "LIVE"
+    REPLAY = "REPLAY"
+    BACKFILL = "BACKFILL"
+
+
+class SelectionCompleteness(StrEnum):
+    COVERED_RECORDS = "COVERED_RECORDS"
+    ZERO_EVENT_PROVEN = "ZERO_EVENT_PROVEN"
+    EMPTY_NOT_PROVEN = "EMPTY_NOT_PROVEN"
+    INCOMPLETE_COVERAGE = "INCOMPLETE_COVERAGE"
+    BLOCKED_SEQUENCE_INTEGRITY = "BLOCKED_SEQUENCE_INTEGRITY"
 
 
 class MarketEventSourceContractError(ValueError):
@@ -75,6 +121,8 @@ class MarketEventProviderSequenceScope(StrEnum):
     UNAVAILABLE = "UNAVAILABLE"
     SESSION = "SESSION"
     CONNECTION_EPOCH = "CONNECTION_EPOCH"
+    SYMBOL_SESSION = "SYMBOL_SESSION"
+    SYMBOL_CONNECTION_EPOCH = "SYMBOL_CONNECTION_EPOCH"
 
 
 class MarketEventSelectionVerificationMode(StrEnum):
@@ -89,9 +137,7 @@ def _require_text(
     allow_empty: bool = False,
 ) -> str:
     if type(value) is not str or value != value.strip() or len(value) > maximum:
-        raise MarketEventSourceContractError(
-            f"{name} must be a safe trimmed string"
-        )
+        raise MarketEventSourceContractError(f"{name} must be a safe trimmed string")
     if not value and not allow_empty:
         raise MarketEventSourceContractError(f"{name} must not be empty")
     if any(unicodedata.category(character) in {"Cc", "Cf"} for character in value):
@@ -102,9 +148,7 @@ def _require_text(
 def _require_sha256(value: object, name: str) -> str:
     text = _require_text(value, name, maximum=64)
     if _SHA256.fullmatch(text) is None:
-        raise MarketEventSourceContractError(
-            f"{name} must be lowercase SHA-256"
-        )
+        raise MarketEventSourceContractError(f"{name} must be lowercase SHA-256")
     return text
 
 
@@ -131,8 +175,10 @@ def _require_utc(value: object, name: str) -> datetime:
 
 
 def _utc_text(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat(timespec="microseconds").replace(
-        "+00:00", "Z"
+    return (
+        value.astimezone(timezone.utc)
+        .isoformat(timespec="microseconds")
+        .replace("+00:00", "Z")
     )
 
 
@@ -144,9 +190,7 @@ def _require_date(value: object, name: str) -> date:
 
 def _require_market(value: object) -> Market:
     if type(value) is not Market:
-        raise MarketEventSourceContractError(
-            "market must be the exact Market type"
-        )
+        raise MarketEventSourceContractError("market must be the exact Market type")
     return value
 
 
@@ -202,9 +246,7 @@ def _canonical_json_bytes(value: dict[str, Any]) -> bytes:
             "source snapshot is not canonical JSON"
         ) from exc
     if not raw or len(raw) > _MAX_PAYLOAD_BYTES:
-        raise MarketEventSourceContractError(
-            "source snapshot exceeds its size bound"
-        )
+        raise MarketEventSourceContractError("source snapshot exceeds its size bound")
     return raw
 
 
@@ -249,7 +291,75 @@ def _hash_document(document: dict[str, Any]) -> str:
 
 
 @dataclass(frozen=True, slots=True)
-class MarketEventSourceSessionManifest:
+class MarketEventSubscriptionManifest(StructuralFixture):
+    market: Market
+    symbols: tuple[str, ...]
+    event_types: tuple[str, ...]
+    subscription_scope_id: str = field(init=False)
+    subscription_manifest_root: str = field(init=False)
+    symbol_or_universe_snapshot_id: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        _require_market(self.market)
+        if type(self.symbols) is not tuple or not self.symbols:
+            raise MarketEventSourceContractError(
+                "subscription symbols must be a non-empty tuple"
+            )
+        for symbol in self.symbols:
+            _require_symbol(symbol, self.market)
+        if self.symbols != tuple(sorted(set(self.symbols))):
+            raise MarketEventSourceContractError(
+                "subscription symbols must be unique and canonical"
+            )
+        if type(self.event_types) is not tuple or not self.event_types:
+            raise MarketEventSourceContractError(
+                "subscription event types must be a non-empty tuple"
+            )
+        for event_type in self.event_types:
+            _require_text(event_type, "subscribed_event_type", maximum=128)
+        if self.event_types != tuple(sorted(set(self.event_types))):
+            raise MarketEventSourceContractError(
+                "subscription event types must be unique and canonical"
+            )
+        identity = _hash_document(self.as_dict())
+        object.__setattr__(self, "subscription_scope_id", identity)
+        object.__setattr__(self, "subscription_manifest_root", identity)
+        object.__setattr__(
+            self,
+            "symbol_or_universe_snapshot_id",
+            _hash_document(
+                {
+                    "schema": "stage4g1-fixture-subscription-universe-v1",
+                    "market": self.market.value,
+                    "symbols": list(self.symbols),
+                }
+            ),
+        )
+
+    def membership_witness(self, symbol: str, market: Market) -> str:
+        if market is not self.market or symbol not in self.symbols:
+            raise MarketEventSourceContractError("symbol is absent from subscription")
+        return _hash_document(
+            {
+                "schema": "stage4g1-fixture-subscription-membership-v1",
+                "subscription_manifest_root": self.subscription_manifest_root,
+                "symbol": symbol,
+                "market": market.value,
+            }
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema": "stage4g1-subscription-manifest-v1",
+            "assurance": self.assurance.value,
+            "market": self.market.value,
+            "symbols": list(self.symbols),
+            "event_types": list(self.event_types),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class MarketEventSourceSessionManifest(StructuralFixture):
     source_store_id: str
     session_id: str
     connection_epoch: int
@@ -261,6 +371,16 @@ class MarketEventSourceSessionManifest:
     provider_sequence_available: bool
     provider_sequence_scope: MarketEventProviderSequenceScope
     sequence_policy_id: str
+    subscription: MarketEventSubscriptionManifest
+    subscription_activated_at: datetime
+    coverage_through: datetime
+    coverage_origin: CoverageOrigin
+    queue_overflow_count: int
+    dropped_callback_count: int
+    first_callback_seq: int | None
+    last_callback_seq: int | None
+    replay_selection: MarketEventSelection | None = None
+    replay_verification: MarketEventSelectionVerification | None = None
     manifest_id: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -273,12 +393,76 @@ class MarketEventSourceSessionManifest:
             "collector_started_at",
         )
         coverage_start = _require_utc(self.coverage_start, "coverage_start")
-        if coverage_start > collector_started_at:
+        activated_at = _require_utc(
+            self.subscription_activated_at, "subscription_activated_at"
+        )
+        through = _require_utc(self.coverage_through, "coverage_through")
+        if through < coverage_start:
+            raise MarketEventSourceContractError("coverage interval is reversed")
+        if type(self.subscription) is not MarketEventSubscriptionManifest:
             raise MarketEventSourceContractError(
-                "coverage_start cannot follow collector_started_at"
+                "typed subscription manifest is required"
             )
+        if replace(self.subscription) != self.subscription:
+            raise MarketEventSourceContractError("subscription manifest was mutated")
+        if type(self.coverage_origin) is not CoverageOrigin:
+            raise MarketEventSourceContractError(
+                "coverage_origin must be CoverageOrigin"
+            )
+        if self.coverage_origin is CoverageOrigin.LIVE and not (
+            collector_started_at <= activated_at <= coverage_start
+        ):
+            raise MarketEventSourceContractError(
+                "LIVE coverage cannot predate collector or subscription activation"
+            )
+        if self.coverage_origin is CoverageOrigin.LIVE:
+            if (
+                self.replay_selection is not None
+                or self.replay_verification is not None
+            ):
+                raise MarketEventSourceContractError(
+                    "LIVE cannot carry replay membership"
+                )
+        else:
+            if self.replay_selection is None or self.replay_verification is None:
+                raise MarketEventSourceContractError(
+                    "replay/backfill requires exact selection membership"
+                )
+            validate_selection_verification(
+                self.replay_selection, self.replay_verification
+            )
+            replay = self.replay_selection
+            if (
+                len(self.subscription.symbols) != 1
+                or replay.symbol != self.subscription.symbols[0]
+                or replay.market is not self.subscription.market
+                or replay.allowed_event_types != self.subscription.event_types
+                or replay.start_source_time > coverage_start
+                or replay.end_source_time < through
+                or not replay.covers_interval(coverage_start, through)
+            ):
+                raise MarketEventSourceContractError(
+                    "replay/backfill does not prove the coverage interval"
+                )
         object.__setattr__(self, "collector_started_at", collector_started_at)
         object.__setattr__(self, "coverage_start", coverage_start)
+        object.__setattr__(self, "subscription_activated_at", activated_at)
+        object.__setattr__(self, "coverage_through", through)
+        _require_int(self.queue_overflow_count, "queue_overflow_count")
+        _require_int(self.dropped_callback_count, "dropped_callback_count")
+        if (self.first_callback_seq is None) != (self.last_callback_seq is None):
+            raise MarketEventSourceContractError(
+                "first/last callback sequence must be paired"
+            )
+        if self.first_callback_seq is not None:
+            first = _require_int(
+                self.first_callback_seq, "first_callback_seq", minimum=1
+            )
+            last = _require_int(self.last_callback_seq, "last_callback_seq", minimum=1)
+            if last < first:
+                raise MarketEventSourceContractError(
+                    "callback sequence interval is reversed"
+                )
         if self.expected_first_callback_seq is not None:
             _require_int(
                 self.expected_first_callback_seq,
@@ -298,12 +482,13 @@ class MarketEventSourceSessionManifest:
                 "provider_sequence_scope must be MarketEventProviderSequenceScope"
             )
         if self.provider_sequence_available != (
-            self.provider_sequence_scope is not MarketEventProviderSequenceScope.UNAVAILABLE
+            self.provider_sequence_scope
+            is not MarketEventProviderSequenceScope.UNAVAILABLE
         ):
             raise MarketEventSourceContractError(
                 "provider sequence availability and scope disagree"
             )
-        if self.sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V1:
+        if self.sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V2:
             raise MarketEventSourceContractError(
                 "unsupported market-event sequence policy"
             )
@@ -315,17 +500,38 @@ class MarketEventSourceSessionManifest:
 
     @property
     def has_sequence_start_proof(self) -> bool:
-        return self.expected_first_callback_seq is not None
+        return self.expected_first_callback_seq is not None and (
+            self.first_callback_seq is None
+            or self.first_callback_seq == self.expected_first_callback_seq
+        )
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-market-event-source-session-manifest-v1",
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-market-event-source-session-manifest-v2",
             "source_store_id": self.source_store_id,
             "session_id": self.session_id,
             "connection_epoch": self.connection_epoch,
             "reconnect_epoch": self.reconnect_epoch,
             "collector_started_at": _utc_text(self.collector_started_at),
             "coverage_start": _utc_text(self.coverage_start),
+            "coverage_through": _utc_text(self.coverage_through),
+            "subscription": self.subscription.as_dict(),
+            "subscription_scope_id": self.subscription.subscription_scope_id,
+            "subscription_manifest_root": self.subscription.subscription_manifest_root,
+            "symbol_or_universe_snapshot_id": self.subscription.symbol_or_universe_snapshot_id,
+            "subscription_activated_at": _utc_text(self.subscription_activated_at),
+            "coverage_origin": self.coverage_origin.value,
+            "queue_overflow_count": self.queue_overflow_count,
+            "dropped_callback_count": self.dropped_callback_count,
+            "first_callback_seq": self.first_callback_seq,
+            "last_callback_seq": self.last_callback_seq,
+            "replay_selection_id": None
+            if self.replay_selection is None
+            else self.replay_selection.selection_id,
+            "replay_verification_id": None
+            if self.replay_verification is None
+            else self.replay_verification.verification_id,
             "expected_first_callback_seq": self.expected_first_callback_seq,
             "callback_sequence_scope": self.callback_sequence_scope.value,
             "provider_sequence_available": self.provider_sequence_available,
@@ -338,7 +544,7 @@ class MarketEventSourceSessionManifest:
 
 
 @dataclass(frozen=True, slots=True)
-class MarketEventSourceRecord:
+class MarketEventSourceRecord(StructuralFixture):
     source_store_id: str
     append_order: int
     event_id: str
@@ -402,11 +608,14 @@ class MarketEventSourceRecord:
         object.__setattr__(self, "source_time", source_time)
         object.__setattr__(self, "received_at", received_at)
         object.__setattr__(self, "durable_known_at", durable_known_at)
-        if market_session_date(
-            source_time,
-            market,
-            self.session_label_policy_id,
-        ) != self.trading_day:
+        if (
+            market_session_date(
+                source_time,
+                market,
+                self.session_label_policy_id,
+            )
+            != self.trading_day
+        ):
             raise MarketEventSourceContractError(
                 "trading_day disagrees with market-local source_time"
             )
@@ -468,12 +677,16 @@ class MarketEventSourceRecord:
         expected_content_hash = _hash_document(record_identity)
         if self.record_content_hash != expected_content_hash:
             raise MarketEventSourceContractError("record_content_hash mismatch")
+        if file_sha != expected_content_hash:
+            raise MarketEventSourceContractError(
+                "record_file_sha256 must equal canonical record content hash"
+            )
         object.__setattr__(
             self,
             "source_record_id",
             _hash_document(
                 {
-                    "schema": "stage4g1-market-event-source-record-id-v2",
+                    "schema": "stage4g1-market-event-source-record-id-v3",
                     "source_store_id": source_store_id,
                     "append_order": append_order,
                     "event_id": event_id,
@@ -525,6 +738,7 @@ class MarketEventSourceRecord:
             else previous_partition_record_hash,
             "raw_payload_sha256": self.raw_payload_sha256,
             "payload_sha256": self.payload_sha256,
+            "payload_json": self.payload_json,
             "parser_id": self.parser_id,
             "source_schema_id": self.source_schema_id,
         }
@@ -559,7 +773,6 @@ class MarketEventSourceRecord:
         payload: dict[str, Any],
         parser_id: str,
         source_schema_id: str,
-        record_file_sha256: str,
     ) -> MarketEventSourceRecord:
         if type(payload) is not dict:
             raise MarketEventSourceContractError("payload must be an exact dict")
@@ -595,7 +808,6 @@ class MarketEventSourceRecord:
             "parser_id": parser_id,
             "source_schema_id": source_schema_id,
             "record_storage_key": _record_storage_key(append_order, event_id),
-            "record_file_sha256": record_file_sha256,
         }.items():
             object.__setattr__(provisional, name, value)
         identity = provisional._record_identity()
@@ -628,12 +840,16 @@ class MarketEventSourceRecord:
             parser_id=parser_id,
             source_schema_id=source_schema_id,
             record_storage_key=_record_storage_key(append_order, event_id),
-            record_file_sha256=record_file_sha256,
+            record_file_sha256=_hash_document(identity),
             record_content_hash=_hash_document(identity),
         )
 
     def payload(self) -> dict[str, Any]:
         return dict(_strict_json_object(self.payload_json.encode("utf-8")))
+
+    def record_content_bytes(self) -> bytes:
+        """Frozen on-disk bytes; catalog identity and the file's own SHA stay outside."""
+        return _canonical_json_bytes(self._record_identity())
 
     def inventory_leaf(self) -> dict[str, Any]:
         return {
@@ -654,6 +870,7 @@ class MarketEventSourceRecord:
     def as_dict(self) -> dict[str, Any]:
         return {
             **self._record_identity(),
+            "assurance": self.assurance.value,
             "payload_json": self.payload_json,
             "record_storage_key": self.record_storage_key,
             "record_file_sha256": self.record_file_sha256,
@@ -663,7 +880,7 @@ class MarketEventSourceRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class MarketEventSequenceFinding:
+class MarketEventSequenceFinding(StructuralFixture):
     sequence_policy_id: str
     kind: MarketEventSequenceFindingKind
     source_store_id: str
@@ -674,10 +891,22 @@ class MarketEventSequenceFinding:
     expected_sequence: int | None
     observed_sequence: int | None
     detail_code: str
+    market: Market
+    impact_scope: FindingImpactScope
+    connection_epoch: int
+    reconnect_epoch: int
+    impact_append_order_start: int
+    impact_append_order_end: int
+    impact_source_time_start: datetime
+    impact_source_time_end: datetime
+    affected_symbol: str | None
+    affected_event_types: tuple[str, ...]
+    resolution_state: FindingResolutionState = FindingResolutionState.UNRESOLVED
+    replay_resolution_id: str | None = None
     finding_id: str = field(init=False)
 
     def __post_init__(self) -> None:
-        if self.sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V1:
+        if self.sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V2:
             raise MarketEventSourceContractError(
                 "unsupported market-event sequence policy"
             )
@@ -699,6 +928,60 @@ class MarketEventSequenceFinding:
         if self.observed_sequence is not None:
             _require_int(self.observed_sequence, "observed_sequence")
         _require_text(self.detail_code, "detail_code", maximum=256)
+        _require_market(self.market)
+        if type(self.impact_scope) is not FindingImpactScope:
+            raise MarketEventSourceContractError(
+                "typed finding impact scope is required"
+            )
+        _require_int(self.connection_epoch, "connection_epoch", minimum=1)
+        _require_int(self.reconnect_epoch, "reconnect_epoch")
+        start_order = _require_int(
+            self.impact_append_order_start, "impact_append_order_start", minimum=1
+        )
+        end_order = _require_int(
+            self.impact_append_order_end, "impact_append_order_end", minimum=start_order
+        )
+        if not start_order <= self.observed_append_order <= end_order:
+            raise MarketEventSourceContractError(
+                "finding carrier is outside append impact"
+            )
+        start = _require_utc(self.impact_source_time_start, "impact_source_time_start")
+        end = _require_utc(self.impact_source_time_end, "impact_source_time_end")
+        if end <= start:
+            raise MarketEventSourceContractError(
+                "finding impact interval must be non-empty"
+            )
+        object.__setattr__(self, "impact_source_time_start", start)
+        object.__setattr__(self, "impact_source_time_end", end)
+        symbol_scoped = self.impact_scope in {
+            FindingImpactScope.SYMBOL_SESSION,
+            FindingImpactScope.SYMBOL_CONNECTION_EPOCH,
+        }
+        if symbol_scoped:
+            _require_symbol(self.affected_symbol, self.market)
+        elif self.affected_symbol is not None:
+            raise MarketEventSourceContractError(
+                "global finding cannot narrow affected symbol"
+            )
+        if (
+            type(self.affected_event_types) is not tuple
+            or not self.affected_event_types
+            or self.affected_event_types
+            != tuple(sorted(set(self.affected_event_types)))
+        ):
+            raise MarketEventSourceContractError(
+                "finding event types must be canonical"
+            )
+        for event_type in self.affected_event_types:
+            _require_text(event_type, "affected_event_type")
+        if type(self.resolution_state) is not FindingResolutionState:
+            raise MarketEventSourceContractError("typed finding resolution is required")
+        if self.resolution_state is FindingResolutionState.RESOLVED:
+            _require_sha256(self.replay_resolution_id, "replay_resolution_id")
+        elif self.replay_resolution_id is not None:
+            raise MarketEventSourceContractError(
+                "unresolved finding cannot carry a resolution"
+            )
         object.__setattr__(
             self,
             "finding_id",
@@ -707,7 +990,8 @@ class MarketEventSequenceFinding:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-market-event-sequence-finding-v2",
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-market-event-sequence-finding-v3",
             "sequence_policy_id": self.sequence_policy_id,
             "kind": self.kind.value,
             "source_store_id": self.source_store_id,
@@ -718,14 +1002,134 @@ class MarketEventSequenceFinding:
             "expected_sequence": self.expected_sequence,
             "observed_sequence": self.observed_sequence,
             "detail_code": self.detail_code,
+            "market": self.market.value,
+            "impact_scope": self.impact_scope.value,
+            "connection_epoch": self.connection_epoch,
+            "reconnect_epoch": self.reconnect_epoch,
+            "impact_append_order_start": self.impact_append_order_start,
+            "impact_append_order_end": self.impact_append_order_end,
+            "impact_source_time_start": _utc_text(self.impact_source_time_start),
+            "impact_source_time_end": _utc_text(self.impact_source_time_end),
+            "affected_symbol": self.affected_symbol,
+            "affected_event_types": list(self.affected_event_types),
+            "resolution_state": self.resolution_state.value,
+            "replay_resolution_id": self.replay_resolution_id,
         }
         if include_id:
             document["finding_id"] = self.finding_id
         return document
 
+    def intersects(
+        self,
+        symbol: str,
+        market: Market,
+        start: datetime,
+        end: datetime,
+        event_types: tuple[str, ...],
+    ) -> bool:
+        return (
+            self.market is market
+            and (self.affected_symbol is None or self.affected_symbol == symbol)
+            and self.impact_source_time_start < end
+            and start < self.impact_source_time_end
+            and bool(set(event_types).intersection(self.affected_event_types))
+        )
+
+    @classmethod
+    def from_record(
+        cls,
+        *,
+        record: MarketEventSourceRecord,
+        manifest: MarketEventSourceSessionManifest,
+        kind: MarketEventSequenceFindingKind,
+        expected_sequence: int | None,
+        observed_sequence: int | None,
+        detail_code: str,
+        scope_manifests: tuple[MarketEventSourceSessionManifest, ...] = (),
+    ) -> MarketEventSequenceFinding:
+        if detail_code.startswith("PROVIDER_"):
+            scope = {
+                MarketEventProviderSequenceScope.SESSION: FindingImpactScope.SOURCE_SESSION_GLOBAL,
+                MarketEventProviderSequenceScope.CONNECTION_EPOCH: FindingImpactScope.CONNECTION_EPOCH_GLOBAL,
+                MarketEventProviderSequenceScope.SYMBOL_SESSION: FindingImpactScope.SYMBOL_SESSION,
+                MarketEventProviderSequenceScope.SYMBOL_CONNECTION_EPOCH: FindingImpactScope.SYMBOL_CONNECTION_EPOCH,
+            }.get(manifest.provider_sequence_scope)
+            if scope is None:
+                raise MarketEventSourceContractError(
+                    "provider finding requires sequence capability"
+                )
+        elif kind is MarketEventSequenceFindingKind.SOURCE_TIME_REGRESSION:
+            scope = FindingImpactScope.SYMBOL_SESSION
+        else:
+            scope = (
+                FindingImpactScope.SOURCE_SESSION_GLOBAL
+                if manifest.callback_sequence_scope
+                is MarketEventCallbackSequenceScope.SESSION
+                else FindingImpactScope.CONNECTION_EPOCH_GLOBAL
+            )
+        impact_manifests = tuple(
+            item
+            for item in scope_manifests
+            if item.source_store_id == record.source_store_id
+            and item.session_id == record.session_id
+            and (
+                scope
+                in {
+                    FindingImpactScope.SOURCE_SESSION_GLOBAL,
+                    FindingImpactScope.SYMBOL_SESSION,
+                }
+                or (
+                    item.connection_epoch == record.connection_epoch
+                    and item.reconnect_epoch == record.reconnect_epoch
+                )
+            )
+        ) or (manifest,)
+        return cls(
+            sequence_policy_id=manifest.sequence_policy_id,
+            kind=kind,
+            source_store_id=record.source_store_id,
+            event_id=record.event_id,
+            session_id=record.session_id,
+            symbol=record.symbol,
+            observed_append_order=record.append_order,
+            expected_sequence=expected_sequence,
+            observed_sequence=observed_sequence,
+            detail_code=detail_code,
+            market=record.market,
+            impact_scope=scope,
+            connection_epoch=record.connection_epoch,
+            reconnect_epoch=record.reconnect_epoch,
+            impact_append_order_start=1,
+            impact_append_order_end=record.append_order,
+            impact_source_time_start=min(
+                item.coverage_start for item in impact_manifests
+            ),
+            impact_source_time_end=max(
+                item.coverage_through for item in impact_manifests
+            ),
+            affected_symbol=(
+                record.symbol
+                if scope
+                in {
+                    FindingImpactScope.SYMBOL_SESSION,
+                    FindingImpactScope.SYMBOL_CONNECTION_EPOCH,
+                }
+                else None
+            ),
+            affected_event_types=tuple(
+                sorted(
+                    {
+                        event_type
+                        for item in impact_manifests
+                        for event_type in item.subscription.event_types
+                    }
+                )
+            ),
+        )
+
 
 @dataclass(frozen=True, slots=True)
-class MarketEventPartitionHead:
+class MarketEventPartitionHead(StructuralFixture):
     partition_key: str
     event_count: int
     first_record_hash: str
@@ -756,7 +1160,8 @@ class MarketEventPartitionHead:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-market-event-partition-head-v1",
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-market-event-partition-head-v2",
             "partition_key": self.partition_key,
             "event_count": self.event_count,
             "first_record_hash": self.first_record_hash,
@@ -769,7 +1174,7 @@ class MarketEventPartitionHead:
 
 
 @dataclass(frozen=True, slots=True, init=False)
-class MarketEventInventoryVerification:
+class MarketEventInventoryVerification(StructuralFixture):
     source_store_id: str
     catalog_schema_fingerprint: str
     high_water_append_order: int
@@ -860,7 +1265,8 @@ class MarketEventInventoryVerification:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-market-event-inventory-verification-v1",
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-market-event-inventory-verification-v2",
             "source_store_id": self.source_store_id,
             "catalog_schema_fingerprint": self.catalog_schema_fingerprint,
             "high_water_append_order": self.high_water_append_order,
@@ -891,6 +1297,7 @@ class _PrefixScan:
     selected_records: tuple[MarketEventSourceRecord, ...]
     selected_findings: tuple[MarketEventSequenceFinding, ...]
     source_session_manifests: tuple[MarketEventSourceSessionManifest, ...]
+    coverage_verified_manifest_ids: tuple[str, ...]
 
 
 def _rolling_digest(previous: str, schema: str, document: dict[str, Any]) -> str:
@@ -909,11 +1316,14 @@ def _expected_sequence_findings(
     callback_max: dict[tuple[object, ...], int],
     provider_max: dict[tuple[object, ...], int],
     symbol_heads: dict[tuple[str, str], MarketEventSourceRecord],
-    sequence_policy_id: str,
+    scope_manifests: tuple[MarketEventSourceSessionManifest, ...],
 ) -> tuple[MarketEventSequenceFinding, ...]:
     findings: list[MarketEventSequenceFinding] = []
     callback_key: tuple[object, ...] = (record.session_id,)
-    if manifest.callback_sequence_scope is MarketEventCallbackSequenceScope.CONNECTION_EPOCH:
+    if (
+        manifest.callback_sequence_scope
+        is MarketEventCallbackSequenceScope.CONNECTION_EPOCH
+    ):
         callback_key += (record.connection_epoch, record.reconnect_epoch)
     previous_callback = callback_max.get(callback_key)
     expected_callback = (
@@ -924,14 +1334,11 @@ def _expected_sequence_findings(
     if expected_callback is not None:
         if record.callback_seq < expected_callback:
             findings.append(
-                MarketEventSequenceFinding(
-                    sequence_policy_id=sequence_policy_id,
+                MarketEventSequenceFinding.from_record(
+                    record=record,
+                    manifest=manifest,
+                    scope_manifests=scope_manifests,
                     kind=MarketEventSequenceFindingKind.OUT_OF_ORDER,
-                    source_store_id=record.source_store_id,
-                    event_id=record.event_id,
-                    session_id=record.session_id,
-                    symbol=record.symbol,
-                    observed_append_order=record.append_order,
                     expected_sequence=expected_callback,
                     observed_sequence=record.callback_seq,
                     detail_code="CALLBACK_SEQUENCE_NOT_ADVANCED",
@@ -939,14 +1346,11 @@ def _expected_sequence_findings(
             )
         elif record.callback_seq > expected_callback:
             findings.append(
-                MarketEventSequenceFinding(
-                    sequence_policy_id=sequence_policy_id,
+                MarketEventSequenceFinding.from_record(
+                    record=record,
+                    manifest=manifest,
+                    scope_manifests=scope_manifests,
                     kind=MarketEventSequenceFindingKind.CALLBACK_SEQUENCE,
-                    source_store_id=record.source_store_id,
-                    event_id=record.event_id,
-                    session_id=record.session_id,
-                    symbol=record.symbol,
-                    observed_append_order=record.append_order,
                     expected_sequence=expected_callback,
                     observed_sequence=record.callback_seq,
                     detail_code="CALLBACK_SEQUENCE_GAP",
@@ -962,21 +1366,26 @@ def _expected_sequence_findings(
             raise MarketEventSourceContractError(
                 "provider sequence is required by the source session manifest"
             )
-        provider_key: tuple[object, ...] = (record.session_id, record.symbol)
-        if manifest.provider_sequence_scope is MarketEventProviderSequenceScope.CONNECTION_EPOCH:
+        provider_key: tuple[object, ...] = (record.session_id,)
+        if manifest.provider_sequence_scope in {
+            MarketEventProviderSequenceScope.SYMBOL_SESSION,
+            MarketEventProviderSequenceScope.SYMBOL_CONNECTION_EPOCH,
+        }:
+            provider_key += (record.symbol,)
+        if manifest.provider_sequence_scope in {
+            MarketEventProviderSequenceScope.CONNECTION_EPOCH,
+            MarketEventProviderSequenceScope.SYMBOL_CONNECTION_EPOCH,
+        }:
             provider_key += (record.connection_epoch, record.reconnect_epoch)
         previous_provider = provider_max.get(provider_key)
         if previous_provider is not None:
             if record.provider_seq <= previous_provider:
                 findings.append(
-                    MarketEventSequenceFinding(
-                        sequence_policy_id=sequence_policy_id,
+                    MarketEventSequenceFinding.from_record(
+                        record=record,
+                        manifest=manifest,
+                        scope_manifests=scope_manifests,
                         kind=MarketEventSequenceFindingKind.OUT_OF_ORDER,
-                        source_store_id=record.source_store_id,
-                        event_id=record.event_id,
-                        session_id=record.session_id,
-                        symbol=record.symbol,
-                        observed_append_order=record.append_order,
                         expected_sequence=previous_provider + 1,
                         observed_sequence=record.provider_seq,
                         detail_code="PROVIDER_SEQUENCE_NOT_ADVANCED",
@@ -984,14 +1393,11 @@ def _expected_sequence_findings(
                 )
             elif record.provider_seq > previous_provider + 1:
                 findings.append(
-                    MarketEventSequenceFinding(
-                        sequence_policy_id=sequence_policy_id,
+                    MarketEventSequenceFinding.from_record(
+                        record=record,
+                        manifest=manifest,
+                        scope_manifests=scope_manifests,
                         kind=MarketEventSequenceFindingKind.PROVIDER_SEQUENCE,
-                        source_store_id=record.source_store_id,
-                        event_id=record.event_id,
-                        session_id=record.session_id,
-                        symbol=record.symbol,
-                        observed_append_order=record.append_order,
                         expected_sequence=previous_provider + 1,
                         observed_sequence=record.provider_seq,
                         detail_code="PROVIDER_SEQUENCE_GAP",
@@ -1007,19 +1413,13 @@ def _expected_sequence_findings(
         )
 
     previous_symbol = symbol_heads.get((record.session_id, record.symbol))
-    if (
-        previous_symbol is not None
-        and record.source_time < previous_symbol.source_time
-    ):
+    if previous_symbol is not None and record.source_time < previous_symbol.source_time:
         findings.append(
-            MarketEventSequenceFinding(
-                sequence_policy_id=sequence_policy_id,
+            MarketEventSequenceFinding.from_record(
+                record=record,
+                manifest=manifest,
+                scope_manifests=scope_manifests,
                 kind=MarketEventSequenceFindingKind.SOURCE_TIME_REGRESSION,
-                source_store_id=record.source_store_id,
-                event_id=record.event_id,
-                session_id=record.session_id,
-                symbol=record.symbol,
-                observed_append_order=record.append_order,
                 expected_sequence=None,
                 observed_sequence=None,
                 detail_code="SOURCE_TIME_REGRESSION",
@@ -1056,10 +1456,8 @@ def _scan_prefix(
     | None = None,
     selection_limit: int = _MAX_SELECTION_RECORDS,
 ) -> _PrefixScan:
-    if sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V1:
-        raise MarketEventSourceContractError(
-            "unsupported market-event sequence policy"
-        )
+    if sequence_policy_id != MARKET_EVENT_SEQUENCE_POLICY_V2:
+        raise MarketEventSourceContractError("unsupported market-event sequence policy")
     manifests = tuple(source_session_manifests)
     ordered_manifests = tuple(
         sorted(
@@ -1081,18 +1479,33 @@ def _scan_prefix(
         raise MarketEventSourceContractError(
             "source session manifests must be canonical and belong to the store"
         )
-    if len({item.manifest_id for item in manifests}) != len(manifests):
-        raise MarketEventSourceContractError(
-            "source session manifests must be unique"
-        )
+    if len(
+        {
+            (
+                item.source_store_id,
+                item.session_id,
+                item.connection_epoch,
+                item.reconnect_epoch,
+            )
+            for item in manifests
+        }
+    ) != len(manifests):
+        raise MarketEventSourceContractError("source session manifests must be unique")
     provider_capability_by_session: dict[
         str,
-        tuple[bool, MarketEventProviderSequenceScope],
+        tuple[
+            bool,
+            MarketEventProviderSequenceScope,
+            MarketEventCallbackSequenceScope,
+            Market,
+        ],
     ] = {}
     for manifest in manifests:
         capability = (
             manifest.provider_sequence_available,
             manifest.provider_sequence_scope,
+            manifest.callback_sequence_scope,
+            manifest.subscription.market,
         )
         previous_capability = provider_capability_by_session.setdefault(
             manifest.session_id,
@@ -1123,6 +1536,7 @@ def _scan_prefix(
     storage_keys: set[str] = set()
     append_orders: set[int] = set()
     finding_chain = _ZERO_HASH
+    manifest_sequences: dict[str, list[int]] = {}
     finding_count = 0
     chunk_chain = _ZERO_HASH
     chunk_manifest_chain = _ZERO_HASH
@@ -1133,7 +1547,7 @@ def _scan_prefix(
     selected_findings: list[MarketEventSequenceFinding] = []
     record_count = 0
     for record in records:
-        if type(record) is not MarketEventSourceRecord:
+        if type(record) is not MarketEventSourceRecord or replace(record) != record:
             raise MarketEventSourceContractError(
                 "audit records must be MarketEventSourceRecord"
             )
@@ -1160,6 +1574,19 @@ def _scan_prefix(
             raise MarketEventSourceContractError(
                 "source record is not bound to its exact session manifest"
             )
+        manifest_sequences.setdefault(manifest.manifest_id, []).append(
+            record.callback_seq
+        )
+        if (
+            record.market is not manifest.subscription.market
+            or record.symbol not in manifest.subscription.symbols
+            or record.event_type not in manifest.subscription.event_types
+            or record.source_time < manifest.coverage_start
+            or record.source_time >= manifest.coverage_through
+        ):
+            raise MarketEventSourceContractError(
+                "record is outside subscribed coverage"
+            )
         if (
             record.event_id in event_ids
             or record.source_record_id in source_record_ids
@@ -1183,7 +1610,9 @@ def _scan_prefix(
             )
         partition_state[record.partition_key] = (
             1 if previous_partition is None else previous_partition[0] + 1,
-            record.record_content_hash if previous_partition is None else previous_partition[1],
+            record.record_content_hash
+            if previous_partition is None
+            else previous_partition[1],
             record.record_content_hash,
         )
         record_selected = False
@@ -1207,7 +1636,7 @@ def _scan_prefix(
             callback_max,
             provider_max,
             symbol_heads,
-            sequence_policy_id,
+            manifests,
         ):
             supplied = next(supplied_findings, None)
             if supplied != expected_finding:
@@ -1220,7 +1649,9 @@ def _scan_prefix(
                 "stage4g1-market-event-finding-chain-node-v1",
                 expected_finding.as_dict(),
             )
-            if record_selected:
+            if selection_query is not None and expected_finding.intersects(
+                *selection_query
+            ):
                 selected_findings.append(expected_finding)
         if record_count == 1:
             first_hash = record.record_content_hash
@@ -1245,6 +1676,18 @@ def _scan_prefix(
             )
             chunk_chain = _ZERO_HASH
             chunk_record_count = 0
+    if any(item.coverage_through > audited_at for item in manifests):
+        raise MarketEventSourceContractError("coverage cannot exceed audit known time")
+    for manifest in manifests:
+        actual = manifest_sequences.get(manifest.manifest_id, [])
+        if manifest.first_callback_seq is not None and (
+            not actual
+            or manifest.first_callback_seq != min(actual)
+            or manifest.last_callback_seq != max(actual)
+        ):
+            raise MarketEventSourceContractError(
+                "declared first/last callback bounds disagree with exact prefix"
+            )
     if next(supplied_findings, None) is not None:
         raise MarketEventSourceContractError(
             "supplied sequence findings contain fabricated or duplicate entries"
@@ -1268,7 +1711,10 @@ def _scan_prefix(
             raise MarketEventSourceContractError(
                 "partition heads must be MarketEventPartitionHead"
             )
-        if previous_partition_key is not None and head.partition_key <= previous_partition_key:
+        if (
+            previous_partition_key is not None
+            and head.partition_key <= previous_partition_key
+        ):
             raise MarketEventSourceContractError(
                 "partition heads must be unique and canonically ordered"
             )
@@ -1333,11 +1779,29 @@ def _scan_prefix(
         selected_records=tuple(selected_records),
         selected_findings=tuple(selected_findings),
         source_session_manifests=manifests,
+        coverage_verified_manifest_ids=tuple(
+            item.manifest_id
+            for item in manifests
+            if (
+                (
+                    not manifest_sequences.get(item.manifest_id)
+                    and item.first_callback_seq is None
+                    and item.last_callback_seq is None
+                )
+                or (
+                    bool(manifest_sequences.get(item.manifest_id))
+                    and item.first_callback_seq
+                    == min(manifest_sequences[item.manifest_id])
+                    and item.last_callback_seq
+                    == max(manifest_sequences[item.manifest_id])
+                )
+            )
+        ),
     )
 
 
 @dataclass(frozen=True, slots=True, init=False)
-class MarketEventStoreAudit:
+class MarketEventStoreAudit(StructuralFixture):
     source_store_id: str
     source_schema_id: str
     scope: MarketEventStoreAuditScope
@@ -1439,11 +1903,14 @@ class MarketEventStoreAudit:
         }
         for name, value in values.items():
             object.__setattr__(self, name, value)
-        object.__setattr__(self, "audit_id", _hash_document(self.as_dict(include_id=False)))
+        object.__setattr__(
+            self, "audit_id", _hash_document(self.as_dict(include_id=False))
+        )
         return self
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
+            "assurance": self.assurance.value,
             "schema": MARKET_EVENT_STORE_AUDIT_SCHEMA,
             "source_store_id": self.source_store_id,
             "source_schema_id": self.source_schema_id,
@@ -1492,7 +1959,7 @@ def _selected_finding_digest(
 
 
 @dataclass(frozen=True, slots=True)
-class MarketEventSelectionCommitment:
+class MarketEventSelectionCommitment(StructuralFixture):
     source_store_id: str
     snapshot_id: str
     snapshot_audit_id: str
@@ -1521,9 +1988,7 @@ class MarketEventSelectionCommitment:
         start = _require_utc(self.start_source_time, "start_source_time")
         end = _require_utc(self.end_source_time, "end_source_time")
         if end <= start:
-            raise MarketEventSourceContractError(
-                "selection interval must be non-empty"
-            )
+            raise MarketEventSourceContractError("selection interval must be non-empty")
         object.__setattr__(self, "start_source_time", start)
         object.__setattr__(self, "end_source_time", end)
         if self.interval_boundary_policy_id != MARKET_EVENT_INTERVAL_BOUNDARY_POLICY_V1:
@@ -1534,8 +1999,7 @@ class MarketEventSelectionCommitment:
             type(self.allowed_event_types) is not tuple
             or not self.allowed_event_types
             or any(
-                type(item) is not str or not item
-                for item in self.allowed_event_types
+                type(item) is not str or not item for item in self.allowed_event_types
             )
             or self.allowed_event_types != tuple(sorted(set(self.allowed_event_types)))
         ):
@@ -1573,7 +2037,8 @@ class MarketEventSelectionCommitment:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-market-event-selection-commitment-v1",
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-market-event-selection-commitment-v2",
             "source_store_id": self.source_store_id,
             "snapshot_id": self.snapshot_id,
             "snapshot_audit_id": self.snapshot_audit_id,
@@ -1594,7 +2059,7 @@ class MarketEventSelectionCommitment:
 
 
 @dataclass(frozen=True, slots=True)
-class MarketEventSelectionMembershipWitness:
+class MarketEventSelectionMembershipWitness(StructuralFixture):
     inventory_verification_id: str
     inventory_root: str
     ordered_source_record_ids: tuple[str, ...]
@@ -1628,7 +2093,10 @@ class MarketEventSelectionMembershipWitness:
             raise MarketEventSourceContractError(
                 "selection membership record columns have unequal length"
             )
-        if self.verification_mode is not MarketEventSelectionVerificationMode.FULL_PREFIX_RESCAN:
+        if (
+            self.verification_mode
+            is not MarketEventSelectionVerificationMode.FULL_PREFIX_RESCAN
+        ):
             raise MarketEventSourceContractError(
                 "selection membership requires full-prefix rescan verification"
             )
@@ -1640,17 +2108,14 @@ class MarketEventSelectionMembershipWitness:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-market-event-selection-membership-witness-v1",
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-market-event-selection-membership-witness-v2",
             "inventory_verification_id": self.inventory_verification_id,
             "inventory_root": self.inventory_root,
             "ordered_source_record_ids": list(self.ordered_source_record_ids),
-            "ordered_record_content_hashes": list(
-                self.ordered_record_content_hashes
-            ),
+            "ordered_record_content_hashes": list(self.ordered_record_content_hashes),
             "relevant_finding_ids": list(self.relevant_finding_ids),
-            "source_session_manifest_ids": list(
-                self.source_session_manifest_ids
-            ),
+            "source_session_manifest_ids": list(self.source_session_manifest_ids),
             "verification_mode": self.verification_mode.value,
         }
         if include_id:
@@ -1659,7 +2124,7 @@ class MarketEventSelectionMembershipWitness:
 
 
 @dataclass(frozen=True, slots=True, init=False)
-class MarketEventSelectionVerification:
+class MarketEventSelectionVerification(StructuralFixture):
     selection_id: str
     selection_commitment_id: str
     membership_witness_id: str
@@ -1702,7 +2167,8 @@ class MarketEventSelectionVerification:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
-            "schema": "stage4g1-market-event-selection-verification-v1",
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-market-event-selection-verification-v2",
             "selection_id": self.selection_id,
             "selection_commitment_id": self.selection_commitment_id,
             "membership_witness_id": self.membership_witness_id,
@@ -1718,7 +2184,7 @@ class MarketEventSelectionVerification:
 
 
 @dataclass(frozen=True, slots=True, init=False)
-class MarketEventStoreSnapshot:
+class MarketEventStoreSnapshot(StructuralFixture):
     audit: MarketEventStoreAudit
     snapshot_id: str
 
@@ -1728,9 +2194,7 @@ class MarketEventStoreSnapshot:
     @classmethod
     def from_audit(cls, audit: MarketEventStoreAudit) -> MarketEventStoreSnapshot:
         if type(audit) is not MarketEventStoreAudit:
-            raise MarketEventSourceContractError(
-                "audit must be MarketEventStoreAudit"
-            )
+            raise MarketEventSourceContractError("audit must be MarketEventStoreAudit")
         self = object.__new__(cls)
         object.__setattr__(self, "audit", audit)
         object.__setattr__(
@@ -1742,6 +2206,7 @@ class MarketEventStoreSnapshot:
 
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
+            "assurance": self.assurance.value,
             "schema": MARKET_EVENT_STORE_SNAPSHOT_SCHEMA,
             "audit": self.audit.as_dict(),
         }
@@ -1769,9 +2234,7 @@ class MarketEventStoreSnapshot:
         start = _require_utc(start_source_time, "start_source_time")
         end = _require_utc(end_source_time, "end_source_time")
         if end <= start:
-            raise MarketEventSourceContractError(
-                "selection interval must be non-empty"
-            )
+            raise MarketEventSourceContractError("selection interval must be non-empty")
         if interval_boundary_policy_id != MARKET_EVENT_INTERVAL_BOUNDARY_POLICY_V1:
             raise MarketEventSourceContractError(
                 "unsupported market-event interval boundary policy"
@@ -1780,10 +2243,7 @@ class MarketEventStoreSnapshot:
             type(allowed_event_types) is not tuple
             or not allowed_event_types
             or allowed_event_types != tuple(sorted(set(allowed_event_types)))
-            or any(
-                type(item) is not str or not item
-                for item in allowed_event_types
-            )
+            or any(type(item) is not str or not item for item in allowed_event_types)
         ):
             raise MarketEventSourceContractError(
                 "allowed event types must be a canonical non-empty tuple"
@@ -1848,6 +2308,7 @@ class MarketEventStoreSnapshot:
             records=scan.selected_records,
             findings=scan.selected_findings,
             source_session_manifests=scan.source_session_manifests,
+            coverage_verified_manifest_ids=scan.coverage_verified_manifest_ids,
             allowed_event_types=allowed_event_types,
             interval_boundary_policy_id=interval_boundary_policy_id,
             record_limit=limit,
@@ -1888,10 +2349,11 @@ class MarketEventStoreSnapshot:
 
 
 @dataclass(frozen=True, slots=True, init=False)
-class MarketEventSelection:
+class MarketEventSelection(StructuralFixture):
     source_store_id: str
     snapshot_id: str
     snapshot_audit_id: str
+    snapshot_audited_at: datetime
     snapshot_high_water_append_order: int
     snapshot_finding_set_digest: str
     sequence_policy_id: str
@@ -1905,6 +2367,7 @@ class MarketEventSelection:
     records: tuple[MarketEventSourceRecord, ...]
     relevant_findings: tuple[MarketEventSequenceFinding, ...]
     source_session_manifests: tuple[MarketEventSourceSessionManifest, ...]
+    coverage_verified_manifest_ids: tuple[str, ...]
     relevant_finding_set_digest: str
     commitment: MarketEventSelectionCommitment
     membership_witness: MarketEventSelectionMembershipWitness
@@ -1927,6 +2390,7 @@ class MarketEventSelection:
         records: tuple[MarketEventSourceRecord, ...],
         findings: tuple[MarketEventSequenceFinding, ...],
         source_session_manifests: tuple[MarketEventSourceSessionManifest, ...],
+        coverage_verified_manifest_ids: tuple[str, ...],
         allowed_event_types: tuple[str, ...],
         interval_boundary_policy_id: str,
         record_limit: int,
@@ -1936,6 +2400,7 @@ class MarketEventSelection:
             "source_store_id": snapshot.audit.source_store_id,
             "snapshot_id": snapshot.snapshot_id,
             "snapshot_audit_id": snapshot.audit.audit_id,
+            "snapshot_audited_at": snapshot.audit.audited_at,
             "snapshot_high_water_append_order": snapshot.audit.high_water_append_order,
             "snapshot_finding_set_digest": snapshot.audit.finding_set_digest,
             "sequence_policy_id": snapshot.audit.sequence_policy_id,
@@ -1949,6 +2414,7 @@ class MarketEventSelection:
             "records": records,
             "relevant_findings": findings,
             "source_session_manifests": source_session_manifests,
+            "coverage_verified_manifest_ids": coverage_verified_manifest_ids,
             "relevant_finding_set_digest": _selected_finding_digest(findings),
         }
         for name, value in values.items():
@@ -1986,9 +2452,7 @@ class MarketEventSelection:
                 ordered_record_content_hashes=tuple(
                     item.record_content_hash for item in records
                 ),
-                relevant_finding_ids=tuple(
-                    item.finding_id for item in findings
-                ),
+                relevant_finding_ids=tuple(item.finding_id for item in findings),
                 source_session_manifest_ids=tuple(
                     item.manifest_id for item in source_session_manifests
                 ),
@@ -2006,7 +2470,8 @@ class MarketEventSelection:
     def _validate_contents(self) -> None:
         records = self.records
         if type(records) is not tuple or any(
-            type(item) is not MarketEventSourceRecord for item in records
+            type(item) is not MarketEventSourceRecord or replace(item) != item
+            for item in records
         ):
             raise MarketEventSourceContractError(
                 "selection records must be an exact source-record tuple"
@@ -2046,18 +2511,22 @@ class MarketEventSelection:
             raise MarketEventSourceContractError(
                 "selection findings must be an exact finding tuple"
             )
-        selected_event_orders = {
-            (item.event_id, item.append_order) for item in records
-        }
         if len({item.finding_id for item in self.relevant_findings}) != len(
             self.relevant_findings
         ) or any(
             item.source_store_id != self.source_store_id
-            or (item.event_id, item.observed_append_order) not in selected_event_orders
+            or item.observed_append_order > self.snapshot_high_water_append_order
+            or not item.intersects(
+                self.symbol,
+                self.market,
+                self.start_source_time,
+                self.end_source_time,
+                self.allowed_event_types,
+            )
             for item in self.relevant_findings
         ):
             raise MarketEventSourceContractError(
-                "selection relevant findings are not exact selected-record findings"
+                "selection findings do not intersect its impact scope"
             )
         expected_finding_digest = _selected_finding_digest(self.relevant_findings)
         if expected_finding_digest != self.relevant_finding_set_digest:
@@ -2065,11 +2534,22 @@ class MarketEventSelection:
                 "selection relevant finding digest mismatch"
             )
         manifest_ids = {item.manifest_id for item in self.source_session_manifests}
-        if len(manifest_ids) != len(self.source_session_manifests) or any(
-            item.source_store_id != self.source_store_id
-            for item in self.source_session_manifests
-        ) or any(
-            item.source_session_manifest_id not in manifest_ids for item in records
+        if (
+            type(self.coverage_verified_manifest_ids) is not tuple
+            or len(set(self.coverage_verified_manifest_ids))
+            != len(self.coverage_verified_manifest_ids)
+            or not set(self.coverage_verified_manifest_ids).issubset(manifest_ids)
+        ):
+            raise MarketEventSourceContractError("coverage manifest proof is invalid")
+        if (
+            len(manifest_ids) != len(self.source_session_manifests)
+            or any(
+                item.source_store_id != self.source_store_id or replace(item) != item
+                for item in self.source_session_manifests
+            )
+            or any(
+                item.source_session_manifest_id not in manifest_ids for item in records
+            )
         ):
             raise MarketEventSourceContractError(
                 "selection source-session manifest inventory is invalid"
@@ -2106,16 +2586,108 @@ class MarketEventSelection:
             ),
             verification_mode=MarketEventSelectionVerificationMode.FULL_PREFIX_RESCAN,
         )
-        if self.commitment != expected_commitment or self.membership_witness != expected_witness:
+        if (
+            self.commitment != expected_commitment
+            or self.membership_witness != expected_witness
+        ):
             raise MarketEventSourceContractError(
                 "selection commitment or membership witness mismatch"
             )
         if self.selection_id != _hash_document(self.as_dict(include_id=False)):
             raise MarketEventSourceContractError("selection_id mismatch")
 
+    def covers_interval(self, start: datetime, end: datetime) -> bool:
+        start = _require_utc(start, "coverage interval start")
+        end = _require_utc(end, "coverage interval end")
+        if not self.start_source_time <= start < end <= self.end_source_time:
+            return False
+        if any(
+            item.subscription.market is self.market
+            and self.symbol in item.subscription.symbols
+            and bool(
+                set(self.allowed_event_types).intersection(
+                    item.subscription.event_types
+                )
+            )
+            and item.coverage_start < end
+            and start < item.coverage_through
+            and (item.queue_overflow_count or item.dropped_callback_count)
+            for item in self.source_session_manifests
+        ):
+            return False
+        if any(
+            item.resolution_state is FindingResolutionState.UNRESOLVED
+            and item.intersects(
+                self.symbol, self.market, start, end, self.allowed_event_types
+            )
+            for item in self.relevant_findings
+        ):
+            return False
+        intervals = sorted(
+            (item.coverage_start, item.coverage_through)
+            for item in self.source_session_manifests
+            if item.manifest_id in self.coverage_verified_manifest_ids
+            and item.subscription.market is self.market
+            and self.symbol in item.subscription.symbols
+            and set(self.allowed_event_types).issubset(item.subscription.event_types)
+            and item.has_sequence_start_proof
+            and item.queue_overflow_count == 0
+            and item.dropped_callback_count == 0
+        )
+        through = start
+        for left, right in intervals:
+            if left > through:
+                break
+            through = max(through, right)
+            if through >= end:
+                return True
+        return False
+
+    @property
+    def completeness(self) -> SelectionCompleteness:
+        if any(
+            item.resolution_state is FindingResolutionState.UNRESOLVED
+            for item in self.relevant_findings
+        ):
+            return SelectionCompleteness.BLOCKED_SEQUENCE_INTEGRITY
+        if self.covers_interval(self.start_source_time, self.end_source_time):
+            return (
+                SelectionCompleteness.COVERED_RECORDS
+                if self.records
+                else SelectionCompleteness.ZERO_EVENT_PROVEN
+            )
+        return (
+            SelectionCompleteness.INCOMPLETE_COVERAGE
+            if self.records
+            else SelectionCompleteness.EMPTY_NOT_PROVEN
+        )
+
+    @property
+    def subscription_membership_witnesses(self) -> tuple[tuple[str, str], ...]:
+        return tuple(
+            (
+                manifest.manifest_id,
+                manifest.subscription.membership_witness(self.symbol, self.market),
+            )
+            for manifest in self.source_session_manifests
+            if manifest.subscription.market is self.market
+            and self.symbol in manifest.subscription.symbols
+            and set(self.allowed_event_types).issubset(
+                manifest.subscription.event_types
+            )
+        )
+
     def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
         document = {
+            "assurance": self.assurance.value,
             "schema": MARKET_EVENT_SELECTION_SCHEMA,
+            "subscription_membership_witnesses": [
+                {"manifest_id": manifest_id, "symbol_membership_witness_id": witness_id}
+                for manifest_id, witness_id in self.subscription_membership_witnesses
+            ],
+            "snapshot_audited_at": _utc_text(self.snapshot_audited_at),
+            "completeness": self.completeness.value,
+            "coverage_verified_manifest_ids": list(self.coverage_verified_manifest_ids),
             "source_store_id": self.source_store_id,
             "snapshot_id": self.snapshot_id,
             "snapshot_audit_id": self.snapshot_audit_id,
@@ -2133,12 +2705,8 @@ class MarketEventSelection:
             "record_content_hashes": [
                 item.record_content_hash for item in self.records
             ],
-            "record_storage_keys": [
-                item.record_storage_key for item in self.records
-            ],
-            "record_file_sha256s": [
-                item.record_file_sha256 for item in self.records
-            ],
+            "record_storage_keys": [item.record_storage_key for item in self.records],
+            "record_file_sha256s": [item.record_file_sha256 for item in self.records],
             "relevant_finding_ids": [
                 item.finding_id for item in self.relevant_findings
             ],
@@ -2154,6 +2722,163 @@ class MarketEventSelection:
         return document
 
 
+def validate_selection_verification(
+    selection: MarketEventSelection,
+    verification: MarketEventSelectionVerification,
+) -> None:
+    if (
+        type(selection) is not MarketEventSelection
+        or type(verification) is not MarketEventSelectionVerification
+    ):
+        raise MarketEventSourceContractError(
+            "exact typed selection and verification are required"
+        )
+    selection._validate_contents()
+    if verification != MarketEventSelectionVerification._from_exact_rescan(selection):
+        raise MarketEventSourceContractError("selection verification identity mismatch")
+
+
+@dataclass(frozen=True, slots=True)
+class DecodedTradeTick(StructuralFixture):
+    record: MarketEventSourceRecord
+    selection: MarketEventSelection
+    verification: MarketEventSelectionVerification
+    decoder_policy_id: str
+    source_schema_id: str = field(init=False)
+    source_store_id: str = field(init=False)
+    source_snapshot_id: str = field(init=False)
+    source_audit_id: str = field(init=False)
+    selection_id: str = field(init=False)
+    selection_verification_id: str = field(init=False)
+    source_record_id: str = field(init=False)
+    event_id: str = field(init=False)
+    symbol: str = field(init=False)
+    market: Market = field(init=False)
+    trading_day: date = field(init=False)
+    source_time: datetime = field(init=False)
+    received_at: datetime = field(init=False)
+    durable_known_at: datetime = field(init=False)
+    price: Decimal = field(init=False)
+    quantity: int = field(init=False)
+    decoded_payload_sha256: str = field(init=False)
+    decoded_tick_id: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        validate_selection_verification(self.selection, self.verification)
+        record = self.record
+        if type(record) is not MarketEventSourceRecord:
+            raise MarketEventSourceContractError(
+                "decoder requires an exact source record"
+            )
+        if replace(record) != record:
+            raise MarketEventSourceContractError("decoder source record was mutated")
+        if record not in self.selection.records:
+            raise MarketEventSourceContractError(
+                "decoded record is outside verified selection"
+            )
+        if (
+            record.source_schema_id != FIXTURE_TRADE_TICK_SCHEMA_V1
+            or self.decoder_policy_id != FIXTURE_TRADE_DECODER_POLICY_V1
+            or record.event_type != "TRADE_TICK"
+        ):
+            raise MarketEventSourceContractError(
+                "unsupported exact trade decoder schema/policy"
+            )
+        payload = record.payload()
+        if set(payload) != {"last_price", "quantity"}:
+            raise MarketEventSourceContractError(
+                "fixture trade payload fields must be exact"
+            )
+        value = payload["last_price"]
+        if type(value) is int:
+            value = str(value)
+        if (
+            type(value) is not str
+            or re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", value) is None
+        ):
+            raise MarketEventSourceContractError(
+                "trade price must be finite decimal text or integer, never float/bool"
+            )
+        price = Decimal(value)
+        if not price.is_finite() or price <= 0:
+            raise MarketEventSourceContractError(
+                "trade price must be positive and finite"
+            )
+        quantity = _require_int(payload["quantity"], "trade quantity", minimum=1)
+        for name in (
+            "source_schema_id",
+            "source_store_id",
+            "source_record_id",
+            "event_id",
+            "symbol",
+            "market",
+            "trading_day",
+            "source_time",
+            "received_at",
+            "durable_known_at",
+        ):
+            object.__setattr__(self, name, getattr(record, name))
+        object.__setattr__(self, "source_snapshot_id", self.selection.snapshot_id)
+        object.__setattr__(self, "source_audit_id", self.selection.snapshot_audit_id)
+        object.__setattr__(self, "selection_id", self.selection.selection_id)
+        object.__setattr__(
+            self, "selection_verification_id", self.verification.verification_id
+        )
+        object.__setattr__(self, "price", price)
+        object.__setattr__(self, "quantity", quantity)
+        object.__setattr__(
+            self,
+            "decoded_payload_sha256",
+            _hash_document(
+                {
+                    "schema": "stage4g1-decoded-trade-payload-v1",
+                    "price": format(price, "f"),
+                    "quantity": quantity,
+                }
+            ),
+        )
+        object.__setattr__(
+            self, "decoded_tick_id", _hash_document(self.as_dict(include_id=False))
+        )
+
+    def validate(self) -> None:
+        expected = type(self)(
+            self.record, self.selection, self.verification, self.decoder_policy_id
+        )
+        if self != expected:
+            raise MarketEventSourceContractError("decoded trade tick was mutated")
+
+    def as_dict(self, *, include_id: bool = True) -> dict[str, Any]:
+        record = self.record
+        document = {
+            "assurance": self.assurance.value,
+            "schema": "stage4g1-decoded-trade-tick-v1",
+            "decoder_policy_id": self.decoder_policy_id,
+            "source_schema_id": record.source_schema_id,
+            "source_store_id": record.source_store_id,
+            "source_snapshot_id": self.selection.snapshot_id,
+            "source_audit_id": self.selection.snapshot_audit_id,
+            "selection_id": self.selection.selection_id,
+            "selection_verification_id": self.verification.verification_id,
+            "source_record_id": record.source_record_id,
+            "event_id": record.event_id,
+            "source_record_content_hash": record.record_content_hash,
+            "symbol": record.symbol,
+            "market": record.market.value,
+            "trading_day": record.trading_day.isoformat(),
+            "append_order": record.append_order,
+            "source_time": _utc_text(record.source_time),
+            "received_at": _utc_text(record.received_at),
+            "durable_known_at": _utc_text(record.durable_known_at),
+            "price": format(self.price, "f"),
+            "quantity": self.quantity,
+            "decoded_payload_sha256": self.decoded_payload_sha256,
+        }
+        if include_id:
+            document["decoded_tick_id"] = self.decoded_tick_id
+        return document
+
+
 class MarketEventReadPort(Protocol):
     """Frozen read-side boundary for an audited append-only source store."""
 
@@ -2163,8 +2888,7 @@ class MarketEventReadPort(Protocol):
         self,
         *,
         high_water_append_order: int | None = None,
-    ) -> MarketEventStoreSnapshot:
-        ...
+    ) -> MarketEventStoreSnapshot: ...
 
     def select(
         self,
@@ -2177,24 +2901,29 @@ class MarketEventReadPort(Protocol):
         allowed_event_types: tuple[str, ...],
         interval_boundary_policy_id: str,
         record_limit: int,
-    ) -> MarketEventSelection:
-        ...
+    ) -> MarketEventSelection: ...
 
     def verify_selection(
         self,
         selection: MarketEventSelection,
-    ) -> MarketEventSelectionVerification:
-        ...
+    ) -> MarketEventSelectionVerification: ...
 
 
 __all__ = [
+    "FIXTURE_TRADE_DECODER_POLICY_V1",
+    "FIXTURE_TRADE_TICK_SCHEMA_V1",
     "MARKET_EVENT_INTERVAL_BOUNDARY_POLICY_V1",
     "MARKET_EVENT_READ_PORT_SCHEMA",
     "MARKET_EVENT_SELECTION_SCHEMA",
-    "MARKET_EVENT_SEQUENCE_POLICY_V1",
+    "MARKET_EVENT_SEQUENCE_POLICY_V2",
     "MARKET_EVENT_SOURCE_RECORD_SCHEMA",
     "MARKET_EVENT_STORE_AUDIT_SCHEMA",
     "MARKET_EVENT_STORE_SNAPSHOT_SCHEMA",
+    "CoverageOrigin",
+    "DecodedTradeTick",
+    "EvidenceAssurance",
+    "FindingImpactScope",
+    "FindingResolutionState",
     "MarketEventCallbackSequenceScope",
     "MarketEventInventoryVerification",
     "MarketEventPartitionHead",
@@ -2213,4 +2942,8 @@ __all__ = [
     "MarketEventStoreAudit",
     "MarketEventStoreAuditScope",
     "MarketEventStoreSnapshot",
+    "MarketEventSubscriptionManifest",
+    "SelectionCompleteness",
+    "StructuralFixture",
+    "validate_selection_verification",
 ]
