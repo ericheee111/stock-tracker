@@ -1870,6 +1870,7 @@ class MarketEventTransportKind(StrEnum):
 
 
 class TransportCoverageState(StrEnum):
+    INCOMPLETE_LIFECYCLE = "INCOMPLETE_LIFECYCLE"
     MIXED_COVERAGE_PROVEN = "MIXED_COVERAGE_PROVEN"
     INCOMPLETE_INTERVAL_GAP = "INCOMPLETE_INTERVAL_GAP"
     LIVE_COVERAGE_PROVEN = "LIVE_COVERAGE_PROVEN"
@@ -1887,7 +1888,7 @@ class TransportCoverageState(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class TransportLivenessPolicy(StructuralFixture):
-    liveness_policy_id: str = "stage4g1-fixture-transport-liveness-v1"
+    liveness_policy_id: str = "stage4g1-fixture-transport-liveness-v2"
     maximum_heartbeat_gap: timedelta = field(init=False, default=timedelta(minutes=5))
     maximum_watermark_gap: timedelta = field(init=False, default=timedelta(minutes=5))
     require_subscription_ack: bool = field(init=False, default=True)
@@ -1910,7 +1911,7 @@ class TransportLivenessPolicy(StructuralFixture):
     def __post_init__(self) -> None:
         if (
             type(self.liveness_policy_id) is not str
-            or self.liveness_policy_id != "stage4g1-fixture-transport-liveness-v1"
+            or self.liveness_policy_id != "stage4g1-fixture-transport-liveness-v2"
         ):
             raise MarketEventSourceContractError(
                 "unsupported transport liveness policy"
@@ -2866,7 +2867,7 @@ class TransportCoverageCertificate(StructuralFixture):
     start: datetime
     end: datetime
     event_types: tuple[str, ...]
-    liveness_policy_id: str = "stage4g1-fixture-transport-liveness-v1"
+    liveness_policy_id: str = "stage4g1-fixture-transport-liveness-v2"
     certificate_id: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -3018,6 +3019,46 @@ class TransportCoverageCertificate(StructuralFixture):
             return incomplete
         return TransportCoverageState(origin + "_COVERAGE_PROVEN")
 
+    @staticmethod
+    def _live_lifecycle_is_ordered(
+        rows: tuple[MarketEventTransportRecord, ...],
+        subscription_scope_id: str,
+    ) -> bool:
+        # The snapshot validates contiguous append order; never sort raw evidence
+        # by timestamp, since equal timestamps do not establish causal order.
+        connected = acknowledged = disconnected = closed = False
+        previous_order = 0
+        for row in rows:
+            if row.transport_append_order <= previous_order or closed:
+                return False
+            previous_order = row.transport_append_order
+            if disconnected and row.kind is not MarketEventTransportKind.SESSION_CLOSED:
+                return False
+            if row.kind is MarketEventTransportKind.CONNECTED:
+                if connected:
+                    return False
+                connected = True
+            elif not connected:
+                return False
+            elif row.kind is MarketEventTransportKind.SUBSCRIPTION_ACKNOWLEDGED:
+                if row.subscription_scope_id != subscription_scope_id:
+                    return False
+                acknowledged = True
+            elif row.kind in {
+                MarketEventTransportKind.HEARTBEAT,
+                MarketEventTransportKind.CALLBACK_WATERMARK,
+                MarketEventTransportKind.QUEUE_WATERMARK,
+            }:
+                if not acknowledged:
+                    return False
+            elif row.kind is MarketEventTransportKind.DISCONNECTED:
+                disconnected = True
+            elif row.kind is MarketEventTransportKind.SESSION_CLOSED:
+                closed = True
+            else:
+                return False
+        return True
+
     def _epoch_state(
         self, manifest: MarketEventSourceSessionManifest, start: datetime, end: datetime
     ) -> TransportCoverageState:
@@ -3025,12 +3066,21 @@ class TransportCoverageCertificate(StructuralFixture):
         rows = self._rows(manifest)
         if manifest.coverage_origin is not CoverageOrigin.LIVE:
             return self._replay_state(manifest, rows, start, end)
+        if not self._live_lifecycle_is_ordered(
+            rows, manifest.subscription.subscription_scope_id
+        ):
+            return TransportCoverageState.INCOMPLETE_LIFECYCLE
         connected = [r for r in rows if r.kind is MarketEventTransportKind.CONNECTED]
         if (
             len(connected) != 1
             or connected[0].observed_at > start
             or any(
-                r.kind is MarketEventTransportKind.DISCONNECTED and r.observed_at < end
+                r.kind
+                in {
+                    MarketEventTransportKind.DISCONNECTED,
+                    MarketEventTransportKind.SESSION_CLOSED,
+                }
+                and r.observed_at < end
                 for r in rows
             )
         ):
@@ -3253,7 +3303,7 @@ class TransportCoverageCertificate(StructuralFixture):
         audit = self.event_snapshot.audit
         transport = audit.transport_snapshot
         document = {
-            "schema": "stage4g1-transport-coverage-certificate-v1",
+            "schema": "stage4g1-transport-coverage-certificate-v2",
             "assurance": self.assurance.value,
             "source_store_id": audit.source_store_id,
             "market_event_snapshot_id": self.event_snapshot.snapshot_id,

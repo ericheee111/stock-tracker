@@ -1751,5 +1751,234 @@ class TestR4TransportClosure(MarketEventSourceSnapshotTestCase):
         )
 
 
+class TestR41TransportLifecycle(MarketEventSourceSnapshotTestCase):
+    def rechain(self, transport, rows):
+        # Build an authoritative test stream in exactly the supplied order.
+        result = []
+        for row in rows:
+            result.append(
+                replace(
+                    row,
+                    transport_append_order=len(result) + 1,
+                    previous_transport_record_hash=result[-1].record_hash
+                    if result
+                    else "0" * 64,
+                )
+            )
+        return replace(transport, records=tuple(result))
+
+    def selection(self, transport, manifests=None):
+        return MarketEventStoreSnapshot.from_audit(
+            self.audit((), transport_snapshot=transport, manifests=manifests)
+        ).select_from_prefix(
+            records=(),
+            partition_heads=(),
+            findings=(),
+            source_session_manifests=(self.default_manifest,)
+            if manifests is None
+            else manifests,
+            symbol="600519.SH",
+            market=Market.A,
+            start_source_time=self.default_manifest.coverage_start,
+            end_source_time=self.default_manifest.coverage_through,
+            allowed_event_types=("TRADE_TICK",),
+            interval_boundary_policy_id=MARKET_EVENT_INTERVAL_BOUNDARY_POLICY_V1,
+            record_limit=100,
+        )
+
+    def assert_incomplete_lifecycle(self, transport):
+        original = transport.records
+        selection = self.selection(transport)
+        self.assertEqual(selection.completeness.value, "EMPTY_NOT_PROVEN")
+        certificate = selection.transport_certificate
+        self.assertEqual(certificate.coverage_state.value, "INCOMPLETE_LIFECYCLE")
+        self.assertFalse(
+            certificate.proves_interval(
+                selection.start_source_time, selection.end_source_time
+            )
+        )
+        self.assertFalse(certificate.proves_session_close(selection.end_source_time))
+        self.assertEqual(transport.records, original)
+        self.assertEqual(certificate.event_snapshot.audit.transport_snapshot, transport)
+
+    def test_r41_correct_equal_timestamp_order_proves_zero(self):
+        transport = transport_fixture((self.default_manifest,))
+        self.assertEqual(len({r.observed_at for r in transport.records[:5]}), 1)
+        self.assertEqual(
+            [r.kind.value for r in transport.records[:5]],
+            [
+                "CONNECTED",
+                "SUBSCRIPTION_ACKNOWLEDGED",
+                "HEARTBEAT",
+                "CALLBACK_WATERMARK",
+                "QUEUE_WATERMARK",
+            ],
+        )
+        selection = self.selection(transport)
+        self.assertEqual(selection.completeness.value, "ZERO_EVENT_PROVEN")
+        self.assertEqual(
+            selection.transport_certificate.coverage_state.value, "LIVE_COVERAGE_PROVEN"
+        )
+        self.assertTrue(
+            selection.transport_certificate.proves_session_close(
+                self.default_manifest.coverage_through
+            )
+        )
+
+    def test_r41_equal_timestamp_ack_before_connect_is_incomplete(self):
+        transport = transport_fixture((self.default_manifest,))
+        rows = list(transport.records)
+        rows[0], rows[1] = rows[1], rows[0]
+        self.assert_incomplete_lifecycle(self.rechain(transport, rows))
+
+    def test_r41_equal_timestamp_activity_before_connect_or_ack_is_incomplete(self):
+        transport = transport_fixture((self.default_manifest,))
+        for index in (2, 3, 4):
+            for position in (0, 1):
+                with self.subTest(
+                    kind=transport.records[index].kind, position=position
+                ):
+                    rows = list(transport.records)
+                    rows.insert(position, rows.pop(index))
+                    self.assert_incomplete_lifecycle(self.rechain(transport, rows))
+
+    def test_r41_same_epoch_activity_after_disconnect_is_incomplete(self):
+        from stock_tracker.runtime_evidence.source_snapshot_contracts import (
+            MarketEventTransportKind,
+        )
+
+        transport = transport_fixture((self.default_manifest,))
+        for kind in (
+            "SUBSCRIPTION_ACKNOWLEDGED",
+            "HEARTBEAT",
+            "CALLBACK_WATERMARK",
+            "QUEUE_WATERMARK",
+        ):
+            with self.subTest(kind=kind):
+                rows = list(transport.records)
+                terminal = replace(rows[-1], kind=MarketEventTransportKind.DISCONNECTED)
+                activity = replace(rows[-1], kind=MarketEventTransportKind(kind))
+                rows[-1:] = [terminal, activity, rows[-1]]
+                self.assert_incomplete_lifecycle(self.rechain(transport, rows))
+
+    def test_r41_same_epoch_restart_after_disconnect_is_rejected(self):
+        from stock_tracker.runtime_evidence.source_snapshot_contracts import (
+            MarketEventTransportKind,
+        )
+
+        transport = transport_fixture((self.default_manifest,))
+        rows = list(transport.records)
+        rows[-1:] = [
+            replace(rows[-1], kind=MarketEventTransportKind.DISCONNECTED),
+            replace(rows[-1], kind=MarketEventTransportKind.CONNECTED),
+        ]
+        with self.assertRaisesRegex(MarketEventSourceContractError, "lifecycle"):
+            self.rechain(transport, rows)
+
+    def test_r41_terminal_before_connection_cannot_prove_coverage(self):
+        from stock_tracker.runtime_evidence.source_snapshot_contracts import (
+            MarketEventTransportKind,
+        )
+
+        transport = transport_fixture((self.default_manifest,))
+        terminal = replace(
+            transport.records[0], kind=MarketEventTransportKind.DISCONNECTED
+        )
+        self.assert_incomplete_lifecycle(
+            self.rechain(transport, (terminal, *transport.records))
+        )
+        with self.assertRaisesRegex(MarketEventSourceContractError, "lifecycle"):
+            self.rechain(
+                transport,
+                (
+                    replace(terminal, kind=MarketEventTransportKind.SESSION_CLOSED),
+                    *transport.records,
+                ),
+            )
+
+    def test_r41_activity_after_closed_is_rejected(self):
+        from stock_tracker.runtime_evidence.source_snapshot_contracts import (
+            MarketEventTransportKind,
+        )
+
+        transport = transport_fixture((self.default_manifest,))
+        for kind in (
+            "CONNECTED",
+            "SUBSCRIPTION_ACKNOWLEDGED",
+            "HEARTBEAT",
+            "CALLBACK_WATERMARK",
+            "QUEUE_WATERMARK",
+            "DISCONNECTED",
+        ):
+            with self.subTest(kind=kind):
+                activity = replace(
+                    transport.records[-1], kind=MarketEventTransportKind(kind)
+                )
+                with self.assertRaisesRegex(
+                    MarketEventSourceContractError, "lifecycle"
+                ):
+                    self.rechain(transport, (*transport.records, activity))
+
+    def test_r41_ordered_disconnect_then_close_at_end_is_valid(self):
+        from stock_tracker.runtime_evidence.source_snapshot_contracts import (
+            MarketEventTransportKind,
+        )
+
+        transport = transport_fixture((self.default_manifest,))
+        rows = list(transport.records)
+        rows.insert(-1, replace(rows[-1], kind=MarketEventTransportKind.DISCONNECTED))
+        self.assertEqual(
+            self.selection(self.rechain(transport, rows)).completeness.value,
+            "ZERO_EVENT_PROVEN",
+        )
+
+    def test_r41_new_epoch_must_establish_own_connection_and_ack(self):
+        first = replace(self.default_manifest, coverage_through=self.base_time)
+        second = replace(
+            self.manifest(connection_epoch=2, reconnect_epoch=1),
+            coverage_start=self.base_time,
+            subscription_activated_at=self.base_time,
+        )
+        transport = transport_fixture((first, second))
+        self.assertEqual(
+            self.selection(transport, (first, second)).completeness.value,
+            "ZERO_EVENT_PROVEN",
+        )
+        rows = list(transport.records)
+        indices = [i for i, r in enumerate(rows) if r.connection_epoch == 2][:2]
+        rows[indices[0]], rows[indices[1]] = rows[indices[1]], rows[indices[0]]
+        selection = self.selection(self.rechain(transport, rows), (first, second))
+        self.assertEqual(selection.completeness.value, "EMPTY_NOT_PROVEN")
+        self.assertEqual(
+            selection.transport_certificate.coverage_state.value, "INCOMPLETE_LIFECYCLE"
+        )
+
+    def test_r41_ack_scope_cannot_be_repaired_by_later_correct_ack(self):
+        transport = transport_fixture((self.default_manifest,))
+        for scope in (None, _hash("other-subscription")):
+            with self.subTest(scope=scope):
+                rows = list(transport.records)
+                rows[1] = replace(rows[1], subscription_scope_id=scope)
+                rows.insert(5, transport.records[1])
+                self.assert_incomplete_lifecycle(self.rechain(transport, rows))
+
+    def test_r41_lifecycle_semantics_have_new_certificate_and_policy_identity(self):
+        from stock_tracker.runtime_evidence.source_snapshot_contracts import (
+            TransportLivenessPolicy,
+        )
+
+        transport = transport_fixture((self.default_manifest,))
+        certificate = self.selection(transport).transport_certificate
+        self.assertEqual(
+            certificate.as_dict()["schema"],
+            "stage4g1-transport-coverage-certificate-v2",
+        )
+        self.assertEqual(
+            certificate.liveness_policy_id, "stage4g1-fixture-transport-liveness-v2"
+        )
+        with self.assertRaisesRegex(MarketEventSourceContractError, "policy"):
+            TransportLivenessPolicy("stage4g1-fixture-transport-liveness-v1")
+
+
 if __name__ == "__main__":
     unittest.main()
