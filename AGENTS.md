@@ -1,5 +1,10 @@
 # AGENTS.md
 
+> **当前执行切片（2026-09-11）：** P1–P3 手工持仓计划已实现为待独立审查候选：用途分层/核心保留量、人工库存与币种现金、T条件预演与预留/取消/对账、双主线首页及相对持有情景测算。使用独立显式初始化的计划库，不修改生产Portfolio、不生成券商订单或真实绩效。具体边界见 `docs/MULTIHORIZON-P1-P3-IMPLEMENTATION.md` 和 `docs/MULTIHORIZON-MANUAL-PLANNING-RUNBOOK.md`；测试与发布身份以 `docs/MULTIHORIZON-P1-P3-VALIDATION.md` 为准。旧文档中的“仅设计/未实现”保留其当时历史范围；多周期策略、真实fill/部分成交、B1d/B2/B3仍未完成。
+
+> **用户画像约束（2026-09-11 已确认）：** 几周到几个月波段为主，期间做 T，兼有部分长持和短线；持仓管理与新机会发现并重，紧急风险置顶不等于弱化机会入口。`docs/PRODUCT-TRADING-PROFILE-20260911.md` 记录本次画像与设计。不得再沿用“A股主周期1—20日”或重新要求用户二选一；T 层不能改写父计划、虚增可卖数量、绕过证券交易制度或启用下单。具体资金比例/参数未确认不得代设，现有安全与证据门禁不变。
+
+
 > **2026-09-11 continuation boundary:** B1a–B1c physical storage kernel is implemented in `runtime_evidence/physical_store.py`; it exposes `PHYSICAL_BYTES_ONLY`, not semantic Market Event v4 completion or Coverage/Admission. Next work is B1d typed ReadPort, explicit legacy tooling and capacity validation; do not replace existing ingestion automatically. See `docs/STAGE4G1-B1-PHYSICAL-STORAGE-IMPLEMENTATION-PLAN.md`. ChatGPT executes/reviews directly by default; local agents are bounded fallbacks, not mandatory parallel sessions. All financial/data/safety rules below remain in force.
 
 

@@ -35,6 +35,7 @@ from ..core.security import (
 from ..storage.db import close_all
 from . import handlers as H
 from . import monitor_handlers as MH
+from . import planning_handlers as PH
 from .audit import (
     AuditWriteError,
     RemoteAuditLogger,
@@ -81,6 +82,7 @@ _PRIVATE_API_PREFIXES = (
     "/api/portfolio/positions/",
     "/api/signal/",
     "/api/monitor/",
+    "/api/planning/",
 )
 _MAX_JSON_BODY_BYTES = 64 * 1024
 _MAX_OVERSIZE_DRAIN_BYTES = 1024 * 1024
@@ -721,6 +723,10 @@ class APIHandler(BaseHTTPRequestHandler):
             self._handle_sse(ctx)
             return
 
+        if path == "/api/planning/book":
+            self._call_json(PH.get_book, ctx)
+            return
+
         if path == "/api/portfolio":
             self._call_json(H.get_portfolio, ctx)
             return
@@ -776,6 +782,19 @@ class APIHandler(BaseHTTPRequestHandler):
         if not self._require_private_api(path):
             return
         if not self._begin_remote_write(path):
+            return
+        planning_routes = {
+            "/api/planning/commands": PH.post_command,
+            "/api/planning/preview": PH.post_preview,
+            "/api/planning/attribution": PH.post_attribution,
+        }
+        if path in planning_routes:
+            payload = self._read_strict_json()
+            if payload is not None:
+                self._call_json(planning_routes[path], ctx, payload)
+            return
+        if path.startswith("/api/planning/"):
+            self._send_json({"error": {"code": "NOT_FOUND", "message": "unknown planning endpoint"}}, status=404)
             return
         if path == "/api/monitor/rules":
             payload = self._read_strict_json()

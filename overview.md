@@ -1,5 +1,9 @@
 # Stock Tracker v1.1 项目概览
 
+> **当前执行切片（2026-09-11）：** P1–P3 手工持仓计划已实现为待独立审查候选：用途分层/核心保留量、人工库存与币种现金、T条件预演与预留/取消/对账、双主线首页及相对持有情景测算。使用独立显式初始化的计划库，不修改生产Portfolio、不生成券商订单或真实绩效。具体边界见 `docs/MULTIHORIZON-P1-P3-IMPLEMENTATION.md` 和 `docs/MULTIHORIZON-MANUAL-PLANNING-RUNBOOK.md`；测试与发布身份以 `docs/MULTIHORIZON-P1-P3-VALIDATION.md` 为准。旧文档中的“仅设计/未实现”保留其当时历史范围；多周期策略、真实fill/部分成交、B1d/B2/B3仍未完成。
+
+> **当前产品画像（2026-09-11 已确认）：** 几周到几个月波段主线＋做 T 辅助＋部分长持/短线；持仓管理与发现新机会并重。见 `docs/PRODUCT-TRADING-PROFILE-20260911.md` 和 `docs/PROJECT-REASSESSMENT-20260911.md`。新仓位分层、T 库存约束与双主线 UI 目前仅为需求/设计，未宣称新运行功能或真实效果已验收。
+
 > **2026-09-11：** B1a–B1c 物理证据内核已实现：独立新目录、严格字节编码、持久化意图、不可覆盖发布、崩溃恢复及有界物理分页。它没有替代现有 Stage 3F，也没有接通自动 Outcome。下一步为 B1d typed ReadPort/legacy/容量验证。设计与证据见 `docs/STAGE4G1-B1-PHYSICAL-STORAGE-IMPLEMENTATION-PLAN.md`、`docs/STAGE4G1-B1-PHYSICAL-STORAGE-REVIEW.md`。当前仍不自动交易，不声称真实战绩。
 
 

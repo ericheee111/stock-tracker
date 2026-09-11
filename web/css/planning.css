@@ -1,0 +1,40 @@
+/* Scoped manual planning UI and dual-primary Today lanes. */
+.tb-dual-jumps { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:16px 0; }
+.tb-dual-jumps a { display:flex; flex-direction:column; gap:6px; padding:14px 16px; color:var(--text-1); background:var(--card-bg,rgba(125,140,165,.09)); border:1px solid var(--border,rgba(125,140,165,.25)); border-radius:14px; text-decoration:none; }
+.tb-dual-jumps span { color:var(--text-2); font-size:13px; }
+.tb-dual-lanes { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; align-items:start; }
+.tb-dual-lanes > section { min-width:0; scroll-margin-top:180px; }
+.tb-dual-lanes .tb-section-label { margin-top:10px; }
+.tb-dual-lanes .tb-core-head { flex-wrap:wrap; }
+.planning-panel { margin:16px 0; padding:16px; background:var(--card-bg,rgba(125,140,165,.08)); border:1px solid var(--border,rgba(125,140,165,.25)); border-radius:16px; }
+.planning-panel > summary { cursor:pointer; font-size:16px; font-weight:650; padding:4px; min-height:32px; }
+#planningWorkspace { margin-top:14px; line-height:1.55; overflow-wrap:anywhere; }
+#planningWorkspace * { box-sizing:border-box; }
+#planningWorkspace .mp-top { display:flex; justify-content:space-between; flex-wrap:wrap; align-items:center; gap:12px; }
+#planningWorkspace h2 { font-size:21px; margin:0; }
+#planningWorkspace h3 { font-size:17px; margin:0 0 10px; }
+#planningWorkspace p { margin:8px 0; }
+#planningWorkspace .mp-note { color:var(--text-2); font-size:13px; }
+#planningWorkspace .mp-block, #planningWorkspace .mp-position, #planningWorkspace .mp-plan, #planningWorkspace .mp-result, #planningWorkspace .mp-disabled { padding:16px; border:1px solid var(--border,rgba(125,140,165,.25)); border-radius:12px; margin:14px 0; min-width:0; }
+#planningWorkspace .mp-positions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+#planningWorkspace .mp-position { margin:0; }
+#planningWorkspace summary { cursor:pointer; padding:12px 0; font-weight:600; min-height:44px; }
+#planningWorkspace .mp-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:12px 0; }
+#planningWorkspace .mp-field { display:flex; flex-direction:column; gap:6px; min-width:0; color:var(--text-2); font-size:13px; }
+#planningWorkspace input:not([type=checkbox]), #planningWorkspace select { width:100%; min-width:0; padding:10px; min-height:42px; background:var(--bg-2,var(--bg,#101722)); color:var(--text-1); border:1px solid var(--border,rgba(125,140,165,.4)); border-radius:8px; font-size:16px; }
+#planningWorkspace fieldset { min-width:0; border:1px solid var(--border,rgba(125,140,165,.25)); border-radius:10px; margin:12px 0; padding:12px; }
+#planningWorkspace legend { font-size:14px; padding:0 6px; }
+#planningWorkspace button { min-height:42px; padding:9px 14px; margin:6px 3px 6px 0; border:1px solid var(--border,rgba(125,140,165,.4)); border-radius:9px; background:var(--bg-2,rgba(125,140,165,.12)); color:var(--text-1); cursor:pointer; white-space:normal; max-width:100%; font:inherit; }
+#planningWorkspace button:disabled { opacity:.45; cursor:not-allowed; }
+#planningWorkspace .mp-primary { border-color:var(--accent,#77a7ff); }
+#planningWorkspace .mp-ack { display:flex; align-items:flex-start; gap:8px; font-size:13px; margin:12px 0; }
+#planningWorkspace .mp-ack input { flex:0 0 auto; margin-top:4px; }
+#planningWorkspace .mp-message { min-height:24px; margin:10px 0; }
+#planningWorkspace .mp-error { color:var(--warning,#eaa348); font-weight:600; }
+#planningWorkspace .mp-purpose-tags { display:flex; flex-wrap:wrap; gap:8px; font-size:13px; }
+#planningWorkspace .mp-purpose-tags span { padding:5px 9px; background:rgba(119,167,255,.12); border-radius:7px; }
+#planningWorkspace hr { border:0; border-top:1px solid var(--border,rgba(125,140,165,.25)); margin:18px 0; }
+#planningWorkspace code { white-space:normal; word-break:break-word; }
+#planningWorkspace :focus-visible, .tb-dual-jumps a:focus-visible, .planning-panel > summary:focus-visible { outline:2px solid var(--accent,#77a7ff); outline-offset:3px; }
+@media(max-width:900px) { .tb-dual-lanes, #planningWorkspace .mp-positions { grid-template-columns:1fr; } }
+@media(max-width:540px) { .planning-panel { padding:12px; } #planningWorkspace .mp-fields { grid-template-columns:1fr; } #planningWorkspace .mp-block, #planningWorkspace .mp-position { padding:12px; } .tb-dual-jumps { gap:8px; } .tb-dual-jumps a { padding:12px; } }

@@ -1,5 +1,9 @@
 # stock-tracker 交接文档（HANDOFF）
 
+> **当前执行切片（2026-09-11）：** P1–P3 手工持仓计划已实现为待独立审查候选：用途分层/核心保留量、人工库存与币种现金、T条件预演与预留/取消/对账、双主线首页及相对持有情景测算。使用独立显式初始化的计划库，不修改生产Portfolio、不生成券商订单或真实绩效。具体边界见 `MULTIHORIZON-P1-P3-IMPLEMENTATION.md` 和 `MULTIHORIZON-MANUAL-PLANNING-RUNBOOK.md`；测试与发布身份以 `MULTIHORIZON-P1-P3-VALIDATION.md` 为准。旧文档中的“仅设计/未实现”保留其当时历史范围；多周期策略、真实fill/部分成交、B1d/B2/B3仍未完成。
+
+> **画像已确认，设计更新（2026-09-11）：** 用户主做几周到几个月波段，期间做 T，兼有长持/短线；持仓与发现机会并重。见 `PRODUCT-TRADING-PROFILE-20260911.md`。产品侧下一步是兼容旧持仓的目的/计划/可卖库存模型与双主线 UI，再验证多周期和 T；证据侧 B1d → B2 → B3 的门禁不变。本轮只更新文档，不改算法、生产Store或UI。不要重复询问已回答的画像；不能从静态盘点推断完整 Review 通过。
+
 > **当前续接点（2026-09-11）：** W5 已交付；ChatGPT 直接完成 B1a–B1c 物理证据内核、CLI 与真实进程中断恢复测试，范围为 `PHYSICAL_BYTES_ONLY`。下一任务是 B1d typed Event/Transport ReadPort、legacy 工具及容量验证；B2 Path Worker、B3 Collection、执行证据与真实 Shadow 仍未完成。详见 `STAGE4G1-B1-PHYSICAL-STORAGE-IMPLEMENTATION-PLAN.md` / `STAGE4G1-B1-PHYSICAL-STORAGE-REVIEW.md`。旧 main 工作区继续保持原 UI/截图改动，不得 reset/clean 来强行同步。
 
 

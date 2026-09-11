@@ -198,6 +198,18 @@
         decision: true
       }).then(function (payload) { return unwrap(payload, 'brief') || payload; });
     },
+    getPlanningBook: function () {
+      return fetchJSON('/api/planning/book', { private: true });
+    },
+    planningCommand: function (payload) {
+      return requestJSON('/api/planning/commands', { method: 'POST', private: true, body: payload });
+    },
+    planningPreview: function (payload) {
+      return requestJSON('/api/planning/preview', { method: 'POST', private: true, body: payload });
+    },
+    planningAttribution: function (payload) {
+      return requestJSON('/api/planning/attribution', { method: 'POST', private: true, body: payload });
+    },
     getPortfolio: function () {
       return fetchJSON('/api/portfolio', { private: true });
     },

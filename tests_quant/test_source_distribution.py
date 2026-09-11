@@ -22,6 +22,20 @@ class TestSourceDistribution(unittest.TestCase):
             self.skipTest("source-distribution check requires a Git checkout")
 
         critical = (
+            "stock_tracker/portfolio_planning/__init__.py",
+            "stock_tracker/portfolio_planning/__main__.py",
+            "stock_tracker/portfolio_planning/domain.py",
+            "stock_tracker/portfolio_planning/store.py",
+            "stock_tracker/api/planning_handlers.py",
+            "tests/test_portfolio_planning.py",
+            "tests/test_planning_api.py",
+            "scripts/run_planning_integration.py",
+            "web/js/planning.js",
+            "web/css/planning.css",
+            "qa/ui/planning_qa.cjs",
+            "docs/MULTIHORIZON-P1-P3-IMPLEMENTATION.md",
+            "docs/MULTIHORIZON-MANUAL-PLANNING-RUNBOOK.md",
+            "docs/PRODUCT-TRADING-PROFILE-20260911.md",
             ".gitattributes",
             "docs/STAGE4G1-CHECKPOINT-A-IMPLEMENTATION.md",
             "docs/STAGE4G1-CHECKPOINT-B0-EVIDENCE-VOCABULARY-AND-PATH-CONTRACT.md",

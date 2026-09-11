@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="css/terminal.css?v=20260910w5" />
   <link rel="stylesheet" href="css/runtime.css?v=20260910w5" />
   <link rel="stylesheet" href="css/monitor.css?v=20260910w5" />
+  <link rel="stylesheet" href="css/planning.css?v=20260911mh1" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2377a7ff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 18V7M9 18V11M14 18V5M19 18V9M3 20h18M5 9l4 2 5-5 5 3'/%3E%3C/svg%3E" />
 </head>
 <body>
@@ -54,6 +55,10 @@
         <div class="page-heading-tags" aria-hidden="true"><span>动作优先</span><span>风险先行</span><span>证据约束</span></div>
       </div>
       <div id="portfolioPanel"></div>
+      <details id="planningPanel" class="planning-panel">
+        <summary>持仓分层与做 T 计划 · 手工管理，不自动交易</summary>
+        <div id="planningWorkspace"><p>展开后读取本地人工计划；不调用行情源。</p></div>
+      </details>
       <div id="todayBrief"></div>
     </section>
 
@@ -154,11 +159,12 @@
   <script src="runtime-config.js?v=20260910w5"></script>
   <script src="js/runtime.js?v=20260910w5"></script>
   <script src="js/format.js?v=20260910w5"></script>
-  <script src="js/api.js?v=20260910w5"></script>
+  <script src="js/api.js?v=20260911mh1"></script>
   <script src="js/sse.js?v=20260910w5"></script>
   <script src="js/components.js?v=20260910w5"></script>
   <script src="js/portfolio.js?v=20260910w5"></script>
-  <script src="js/today.js?v=20260910w5"></script>
+  <script src="js/today.js?v=20260911mh1"></script>
+  <script src="js/planning.js?v=20260911mh1"></script>
   <script src="js/monitor.js?v=20260910w5"></script>
   <script src="js/app.js?v=20260910w5"></script>
 </body>

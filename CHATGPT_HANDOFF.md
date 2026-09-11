@@ -1,5 +1,16 @@
 # ChatGPT Handoff
 
+> **当前执行切片（2026-09-11）：** P1–P3 手工持仓计划已实现为待独立审查候选：用途分层/核心保留量、人工库存与币种现金、T条件预演与预留/取消/对账、双主线首页及相对持有情景测算。使用独立显式初始化的计划库，不修改生产Portfolio、不生成券商订单或真实绩效。具体边界见 `docs/MULTIHORIZON-P1-P3-IMPLEMENTATION.md` 和 `docs/MULTIHORIZON-MANUAL-PLANNING-RUNBOOK.md`；测试与发布身份以 `docs/MULTIHORIZON-P1-P3-VALIDATION.md` 为准。旧文档中的“仅设计/未实现”保留其当时历史范围；多周期策略、真实fill/部分成交、B1d/B2/B3仍未完成。
+
+## User profile confirmed — 2026-09-11
+
+The user primarily swing-trades over weeks to months, performs tactical intraday T operations during those holdings, and also keeps some long-term and short-term positions. Holdings management and new-opportunity discovery are equally important. Do not ask these questions again. See `docs/PRODUCT-TRADING-PROFILE-20260911.md`. Three holding purposes share one account inventory; a T overlay references a parent plan and cannot create extra sellable stock or rewrite that plan. Position allocation, numerical horizons and model parameters are NOT user-confirmed. This is documentation/design only; the runtime, database and trading capabilities are unchanged.
+
+## Current reassessment — 2026-09-11
+
+A new isolated documentation worktree contains `docs/PROJECT-REASSESSMENT-20260911.md` and `docs/METRIC-AND-ALGORITHM-GOVERNANCE.md`. Static source/AST/document inventory was generated against exact Git base `c0c39977f4460cc9102fb3731b35cbf88786fc1d`. This is a product/architecture/algorithm governance proposal, not a new full semantic-code or visual-UI review pass. No production algorithm, thresholds, provider, database, old workspace or release ref is changed. Follow the evidence identity and preserve all historical task records below.
+
+
 ## Current continuation — 2026-09-11 B1 physical kernel
 
 W5 GitHub baseline verified at `cf743a73c6fa4cb860bb1191183e5e358b7218f6`. ChatGPT directly implemented B1a–B1c physical byte storage in the isolated `chatgpt/b1-storage` worktree. Explicit init, durable append intent, no-overwrite file publication, append-only publication receipts, seven real process-crash recovery windows, exact schema/inventory audit and bounded physical pages are implemented. New physical/CLI tests: 45 passed; full Runtime: 785 run / 784 passed / 1 expected skip; full Quant: 724 passed. See `docs/STAGE4G1-B1-PHYSICAL-STORAGE-REVIEW.md` for exact verification and limits.

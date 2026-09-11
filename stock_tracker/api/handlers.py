@@ -57,6 +57,8 @@ class AppContext:
     monitor_service: Any = None
     monitor_subscription: Any = None
     runtime_artifact_service: Any = None
+    planning_store: Any = None
+    planning_status: str = "NOT_CONFIGURED"
 
 
 class APIError(ValueError):

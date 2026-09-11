@@ -1,5 +1,21 @@
 # Stock Tracker v1.1 产品 Gap Matrix 与 Stage 1/1.5 实施入口
 
+> **当前执行切片（2026-09-11）：** P1–P3 手工持仓计划已实现为待独立审查候选：用途分层/核心保留量、人工库存与币种现金、T条件预演与预留/取消/对账、双主线首页及相对持有情景测算。使用独立显式初始化的计划库，不修改生产Portfolio、不生成券商订单或真实绩效。具体边界见 `MULTIHORIZON-P1-P3-IMPLEMENTATION.md` 和 `MULTIHORIZON-MANUAL-PLANNING-RUNBOOK.md`；测试与发布身份以 `MULTIHORIZON-P1-P3-VALIDATION.md` 为准。旧文档中的“仅设计/未实现”保留其当时历史范围；多周期策略、真实fill/部分成交、B1d/B2/B3仍未完成。
+
+> **用户画像已确认（2026-09-11）：** 几周到几个月波段、期间做 T、兼有长持/短线；持仓与新机会双主线。规格见 `PRODUCT-TRADING-PROFILE-20260911.md`，不是已实现声明。
+
+## 多周期需求差距（本次更新）
+
+| 能力 | 本次状态 | 下一验收 |
+|---|---|---|
+| 波段主线与持仓/机会并重 | USER_PROFILE_CONFIRMED | 主文档不再使用旧画像 |
+| 同股多目的计划、共享真实库存 | MANUAL_IMPLEMENTATION_REVIEW_PENDING | 真实持仓只读锚定；人工库存，非Broker验证 |
+| T 附加计划、成本、未完成腿 | MANUAL_PLAN_AND_SCENARIO_ONLY | 预留/取消/对账已实现；真实fill和部分成交待后续 |
+| 双主线桌面/移动首页 | IMPLEMENTED_CANDIDATE | 持仓与机会同时可达；人工计划面板可折叠 |
+| 多周期策略与校准 | REASSESSMENT_PENDING | 不把短周期实验替换标签后冒充波段验证 |
+
+既有阶段证据继续保留原验收范围。
+
 ## 当前增量 — 2026-09-11 B1 物理基础
 
 | 能力 | 本次状态 | 剩余边界 |

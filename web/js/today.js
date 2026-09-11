@@ -378,22 +378,23 @@
         }).join('') + '</div>'
       : '';
 
-    let html = '';
+    let html = '<nav class="tb-dual-jumps" aria-label="今日双主线">' +
+      '<a href="#todayHoldings"><strong>持仓管理</strong><span>' + holdings.length + ' 个持仓动作 · 原计划与风险</span></a>' +
+      '<a href="#todayOpportunities"><strong>发现新机会</strong><span>' + core.length + ' 个重点候选 · 不足不凑数</span></a></nav>';
     html += summaryBlock(brief.summary);
     html += postureBlock(brief.market_posture);
     if (summaryHtml) html += '<div class="tb-card tb-dosuggest"><div class="tb-card-title">今天建议你做</div>' + summaryHtml + '</div>';
 
-    // Core Opportunities（3—5）
+    // Equal-priority lanes; an empty holding list does not hide its entry point.
+    html += '<div class="tb-dual-lanes"><section id="todayHoldings" aria-label="持仓管理">';
+    html += '<div class="tb-section-label">持仓需要处理</div>';
+    html += holdings.length ? holdings.map(holdingCard).join('')
+      : '<div class="card-empty">暂无持仓动作；可在持仓管理录入和核对原计划。</div>';
+    html += '</section><section id="todayOpportunities" aria-label="发现新机会">';
     html += '<div class="tb-section-label">Core Opportunities（' + core.length + '）</div>';
-    html += core.length
-      ? core.map(coreOpportunityCard).join('')
+    html += core.length ? core.map(coreOpportunityCard).join('')
       : '<div class="card-empty">当前没有达到可执行/观察条件的 Core Opportunity。</div>';
-
-    // 持仓需要处理（与机会分开）
-    if (holdings.length) {
-      html += '<div class="tb-section-label">持仓需要处理</div>';
-      html += holdings.map(holdingCard).join('');
-    }
+    html += '</section></div>';
 
     // 今日不要做
     if (avoids.length) {

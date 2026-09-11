@@ -235,6 +235,8 @@ def build_context(args) -> tuple:
         runtime_artifact_service=runtime_artifact_service,
     )
     ctx.audit_logger = audit_logger
+    from .api.planning_handlers import configure as configure_planning
+    configure_planning(ctx, str(db_path), logger)
 
     scheduler = Scheduler(
         bundle,
