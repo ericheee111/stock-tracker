@@ -1,6 +1,8 @@
 # W5 有限修正集成交接
 
-状态：LOCAL_CANDIDATE / INDEPENDENT_REVIEW_PENDING。来源基线为
+状态：INDEPENDENT_REVIEW_PASSED / RELEASE_AUTHORIZED（2026-09-11）。
+精确审查候选为 `139ce41baea404c9dd54798562e5f3ad85ee73f8`；
+后续交接/发布记录见 [W5-GITHUB-DELIVERY.md](W5-GITHUB-DELIVERY.md)。下文保留原集成交付边界。来源基线为
 `788ffdb1cc3e770f99d63bdd10d923f46d9b1ddd`，tree
 `18a5b27bf2219bd5536f76736099da9ad5dac262`。本文仅记录 W5 的测试工具、UI
 与专项文档集成，不替代 PRD、AGENTS、总 Handoff 或历史阶段验证报告。
@@ -116,5 +118,5 @@ Git commit，不能依赖未跟踪文件；源码树冻结散列将测试绑定�
 B1 物理 Store，未使用真实市场数据。synthetic/临时 API 工程通过不代表真实 Coverage、
 Shadow Acceptance、Trusted Admission 或投资表现。自动交易仍关闭。
 
-候选需独立审查；WorkBuddy 后续只在精确候选独立 checkout 复跑。当前授权仅本地
-scoped commits，不 merge/push；输出候选与验证包后停止。
+候选已通过独立审查。用户随后授权受控 merge/push，发布在独立工作区执行；
+原 main/UI 不动，WorkBuddy 后续复跑仍须绑定精确 commit。暂不开始 B1。

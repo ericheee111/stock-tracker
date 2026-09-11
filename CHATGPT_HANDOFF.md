@@ -454,3 +454,14 @@ Status: `COMPLETED`
 - The implementation commit contains exactly 14 Stage 4G-R0 files: core Outcome/Collection code, focused tests, R0/design/review documents and required AGENTS/PRD/Gap Matrix/Overview/Handoff synchronization.
 - Concurrent `web/**`, `qa/**`, tracked screenshot deletions, responsive screenshots, UI reports, runtime databases, caches and temporary files were neither staged nor reset.
 - This handoff-only delivery record is pushed together with the implementation commit; final local `HEAD`, local `origin/main` and GitHub `refs/heads/main` equality is verified after push and reported to the user.
+
+
+## 34. W5 — reviewed integration and controlled GitHub delivery
+
+Status: `INDEPENDENT_REVIEW_PASSED / USER_AUTHORIZED_RELEASE`
+
+- ChatGPT independently passed candidate `139ce41baea404c9dd54798562e5f3ad85ee73f8`, tree `e1bfc6b2465e0e2b48ba1a1d67b087f071a7ecf6`, on 2026-09-11. T1/T2/U1/U2/U3 are CLOSED; scope is W5, not a new certification of all historical financial capabilities.
+- The reviewed candidate includes Stage 4G.1 prerequisite commits after remote main `082a6dac310388ec10c8a432427a40e275bcd7ae`. Runtime Artifact/Outbox Worker is implemented and conditionally wired; Market Path/B2 physical worker and automatic Outcome Collection remain pending.
+- User authorized protected integration and push. Release uses a separate `codex/w5-release` worktree and ordinary fast-forward push to GitHub main; the dirty local main branch and its UI/screenshots remain unchanged. Local main may intentionally lag origin/main after delivery.
+- Exact release identities, current gates and remote confirmation are recorded in `docs/W5-GITHUB-DELIVERY.md` and the external release command ledger. Historical test counts above remain historical.
+- B1 physical Store is NOT_STARTED. No production SQLite connection/migration, live capture, Broker write, Trusted Admission or auto-trading is introduced.

@@ -2,7 +2,7 @@
 
 > 主理人：齐活林（Delivery Director）｜团队：许清楚(PM) / 高见远(Architect) / 寇豆码(Engineer) / 严过关(QA)
 > 对应 PRD：`docs/PRD-股票辅助判断与交易参考网站.md`（v1.1；A 股优先的个人交易决策驾驶舱）
-> 最新对齐日期：2026-08-31
+> 最新对齐日期：2026-09-11（W5 独立审查与受控发布同步）
 > 用途：供其他 Agent / 开发者按 v1.1 产品优先级、Hybrid H0–H5 与后续 Stage 路线接续工作。
 
 ---
@@ -11,13 +11,15 @@
 
 stock-tracker 已实现为一个**近零依赖 Python 后端 + 静态前端 + 独立 Quant Foundation** 的真实可运行系统。v1.1 将产品中心冻结为“今天该怎么操作”，市场资源按 A 股、港股通、美股排序，并把 Core Opportunity、Big Trend、Event Intelligence、持仓/Exit、Strategy Scoreboard、Replay 与混合部署设为主线。Stage 1 的严格决策合同、Portfolio REST/UI、真实 `/api/brief/today` 和 Today Action 首页已经接线。Hybrid H0–H4 的仓库侧工程实现和本地验收现已完成：loopback/Tailscale Bootstrap、Runtime Config、统一 REST/SSE/Health URL Builder、Origin-scoped 会话访问、API Major/Engine/Build 握手、exact CORS/OPTIONS、API-only Target、远程写审计、Windows 恢复计划、Power Guard、no-secret 静态构建和在线/离线浏览器验收均已落地；H5 已实现可信 Tailnet 优先、公开模式失败关闭的只读门禁。真实 Tailscale、两设备、Windows 重启/休眠、Pages 实际部署和任何公开入口仍待 operational 验收。概率、Big Trend 和策略战绩仍诚实降级，这些工程能力不等于真实投资表现。
 
-Stage 4G 独立复审已把先前“Runtime Service 完成”修正为“manual Collection/Finalization Core schema v3 已完成 R0 收敛”：first-touch、PATH fact/known-time 前缀与延迟成交语义已失败关闭；自动 Runtime Decision Artifact、transactional outbox、Market Path/Execution Adapter、worker/cursor/recovery 仍未接线，必须先完成 Stage 4G.1，才能进入独立签名/撤销/PIT 的 Stage 4H Admission Authority。
+Stage 4G 独立复审已把先前“Runtime Service 完成”修正为“manual Collection/Finalization Core schema v3 已完成 R0 收敛”：first-touch、PATH fact/known-time 前缀与延迟成交语义已失败关闭；Stage 4G.1 已实现 Runtime Decision Artifact、transactional outbox 及有条件接线的 Artifact/Outbox Worker，并完成 R4.1 Transport 生命周期合同与 W5 测试/UI 集成。Market Path/B2 物理 Worker、Execution Adapter 和自动 Collection 编排仍未完成；现有 Artifact Worker 不等于自动 Outcome 收集。必须完成后续 Stage 4G.1 前置条件，才能进入独立签名/撤销/PIT 的 Stage 4H Admission Authority。
 
 > **路线覆盖规则：** 下文保留的 v0.4 Wave、T1–T15 和历史提交记录用于追溯；若与新版产品优先级冲突，以 PRD v1.1、根 `AGENTS.md`、`docs/HYBRID-DEPLOYMENT-ARCHITECTURE-v1.md` 和 `docs/PRODUCT-GAP-MATRIX-v1.1.md` 为准。
 
 ### 0.1 v1.1 当前状态覆盖说明
 
 本节优先级高于下文保留的历史会话记录：
+
+- 2026-09-11：W5 候选 `139ce41baea404c9dd54798562e5f3ad85ee73f8`（tree `e1bfc6b2465e0e2b48ba1a1d67b087f071a7ecf6`）已获 ChatGPT 独立 scoped Review PASSED，T1/T2/U1/U2/U3 全部 CLOSED。用户已授权安全合并及 GitHub 推送；发布身份与验证见 [W5-GITHUB-DELIVERY.md](W5-GITHUB-DELIVERY.md)。原 main/UI 工作区保留，不为发布 reset/clean/stash。暂不开始 B1；全部工程证据仍为 synthetic/临时数据。下文 dated 历史测试数不改写。
 
 - Stage 1 Today Action 已实现严格产品合同、旧 SignalState → ActionState 映射、按风险计算的 PositionSizer、TradePlan、Core 3—5 和最低安全 Exit baseline；
 - `GET /api/brief/today` 已真实接线，只读 Store/Repository，不调用 Provider、LLM 或 Quant 训练链；单条合同损坏信号会跳过而不是拖垮整页；

@@ -2271,6 +2271,8 @@ docs/STAGE2H-STAGE2J-MARKET-BAR-ACCEPTANCE-DESIGN.md
 
 ## Stage 4：真实策略战绩与 Replay
 
+> **工程状态补充（2026-09-11，W5 scoped Review 通过）**：Stage 4G.1 的 Runtime Decision Artifact、transactional outbox 与有条件接线的 Artifact/Outbox Worker 已实现；R4.1 Transport 生命周期合同与 W5 测试/UI 候选通过独立审查。它们不等于 Market Path/B2 物理管线或自动 Outcome Collection 完成。用户本次只授权同步交接及 GitHub 发布，暂不开始 B1；Trusted Admission、真实战绩与自动交易边界不变。发布记录见 `docs/W5-GITHUB-DELIVERY.md`。下段保留 2026-08-31 历史阶段记录。
+
 > **工程状态（2026-08-31，Stage 4G R0 收敛）**：Stage 4A Outcome/Scoreboard、Stage 4B PIT Replay、Stage 4C 失败归因/同 cohort 版本比较和 Stage 4F append-only Outcome Evidence Ledger 已完成工程实现。Stage 4G Collection schema v3 完成的是**手工驱动的 Collection/Finalization Core**：受控调用方提供外部 `runtime_episode_fact_id`、真实 `entry_requested_at` 和 entry/path/exit/no-entry 候选事实；Core 冻结 immutable episode/decision snapshot、请求时最大已知 PATH 前缀（point ID + PATH event fact ID + collection known time），以 horizon 内 first-touch 验证 TARGET/STOP/TIMEOUT，并通过独立 append-only event chain 与两阶段 finalization 生成 deterministic `SignalOutcome` 后写入 Stage 4F。同一粗粒度 PATH point 双触发失败关闭，市场最小退出 offset 与策略 horizon 独立，延迟成交不得截断。它尚未接入 SignalManager/EventBus/Scheduler/Market Event Store/Broker，没有 transactional outbox、后台 worker、操作 CLI/API 或重启补采编排；普通未成交过期/用户撤单以及停牌/无交易/休市/缺失数据仍需 Stage 4G.1 独立合同，因此不得称为自动 Runtime Service 已完成。Paper 永久进入 `DIAGNOSTIC_ONLY`，Live Manual 最多进入 `LIVE_CANDIDATE`；调用方自报 evidence ID、`verified=true` 或高 Trust Tier 均不构成可信准入。正确后续顺序是 Stage 4G.1 Operational Runtime Evidence Adapter → Stage 4H Trusted Outcome Admission Authority → admitted-sample shadow → Stage 4I Strategy Scoreboard API/UI。可信准入与真实独立样本不足时，真实 Scoreboard 必须保持 `INSUFFICIENT_REAL_EVIDENCE` / `TRUSTED_OUTCOME_ADMISSION_NOT_CONFIGURED`，正式 Replay 在 T3 快照链不完整时必须保持 `BLOCKED`。
 
 1. 信号 Outcome；
