@@ -1,6 +1,6 @@
 # W5 GitHub 受控发布记录
 
-日期：2026-09-11。状态：`REVIEW_PASSED / USER_AUTHORIZED / RELEASE_VALIDATED / REMOTE_CONFIRMATION_PENDING`。
+日期：2026-09-11。状态：`GITHUB_DELIVERED / B1_NOT_STARTED`。
 
 ## 精确身份与授权范围
 
@@ -58,3 +58,20 @@ Quant smoke、synthetic benchmark 与 diff 检查均通过。
 本次提交明确只纳入五份文档：CHATGPT_HANDOFF.md、docs/HANDOFF.md、PRD、
 docs/W5-INTEGRATION-HANDOFF.md 和本文。正式推送前再验证 fresh committed checkout
 导入、分发及实现/测试/UI 与已审查候选的相同 blob。远端确认结果随后追加。
+
+
+## GitHub 已确认的交付
+
+- 实现及交接同步提交：`0af6c2ac84f9e82134d62e190987ff59f81f3885`。
+- 对应 tree：`86bf5647227a68ab6e4b04c63cdda69583ca01e4`。
+- 普通 push `HEAD:refs/heads/main` exit 0；随后在线 `git ls-remote` 与本地 origin/main
+  均精确等于上述提交。旧远端 `082a6dac310388ec10c8a432427a40e275bcd7ae` 已快进，未 force、未重写历史。
+- 原本机 main 仍为 `082a6dac310388ec10c8a432427a40e275bcd7ae`；其 HEAD/status、原 tracked/untracked 文件和
+  DB/WAL/SHM 散列全部与发布前相同，原其他七类保护对象的实际清单见仓外记录。
+- 本段及 W5/ChatGPT 交接完成状态作为后续纯文档提交推送；最终远端 SHA/tree 与
+  再次保护核验写入仓外 `FINAL-DELIVERY.json`，不将本文件已发布前驱 SHA 冒充最终 HEAD。
+- 未启动 GitHub Pages workflow（当前仅 workflow_dispatch），没有网站部署、Engine
+  启用或真实数据采集；暂不开始 B1。
+
+记录工具曾因 NUL 分隔清单的尾部空元素而中止提交前校验；已修正仓外脚本，明确五文件
+清单后才提交。一次辅助命令因包含 NUL 被执行器拒绝，未执行任何 Git 动作。产品源码未变。
