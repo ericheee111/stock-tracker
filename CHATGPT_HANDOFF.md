@@ -1,5 +1,14 @@
 # ChatGPT Handoff
 
+## Current continuation — 2026-09-11 B1 physical kernel
+
+W5 GitHub baseline verified at `cf743a73c6fa4cb860bb1191183e5e358b7218f6`. ChatGPT directly implemented B1a–B1c physical byte storage in the isolated `chatgpt/b1-storage` worktree. Explicit init, durable append intent, no-overwrite file publication, append-only publication receipts, seven real process-crash recovery windows, exact schema/inventory audit and bounded physical pages are implemented. New physical/CLI tests: 45 passed; full Runtime: 785 run / 784 passed / 1 expected skip; full Quant: 724 passed. See `docs/STAGE4G1-B1-PHYSICAL-STORAGE-REVIEW.md` for exact verification and limits.
+
+This is `PHYSICAL_BYTES_ONLY`, not the full semantic Market Event Store v4. Existing Stage 3F ingestion is untouched. B1d typed Event/Transport ReadPort, legacy migration/export and capacity work are next; B2 Path worker, B3 Collection bridge, execution adapters, operational shadow and Trusted Admission remain pending. No automatic trading or production database writes. The original dirty main/UI/screenshots and all prior agent worktrees must remain protected.
+
+Execution preference: ChatGPT designs, implements and reviews directly; local Codex is fallback (xhigh persistence/PIT, high integration, medium packaging). WorkBuddy is optional for bounded mechanical checks, not a standing four-session campaign. Commit/push identities are recorded in the external delivery evidence; the history below is not a statement of current completion.
+
+
 > Updated: 2026-08-28
 > Workspace: `D:\Projects\stock-tracker`
 > Branch: `main` tracking `origin/main`

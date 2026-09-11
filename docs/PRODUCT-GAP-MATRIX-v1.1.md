@@ -1,5 +1,18 @@
 # Stock Tracker v1.1 产品 Gap Matrix 与 Stage 1/1.5 实施入口
 
+## 当前增量 — 2026-09-11 B1 物理基础
+
+| 能力 | 本次状态 | 剩余边界 |
+|---|---|---|
+| B1a 格式与显式初始化 | `IMPLEMENTED_PHYSICAL_ONLY` | 不自动迁移现有 Stage 3F Store |
+| B1b 原子发布及恢复 | `PROCESS_CRASH_TESTED` | 七个进程退出窗口已测；不声明整机断电保证 |
+| B1c 物理审计与分页 | `IMPLEMENTED_PHYSICAL_ONLY` | 物理前缀一致、有界页；未签发语义 Coverage/Admission |
+| B1d typed Event/Transport ReadPort | `PENDING` | 接入冻结语义、旧库显式工具、批处理与容量门禁 |
+| B2/B3/C/D | `PENDING` | Path Worker、Collection bridge、执行证据、跨交易日 Shadow |
+
+主路线及证据见 `STAGE4G1-B1-PHYSICAL-STORAGE-IMPLEMENTATION-PLAN.md` 和 `STAGE4G1-B1-PHYSICAL-STORAGE-REVIEW.md`；以下历史矩阵保留原验收范围。真实 Scoreboard、Trusted Admission 和自动交易未因此启用。
+
+
 > 初始审计日期：2026-08-14
 > 最新对齐日期：2026-08-28
 > 工作区：`D:\Projects\stock-tracker`

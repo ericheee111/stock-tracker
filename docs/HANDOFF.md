@@ -1,5 +1,8 @@
 # stock-tracker 交接文档（HANDOFF）
 
+> **当前续接点（2026-09-11）：** W5 已交付；ChatGPT 直接完成 B1a–B1c 物理证据内核、CLI 与真实进程中断恢复测试，范围为 `PHYSICAL_BYTES_ONLY`。下一任务是 B1d typed Event/Transport ReadPort、legacy 工具及容量验证；B2 Path Worker、B3 Collection、执行证据与真实 Shadow 仍未完成。详见 `STAGE4G1-B1-PHYSICAL-STORAGE-IMPLEMENTATION-PLAN.md` / `STAGE4G1-B1-PHYSICAL-STORAGE-REVIEW.md`。旧 main 工作区继续保持原 UI/截图改动，不得 reset/clean 来强行同步。
+
+
 > 主理人：齐活林（Delivery Director）｜团队：许清楚(PM) / 高见远(Architect) / 寇豆码(Engineer) / 严过关(QA)
 > 对应 PRD：`docs/PRD-股票辅助判断与交易参考网站.md`（v1.1；A 股优先的个人交易决策驾驶舱）
 > 最新对齐日期：2026-09-11（W5 独立审查与受控发布同步）

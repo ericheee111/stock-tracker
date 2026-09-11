@@ -1,5 +1,8 @@
 # Stock Tracker v1.1 产品需求、决策引擎与混合部署设计书
 
+> **2026-09-11 工程增量：** W5 已发布；B1a–B1c 独立物理证据内核已实现显式初始化、持久化意图、不可覆盖发布、进程中断恢复和有界读取。此完成范围仅为 `PHYSICAL_BYTES_ONLY`，不等于行情覆盖、PIT Authority 或自动 Outcome。下一步是 B1d typed ReadPort/旧数据工具/容量验证，再依次进入 B2 Path Worker、B3 Collection、C 执行证据、D Shadow、4H/4I。详见 `STAGE4G1-B1-PHYSICAL-STORAGE-IMPLEMENTATION-PLAN.md` 与 `STAGE4G1-B1-PHYSICAL-STORAGE-REVIEW.md`。不改变下文冻结产品目标或历史验收记录。
+
+
 > **副标题：A 股优先的个人交易决策驾驶舱**
 >
 > 文档版本：v1.1.1（混合部署 + XTP/Monitor 工程补充）

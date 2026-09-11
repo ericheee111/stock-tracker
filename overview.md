@@ -1,5 +1,8 @@
 # Stock Tracker v1.1 项目概览
 
+> **2026-09-11：** B1a–B1c 物理证据内核已实现：独立新目录、严格字节编码、持久化意图、不可覆盖发布、崩溃恢复及有界物理分页。它没有替代现有 Stage 3F，也没有接通自动 Outcome。下一步为 B1d typed ReadPort/legacy/容量验证。设计与证据见 `docs/STAGE4G1-B1-PHYSICAL-STORAGE-IMPLEMENTATION-PLAN.md`、`docs/STAGE4G1-B1-PHYSICAL-STORAGE-REVIEW.md`。当前仍不自动交易，不声称真实战绩。
+
+
 > **定位：A 股优先的个人交易决策驾驶舱**
 > 核心问题：**今天该怎么操作？**
 > 市场优先级：A 股第一、港股通第二、美股第三

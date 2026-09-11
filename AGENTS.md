@@ -1,5 +1,8 @@
 # AGENTS.md
 
+> **2026-09-11 continuation boundary:** B1a–B1c physical storage kernel is implemented in `runtime_evidence/physical_store.py`; it exposes `PHYSICAL_BYTES_ONLY`, not semantic Market Event v4 completion or Coverage/Admission. Next work is B1d typed ReadPort, explicit legacy tooling and capacity validation; do not replace existing ingestion automatically. See `docs/STAGE4G1-B1-PHYSICAL-STORAGE-IMPLEMENTATION-PLAN.md`. ChatGPT executes/reviews directly by default; local agents are bounded fallbacks, not mandatory parallel sessions. All financial/data/safety rules below remain in force.
+
+
 本文件适用于整个 `stock-tracker` 仓库。更深目录如未来存在自己的 `AGENTS.md`，仅在其目录范围内补充或收紧本规则，不得削弱本文的金融正确性、数据真实性和安全边界。
 
 ## 1. 项目使命

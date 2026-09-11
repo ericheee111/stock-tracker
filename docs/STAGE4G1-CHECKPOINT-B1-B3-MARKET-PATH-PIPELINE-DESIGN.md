@@ -1,5 +1,10 @@
 # Stage 4G.1 Checkpoint B1–B3 — Audited Market Path Pipeline Design
 
+
+
+> **2026-09-11 physical implementation refinement:** B1a–B1c now has a separate `b1-physical-store-v1` kernel. The durable-intent publication protocol and its scope are specified in `STAGE4G1-B1-PHYSICAL-STORAGE-IMPLEMENTATION-PLAN.md`; it supersedes the physical draft's orphan-ownership inference in section 4.7, without reinterpreting legacy records or changing reviewed market/transport semantics. B1d semantic ReadPort, migration/export and scale integration remain pending. Do not equate a physical snapshot with the semantic Audit/Coverage certificates below.
+
+
 状态：`DESIGN_FROZEN / B0_B1_R3_SEMANTIC_CANDIDATE / INDEPENDENT_REVIEW_PENDING / STORE_MIGRATION_AND_WORKER_WIRING_PENDING`
 
 日期：2026-09-04
