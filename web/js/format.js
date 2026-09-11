@@ -12,10 +12,24 @@
     return (v === undefined || v === null) ? (d === undefined ? null : d) : v;
   }
 
-  /** 转数字，失败返回 0 */
+  /** 转数字，失败返回 0（保留算术默认语义，展示边界请用 fnum） */
   function num(v) {
     const n = Number(v);
     return Number.isFinite(n) ? n : 0;
+  }
+
+  /**
+   * 有限数展示边界：缺失≠0。null/undefined/空串/纯空白/boolean/NaN/Infinity/
+   * 对象/数组/函数一律返回 null；真实 number 0 与有效有限数字字符串保留。
+   * 用于「展示数字」路径，不影响 num() 的算术默认值。
+   */
+  function fnum(v) {
+    if (v === null || v === undefined) return null;
+    if (typeof v === 'boolean' || typeof v === 'function') return null;
+    if (typeof v === 'object') return null;
+    if (typeof v === 'string' && v.trim() === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
   }
 
   /** 百分比计算（分母保护） */
@@ -23,10 +37,11 @@
     return whole ? (part / whole) * 100 : 0;
   }
 
-  /** 价格：固定 2 位小数 + 千分位 */
+  /** 价格：固定 2 位小数 + 千分位。缺失/非法类型（null/bool/对象/数组/NaN/Inf）→ '—'；
+   *  真实 0 与有效有限数字字符串兼容保留（展示边界用 fnum，不沿算术 num 的 0 兜底）。 */
   function fmtPrice(v) {
-    const n = num(v);
-    if (!Number.isFinite(n)) return '—';
+    const n = fnum(v);
+    if (n === null) return '—';
     return n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
@@ -37,10 +52,10 @@
     return Math.round(n).toLocaleString('zh-CN');
   }
 
-  /** 带正负号的百分比文本 */
+  /** 带正负号的百分比文本（缺失→'—'，真实 0→'+0.00%'） */
   function fmtPct(v) {
-    const n = num(v);
-    if (!Number.isFinite(n)) return '—';
+    const n = fnum(v);
+    if (n === null) return '—';
     return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
   }
 
@@ -104,32 +119,33 @@
 
   /**
    * 从 Quote dict 抽取最新价：优先 last。
-   * 缺失/非法的最新价（null / undefined / 0 / 非数）→ 破折号「—」，
-   * 绝不把后端的 None（缺失）渲染成 "0.00"（修复 quote.last=0 时指数/个股显示 0.00）。
+   * last 必须是「合法正值」（有限数且 >0，含数字字符串兼容）；否则（null/undefined/0/负/bool/
+   * 数组/对象/NaN/Inf）一律未知 → '—'。绝不把后端缺失渲染成 "0.00"。
    */
   function quotePrice(q) {
-    if (!q) return '—';
-    const last = q.last;
-    if (last === undefined || last === null ||
-        !Number.isFinite(Number(last)) || Number(last) === 0) {
-      return '—';
-    }
+    if (!q || typeof q !== 'object' || Array.isArray(q)) return '—';
+    const last = fnum(q.last);
+    if (last === null || last <= 0) return '—';
     return fmtPrice(last);
   }
 
   /**
    * 从 Quote dict 抽取涨跌幅(%)：
-   *   1) 若含 change_pct 直接使用；
-   *   2) 否则用 last vs prev_close / open 推导；
-   *   3) 都缺失返回 0。
+   *   1) 优先有效 change_pct（有限数，含数字字符串兼容路径）；
+   *   2) 否则仅用「合法正 last + 合法正 prev_close」推导（0/负值最新价视为未知，不得推导）；
+   *   3) 无合法 prev_close（即便有 open）保持未知 → null，绝不把缺失/非法 last 推导成 -100%。
    */
   function quoteChangePct(q) {
-    if (!q) return 0;
-    if (q.change_pct !== undefined && q.change_pct !== null) return num(q.change_pct);
-    const last = num(def(q.last, q.close));
-    if (q.prev_close) return pct(last - q.prev_close, q.prev_close);
-    if (q.open) return pct(last - q.open, q.open);
-    return 0;
+    if (!q || typeof q !== 'object' || Array.isArray(q)) return null;
+    if (q.change_pct !== undefined && q.change_pct !== null) {
+      const n = fnum(q.change_pct);
+      if (n !== null) return n;
+    }
+    const last = fnum(q.last !== undefined && q.last !== null ? q.last : q.close);
+    if (last === null || last <= 0) return null;
+    const prevClose = fnum(q.prev_close);
+    if (prevClose === null || prevClose <= 0) return null;
+    return (last - prevClose) / prevClose * 100;
   }
 
   /** ISO 时间 → 本地 HH:MM:SS（失败返回 '—'） */
@@ -153,7 +169,7 @@
   }
 
   global.Fmt = {
-    def: def, num: num, pct: pct,
+    def: def, num: num, fnum: fnum, pct: pct,
     fmtPrice: fmtPrice, fmtInt: fmtInt, fmtPct: fmtPct, fmtRange: fmtRange,
     chgClass: chgClass, fmtAge: fmtAge, statusBadge: statusBadge,
     scoreColor: scoreColor, quotePrice: quotePrice, quoteChangePct: quoteChangePct,

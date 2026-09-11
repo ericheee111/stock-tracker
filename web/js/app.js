@@ -358,6 +358,42 @@
     return loadDataOnce();
   }
 
+  /** 市场键校验：仅 a/hk/us（大小写不敏感）。 */
+  function isMarketKey(value) {
+    return typeof value === 'string' && /^(a|hk|us)$/i.test(value);
+  }
+
+  /** Array 必须声明 market；dict 的 market 身份由键给定，显式字段必须一致。 */
+  function validMarketEntry(x, dictionaryKey) {
+    if (!x || typeof x !== 'object' || Array.isArray(x)) return false;
+    if (Object.prototype.hasOwnProperty.call(x, 'market')) {
+      return isMarketKey(x.market) && (!dictionaryKey || x.market.toLowerCase() === dictionaryKey.toLowerCase());
+    }
+    if (!dictionaryKey) return false;
+    return !!(x.index && typeof x.index === 'object' && !Array.isArray(x.index));
+  }
+
+  /** 市场容器是否有行情数据：同时支持 dict（{a/hk/us}）与 array 合同。
+   *  只识别合法 a/hk/us 键或带合法 market/index 的条目；observed_age_ms 等元数据、
+   *  false/字符串/非法 market 均不算行情证明。 */
+  function marketsHaveData(markets) {
+    if (!markets || typeof markets !== 'object') return false;
+    if (Array.isArray(markets)) return markets.some(function (entry) { return validMarketEntry(entry); });
+    return ['a', 'hk', 'us', 'A', 'HK', 'US'].some(function (k) {
+      return Object.prototype.hasOwnProperty.call(markets, k) && validMarketEntry(markets[k], k);
+    });
+  }
+
+  /** 已有明确运行态（AUTH/STALE/版本/CORS 等）不应被泛化「连接后端失败」覆盖。 */
+  function hasSpecificRuntimeStatus(runtime) {
+    if (!runtime || !runtime.status) return false;
+    return [
+      'AUTH_REQUIRED', 'AUTH_FAILED', 'STALE', 'API_VERSION_MISMATCH',
+      'BUILD_MISMATCH', 'ENGINE_ID_MISMATCH', 'CORS_BLOCKED',
+      'RUNTIME_HEALTH_INVALID', 'NETWORK_OFFLINE'
+    ].indexOf(runtime.status) !== -1;
+  }
+
   async function loadApplicationData() {
     const results = await Promise.allSettled([
       API.getBriefToday(), API.getPortfolio(), API.getOverview(), API.getMarkets(),
@@ -387,7 +423,8 @@
     // 横幅：真实/降级/演示/失败 可见
     renderBanner();
     renderHolding();
-    if (!state.meta && !state.markets.length) {
+    const runtimeNow = Runtime ? Runtime.snapshot() : null;
+    if (!state.meta && !marketsHaveData(state.markets) && !hasSpecificRuntimeStatus(runtimeNow)) {
       const banner = $('#banner');
       banner.className = 'banner error';
       banner.innerHTML = '<span class="banner-dot"></span><span class="banner-mode">连接后端失败</span>' +

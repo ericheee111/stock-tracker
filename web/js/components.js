@@ -89,7 +89,14 @@
   }
 
   function scoreCircle(label, value, invert) {
-    const v = F.num(value);
+    const v = F.fnum(value);
+    if (v === null) {
+      // 缺失分数不得显示为 0，也不得给缺失风险分绿色（score-good）
+      return '<div class="score-cell">' +
+        '<div class="score-circle" style="--sc:var(--text-3)">—</div>' +
+        '<div class="score-label">' + esc(label) + '</div>' +
+        '</div>';
+    }
     const color = F.scoreColor(v, invert);
     return '<div class="score-cell">' +
       '<div class="score-circle" style="--sc:' + color + '">' + v + '</div>' +
@@ -97,9 +104,13 @@
       '</div>';
   }
 
-  /** 四分数网格（ScoreSet：opportunity/timing/risk/confidence） */
+  /** 四分数网格（ScoreSet：opportunity/timing/risk/confidence）
+   *  全缺失 → 暂无评分；部分缺失 → 仅对应字段显示 '—'（缺失风险分不给绿色）。 */
   function renderScores(score) {
-    if (!score) return '<div class="card-empty">暂无评分</div>';
+    const FIELDS = ['opportunity', 'timing', 'risk', 'confidence'];
+    const isScore = score && typeof score === 'object' && !Array.isArray(score);
+    const hasValue = isScore && FIELDS.some(function (k) { return F.fnum(score[k]) !== null; });
+    if (!hasValue) return '<div class="card-empty">暂无评分</div>';
     return '<div class="score-grid">' +
       scoreCircle('机会', score.opportunity, false) +
       scoreCircle('时机', score.timing, false) +
@@ -408,7 +419,8 @@
       const level = F.def(e.level, 'LOW');
       const levelColor = RISK_LEVEL_COLORS[level] || '#8e8e93';
       const levelLabel = esc(RISK_LEVEL_LABELS[level] || level);
-      const score = F.num(e.risk_score);
+      const riskScore = F.fnum(e.risk_score);
+      const score = riskScore === null ? '—' : riskScore;
       const state = F.def(e.state, '');
       const reason = esc(F.def(e.reason, ''));
       return '<div class="risk-item" style="border-left-color:' + levelColor + '">' +
@@ -588,7 +600,12 @@
     const grp = radarGroupOf(sig.state);
     const grpCls = groupClassOf(grp);
     const scoreMini = function (label, v, invert) {
-      return '<div class="radar-score"><span class="rs-num" style="color:' + F.scoreColor(F.num(v), invert) + '">' + F.num(v) + '</span>' +
+      const n = F.fnum(v);
+      if (n === null) {
+        return '<div class="radar-score"><span class="rs-num" style="color:var(--text-3)">—</span>' +
+          '<span class="rs-label">' + esc(label) + '</span></div>';
+      }
+      return '<div class="radar-score"><span class="rs-num" style="color:' + F.scoreColor(n, invert) + '">' + n + '</span>' +
         '<span class="rs-label">' + esc(label) + '</span></div>';
     };
     const sub = '入场 ' + F.fmtRange(sig.entry_low, sig.entry_high) +
