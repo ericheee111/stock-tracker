@@ -532,7 +532,11 @@
       const st = (it.signal && it.signal.state);
       return st === 'TRIGGERED' || st === 'ACTIVE';
     }).length;
-    return '今日有 <b>' + triggered + '</b> 只自选处于可执行/持有状态 · 持仓 ' + p.length + ' 笔';
+    // .signal-summary 容器为 3 列统计瓦片网格（terminal.css .signal-summary > *），
+    // 必须输出 3 个瓦片子元素，而非裸文本行。
+    return '<div class="ss-tile"><b>' + triggered + '</b><span>可执行 / 持有</span></div>' +
+      '<div class="ss-tile"><b>' + w.length + '</b><span>自选标的</span></div>' +
+      '<div class="ss-tile"><b>' + p.length + '</b><span>持仓笔数</span></div>';
   }
 
   /* ============================================================

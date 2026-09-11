@@ -191,16 +191,19 @@ body::after { display: none; }
 }
 .icon-btn:hover { border-color: var(--border-strong); color: var(--text); background: var(--surface-hover); }
 .banner {
+  margin: 0; /* 覆盖 base.css 的 margin:0 -16px 全出血负边距（移动端遗留），与内容列精确共边 */
   min-height: 39px; padding: 8px 14px; gap: 9px;
   border: 0; border-top: 1px solid var(--line-soft); border-left: 0; border-radius: 0;
-  background: rgba(8, 11, 16, .38); color: var(--text-2); font-size: 10px;
+  background: rgba(8, 11, 16, .38); color: var(--text-2); font-size: 12.5px;
 }
 :root[data-theme="light"] .banner { background: rgba(239, 237, 231, .60); }
 .banner-dot { width: 7px; height: 7px; box-shadow: 0 0 0 4px rgba(119,167,255,.08); }
-.banner-mode { color: var(--text); font: 760 9px/1 var(--font-mono); letter-spacing: .075em; text-transform: uppercase; }
-.banner-text { flex: 1; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.banner-meta { margin-left: 0; padding-left: 9px; border-left: 1px solid var(--line-soft); color: var(--text-3); font: 8px/1.2 var(--font-mono); white-space: nowrap; }
-.banner-loading { color: var(--text-3); font-family: var(--font-mono); }
+/* 中文内容字号下限 12px：mono 小字号仅适用于拉丁标签，中文 ≤10px 在 Windows 渲染糊化（用户反馈"字歪"根因） */
+/* 基线对齐：banner-mode 与 banner-text 必须同字号同行高（12.5px/1.5），否则 flex 居中后基线错位（红字浮高） */
+.banner-mode { color: var(--text); font: 760 12.5px/1.5 var(--font-mono); letter-spacing: .04em; text-transform: uppercase; }
+.banner-text { flex: 1; color: var(--text-3); font-size: 12.5px; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.banner-meta { margin-left: 0; padding-left: 9px; border-left: 1px solid var(--line-soft); color: var(--text-3); font: 10px/1.5 var(--font-mono); white-space: nowrap; }
+.banner-loading { color: var(--text-3); font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5; }
 
 /* Page frame */
 .content { padding: 0 0 14px; }
@@ -376,7 +379,7 @@ body::after { display: none; }
 .pf-honesty { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line-soft); }
 .pf-summary-grid { grid-template-columns: repeat(4,minmax(0,1fr)); gap: 6px; }
 .pf-summary-grid > div { min-height: 58px; padding: 8px 9px; border: 1px solid var(--line-soft); border-radius: 9px; background: var(--panel-soft); }
-.pf-summary-grid span { color: var(--text-3); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; }
+.pf-summary-grid span { color: var(--text-3); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
 .pf-summary-grid strong { color: var(--text); font: 670 12px/1.2 var(--font-mono); }
 .pf-primary, .pf-secondary, .pf-danger {
   min-height: 36px; padding: 8px 11px; border-radius: 9px; box-shadow: none; font: 650 11px var(--font-sans); transform: none;
@@ -392,7 +395,7 @@ body::after { display: none; }
 .pf-form-grid input:focus, .pf-form-grid select:focus, .pf-inline-form input:focus, .pf-position-fields input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
 /* Overview */
-.index-grid { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 9px; margin-bottom: 12px; }
+.index-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 9px; margin-bottom: 12px; }
 .index-card { min-height: 154px; padding: 17px; display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; text-align: left; background: var(--panel); }
 .index-card::before { background: var(--accent); }
 .index-name { color: var(--text-3); font: 680 9px/1.2 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
@@ -401,11 +404,12 @@ body::after { display: none; }
 .index-status { margin-top: auto; }
 .overview-grid { display: grid; grid-template-columns: repeat(12,minmax(0,1fr)); gap: 10px; }
 .overview-grid > .card { margin: 0; }
-.overview-grid > .card:nth-child(1) { grid-column: span 5; }
-.overview-grid > .card:nth-child(2) { grid-column: span 7; }
-.overview-grid > .card:nth-child(3) { grid-column: span 4; }
-.overview-grid > .card:nth-child(4) { grid-column: span 4; }
-.overview-grid > .card:nth-child(5) { grid-column: span 4; }
+/* 列宽按位置分配且不限类名：加载态 loadingBox（无 .card 类）与加载完成卡片布局一致，避免桌面端被压成窄条 */
+.overview-grid > :nth-child(1) { grid-column: span 5; }
+.overview-grid > :nth-child(2) { grid-column: span 7; }
+.overview-grid > :nth-child(3) { grid-column: span 4; }
+.overview-grid > :nth-child(4) { grid-column: span 4; }
+.overview-grid > :nth-child(5) { grid-column: span 4; }
 .regime-name { color: var(--text); font-size: 21px; font-weight: 700; letter-spacing: -.03em; }
 .regime-score { color: var(--accent); font-size: 28px; }
 .regime-factors { gap: 5px; }
@@ -414,7 +418,7 @@ body::after { display: none; }
 .sector-list, .risk-list, .health-list { gap: 6px; }
 .sector-row, .risk-item, .health-row { padding: 9px 10px; border-color: var(--line-soft); border-radius: 9px; background: var(--panel-soft); box-shadow: none; }
 .sector-name, .health-name { color: var(--text); font-size: 12px; font-weight: 650; }
-.sector-stage, .risk-level-chip { min-height: 20px; padding: 3px 6px; font-size: 8px; color: var(--accent); background: var(--accent-soft) !important; }
+.sector-stage, .risk-level-chip { min-height: 20px; padding: 3px 7px; font-size: 10px; color: var(--accent); background: var(--accent-soft) !important; }
 .sector-score, .risk-score, .health-meta { font-size: 10px; }
 .breadth-bar { height: 14px; border-radius: 999px; font-size: 0; background: var(--panel-soft); }
 .breadth-bar .seg-flat { background: var(--text-3); opacity: .35; }
@@ -434,6 +438,8 @@ body::after { display: none; }
 /* Watch / positions / radar */
 .signal-summary { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 1px; padding: 0; overflow: hidden; border-color: var(--border); background: var(--line-soft); font-size: 11px; }
 .signal-summary > * { min-height: 76px; display: grid; place-items: center; background: var(--panel); }
+.signal-summary .ss-tile { gap: 4px; padding: 8px; }
+.signal-summary .ss-tile span { color: var(--text-3); font-size: 10px; letter-spacing: .05em; }
 .signal-summary b { color: var(--accent); font-size: 30px; font-weight: 730; }
 .wl-card, .pos-card, .radar-card { padding: 15px; margin-bottom: 8px; background: var(--panel); }
 .wl-card::before { background: var(--accent); }
@@ -508,9 +514,10 @@ body::after { display: none; }
 .nav-btn.active::after { display: none; }
 .nav-ico { width: 22px; height: 22px; display: grid; place-items: center; }
 .nav-ico svg { width: 18px; height: 18px; stroke-width: 1.75; }
-.disclaimer { margin: 28px 2px 0; padding: 14px 0 4px; border-top: 1px solid var(--line-soft); color: var(--text-3); font-size: 9px; line-height: 1.65; text-align: left; }
+.disclaimer { margin: 28px 0 0; padding: 14px 16px 4px; border-top: 1px solid var(--line-soft); color: var(--text-3); font-size: 12px; line-height: 1.65; text-align: left; }
 .disclaimer strong { color: var(--text-2); font-weight: 620; }
-.disclaimer-label { display: inline-block; margin-right: 8px; color: var(--status-delayed); font: 720 8px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+/* 基线对齐：标签改回行内排布并继承正文行高（1.65），inline-block + line-height:1 会使字形在 1.65 行高的正文里下沉 */
+.disclaimer-label { margin-right: 10px; color: var(--status-delayed); font: 720 11px/1.65 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; vertical-align: baseline; }
 
 /* Desktop layout */
 @media (min-width: 920px) {
@@ -527,7 +534,7 @@ body::after { display: none; }
   #page-today #todayBrief > .tb-summary { grid-column: span 8; }
   #page-today #todayBrief > .tb-posture { grid-column: span 4; }
   #page-today #todayBrief > .tb-dosuggest { grid-column: span 12; }
-  #page-today #todayBrief > .tb-section-label, #page-today #todayBrief > .card-empty { grid-column: span 12; }
+  #page-today #todayBrief > .tb-section-label, #page-today #todayBrief > .card-empty, #page-today #todayBrief > .loading-box { grid-column: span 12; }
   #page-today #todayBrief > .tb-core { grid-column: span 6; width: auto; margin-right: 0; }
   #page-today #todayBrief > .tb-holding { grid-column: span 6; width: auto; margin-right: 0; }
   #page-today #todayBrief > .tb-avoid { grid-column: span 12; }
@@ -542,8 +549,8 @@ body::after { display: none; }
   .topbar-context { display: none; }
   .brand { min-width: 0; margin-right: auto; }
   .overview-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
-  .overview-grid > .card:nth-child(n) { grid-column: span 1; }
-  .overview-grid > .card:nth-child(2), .overview-grid > .card:nth-child(5) { grid-column: span 2; }
+  .overview-grid > :nth-child(n) { grid-column: span 1; }
+  .overview-grid > :nth-child(2), .overview-grid > :nth-child(5) { grid-column: span 2; }
 }
 
 @media (max-width: 700px) {
@@ -587,11 +594,12 @@ body::after { display: none; }
   .tb-plan { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .tb-prob-row { grid-template-columns: 86px minmax(0,1fr); }
   .overview-grid { grid-template-columns: 1fr; }
-  .overview-grid > .card:nth-child(n) { grid-column: auto; }
+  .overview-grid > :nth-child(n) { grid-column: auto; }
   .index-card { min-height: 136px; padding: 16px; }
   .index-value { font-size: 34px; }
   .top-list { grid-template-columns: 1fr; }
-  .signal-summary { grid-template-columns: 1fr; }
+  .signal-summary { grid-template-columns: repeat(auto-fit, minmax(108px, 1fr)); }
+  .pf-panel-head { align-items: stretch; }
   .radar-card { grid-template-columns: 1fr; }
   .radar-scores { justify-content: flex-start; }
   .research-card { min-height: 360px; padding: 24px; }
@@ -602,7 +610,7 @@ body::after { display: none; }
   .bottom-nav { height: 58px; bottom: 10px; border-radius: 17px; }
   .nav-btn { font-size: 8px; }
   .nav-ico svg { width: 17px; height: 17px; }
-  .disclaimer { margin-top: 22px; font-size: 8px; }
+  .disclaimer { margin-top: 22px; font-size: 11px; }
 }
 
 @media (max-width: 430px) {
@@ -619,3 +627,40 @@ body::after { display: none; }
     animation: none !important; transition: none !important; transform: none !important;
   }
 }
+
+/* =========================================================================
+ * 加载/空态兜底（跨断点）：今日简报容器在任何网格断点下，加载框与空态卡
+ * 一律占满整行，防止被塞进 1/12 窄列形成"竖条"（1 / -1 对任意列数成立）。
+ * ========================================================================= */
+#page-today #todayBrief > .loading-box,
+#page-today #todayBrief > .card-empty,
+#page-today #todayBrief > .tb-section-label { grid-column: 1 / -1; }
+
+/* =========================================================================
+ * 全站中文可读性下限（Playwright 全元素扫描后统一修正）
+ * mono 小字号（8-10px）仅适用于拉丁/数字标签；任何含中文的文本一律 ≥11px，
+ * 否则在 Windows 渲染糊化（用户反馈"字歪"）。本块位于文件末尾，级联最后生效。
+ * ========================================================================= */
+.page-heading-tags span { font: 700 11px/1.2 var(--font-mono); letter-spacing: .06em; }
+.section-label, .tb-section-label, .group-title { font: 760 11px/1.35 var(--font-mono); letter-spacing: .08em; }
+.card-title, .tb-card-title, .detail-section-title, .quote-panel-head, .pf-sheet-section h3 {
+  font: 760 12px/1.35 var(--font-mono); letter-spacing: .06em;
+}
+.tb-sub-title { font: 720 11px/1.3 var(--font-mono); }
+.index-name { font: 680 11px/1.3 var(--font-mono); letter-spacing: .05em; }
+.ds-badge { font-size: 11px; }
+.sector-stage, .risk-level-chip { font-size: 11px; }
+.sector-crowd { font-size: 11px; }
+.mini-tag { font-size: 11px; }
+.signal-summary .ss-tile span { font-size: 11px; }
+.pf-access-state, .pf-help, .pf-honesty { font-size: 11.5px; }
+.pf-summary-grid span { font-size: 11px; }
+.pf-form-grid label, .pf-inline-form label, .pf-position-fields label { font-size: 11.5px; }
+.mon-metric-detail { font-size: 11px; line-height: 1.45; }
+.mon-tab, .mon-refresh, .mon-button, .mon-row-actions button { font-size: 11.5px; }
+.nav-btn { font-size: 11px; }
+.opp-code, .opp-plan { font-size: 11px; }
+.factor-chip { font-size: 11px; }
+.breadth-legend { font: 11px/1.35 var(--font-mono); }
+.risk-reason { font-size: 11px; }
+.health-meta, .risk-score, .sector-score { font-size: 11px; }

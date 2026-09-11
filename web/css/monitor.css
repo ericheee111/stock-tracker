@@ -567,3 +567,17 @@
   .mon-button,
   .mon-row-actions button { transition: none; }
 }
+
+/* =========================================================================
+ * 中文可读性下限（文件末尾 = 级联最后，覆盖本文件更早的媒体查询与终端皮肤）
+ * 任何含中文的文本一律 ≥11px；mono 小字仅限拉丁/数字标签。
+ * ========================================================================= */
+.mon-metric-detail { font-size: 11px !important; line-height: 1.45; }
+.mon-tab { font-size: 11.5px !important; }
+.mon-refresh, .mon-button, .mon-row-actions button { font-size: 11.5px !important; }
+.mon-empty p { font-size: 11.5px !important; }
+.mon-inbox-time strong { font-size: 11px; }
+.mon-definition-list small { font-size: 11px; }
+.mon-loading small { font-size: 11px; }
+.bottom-nav .nav-btn,
+.bottom-nav:has(.nav-btn[data-page="monitor"]) .nav-btn { font-size: 11px !important; }
