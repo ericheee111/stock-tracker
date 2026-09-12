@@ -244,14 +244,39 @@ const KNOWN_ACTIONS = ['当前可执行', '等回踩', '等突破', '继续持�
     // 8. 持仓动作与新机会分开
     const coreN2 = await count('#todayBrief .tb-core');
     const holdN = await count('#todayBrief .tb-holding');
-    const orderOk = await page.evaluate(() => {
-      const c = document.querySelector('#todayBrief .tb-core');
-      const h = document.querySelector('#todayBrief .tb-holding');
-      if (!c || !h) return false;
-      return c.compareDocumentPosition(h) & Node.DOCUMENT_POSITION_FOLLOWING;
-    }).catch(() => false);
-    add('持仓动作与新机会分开', coreN2 > 0 && holdN > 0 && orderOk,
-      'core=' + coreN2 + ' holding=' + holdN + ' orderOk=' + orderOk);
+    // The confirmed product has equal primary lanes, not a fixed core-before-hold order.
+    function primaryLanesAreSeparated() {
+      const root = document.querySelector('#todayBrief');
+      const core = root && root.querySelector('#todayOpportunities');
+      const holding = root && root.querySelector('#todayHoldings');
+      if (!core || !holding || core === holding || core.contains(holding) || holding.contains(core)) return false;
+      if (root.querySelectorAll('#todayOpportunities').length !== 1 || root.querySelectorAll('#todayHoldings').length !== 1) return false;
+      const cores = Array.from(root.querySelectorAll('.tb-core'));
+      const holds = Array.from(root.querySelectorAll('.tb-holding'));
+      return cores.length > 0 && holds.length > 0 && cores.every(c => core.contains(c) && !holding.contains(c)) &&
+        holds.every(h => holding.contains(h) && !core.contains(h)) &&
+        root.querySelectorAll('.tb-dual-jumps a[href="#todayOpportunities"]').length === 1 &&
+        root.querySelectorAll('.tb-dual-jumps a[href="#todayHoldings"]').length === 1;
+    }
+    const lanesOk = await page.evaluate(primaryLanesAreSeparated).catch(() => false);
+    add('持仓动作与新机会分开', coreN2 > 0 && holdN > 0 && lanesOk,
+      'core=' + coreN2 + ' holding=' + holdN + ' separatePrimaryLanes=' + lanesOk);
+    // A real DOM negative control proves the assertion cannot pass a mixed lane.
+    await page.evaluate(() => {
+      const card = document.querySelector('#todayHoldings .tb-holding');
+      if (card) {
+        window.__qaHoldingPlacement = {card, parent:card.parentNode, next:card.nextSibling};
+        document.querySelector('#todayOpportunities').appendChild(card);
+      }
+    });
+    const rejectsMixedLane = !(await page.evaluate(primaryLanesAreSeparated).catch(() => true));
+    await page.evaluate(() => {
+      const saved = window.__qaHoldingPlacement;
+      if (saved) { saved.parent.insertBefore(saved.card, saved.next); delete window.__qaHoldingPlacement; }
+    });
+    const restored = await page.evaluate(primaryLanesAreSeparated).catch(() => false);
+    add('混放卡片反例失败且恢复后通过', rejectsMixedLane && restored,
+      'rejectsMixedLane=' + rejectsMixedLane + ' restored=' + restored);
 
     // 9. 无 [object Object]
     add('无 [object Object]', !/\[object Object\]/.test(txt1), 'found=' + /\[object Object\]/.test(txt1));

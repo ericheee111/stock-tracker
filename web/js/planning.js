@@ -11,6 +11,91 @@
   let pending = null;
   let previewCommand = null;
   let requestedAt = 0;
+  let requestedMono = 0;
+  let requestDuration = 0;
+  let generation = 0;
+  let snapshotScope = '';
+  let snapshotAccess = '';
+
+  function runtimeContext() {
+    try {
+      const r = global.Runtime;
+      const state = r.snapshot();
+      return {scope: JSON.stringify([state.apiOrigin, state.health && state.health.engine_id]),
+        access: r.privateAccessValue(), ready: state.handshakeReady === true &&
+          !state.authState && !r.isHardFailure(state.status)};
+    } catch (_) { return {scope:'', access:'', ready:false}; }
+  }
+  let lastContext = runtimeContext();
+  function stamp() { return Object.assign({generation:generation}, runtimeContext()); }
+  function current(ticket) {
+    const ctx = runtimeContext();
+    return ticket.generation === generation && ticket.scope === ctx.scope && ticket.access === ctx.access && ctx.ready;
+  }
+  function inSession() {
+    const ctx = runtimeContext();
+    return Boolean(snapshot && ctx.ready && ctx.scope === snapshotScope && ctx.access === snapshotAccess);
+  }
+  function clearPreview() {
+    previewCommand = null;
+    const element = document.getElementById('planningPreview');
+    if (element) element.replaceChildren();
+  }
+  function lockedView() {
+    return '<div id="planningMessage" role="alert" class="mp-message mp-error"></div>' +
+      '<button data-mp="refresh" type="button">重新加载</button>' +
+      '<button data-mp="retry" type="button" hidden>重试未确认请求（原ID）</button>';
+  }
+  function invalidatePrivate() {
+    generation++;
+    snapshot = null; snapshotScope = ''; snapshotAccess = ''; clearPreview();
+    if (root()) { root().innerHTML = lockedView(); message((global.Runtime && global.Runtime.snapshot().authState ? '认证失败或需重新认证，私有展示已清除。' : '连接或认证已变化，私有展示已清除。') +
+      (pending ? '原请求结果仍未确认；恢复原引擎和计划库后，刷新并复用原ID重试。' : '请重新确认连接后加载。'), true); }
+    freezeControls();
+  }
+  function runtimeChanged() {
+    const next = runtimeContext();
+    const changed = next.scope !== lastContext.scope || next.access !== lastContext.access;
+    const lost = !next.ready && (lastContext.ready || snapshot !== null);
+    lastContext = next;
+    if (changed || lost) invalidatePrivate();
+  }
+  function estimatedTime(conservative) {
+    const origin = book() && Date.parse(book().as_of);
+    if (!Number.isFinite(origin)) return NaN;
+    const mono = Math.max(0, global.performance.now() - requestedMono);
+    const elapsed = conservative ? Math.max(mono, Date.now() - requestedAt, 0) + requestDuration : mono;
+    return origin + elapsed;
+  }
+  function isFresh(item) {
+    const now = estimatedTime(true);
+    return Boolean(item && Number.isFinite(now) && Date.parse(item.observed_at) <= now && now < Date.parse(item.expires_at));
+  }
+  function previewInputsFresh(pid) {
+    const b = book(); const inv = b && b.inventory[pid];
+    return Boolean(inv && inv.parent_matches && isFresh(inv) && isFresh(b.cash[inv.currency]));
+  }
+  function refreshTemporalState() {
+    runtimeChanged();
+    if (!inSession() || !book() || !root()) return;
+    const b = book();
+    root().querySelectorAll('[data-inventory-fresh]').forEach(function(el) {
+      const inv = b.inventory[el.dataset.inventoryFresh];
+      el.textContent = inv && inv.parent_matches && isFresh(inv) ? '人工确认有效' : '未确认或已过期';
+    });
+    root().querySelectorAll('[data-cash-fresh]').forEach(function(el) {
+      el.textContent = isFresh(b.cash[el.dataset.cashFresh]) ? '确认有效' : '已过期';
+    });
+    root().querySelectorAll('[data-plan-expiry]').forEach(function(el) {
+      const plan = b.plans[el.dataset.planExpiry];
+      el.hidden = !plan || !ACTIVE.includes(plan.status) || estimatedTime(true) < Date.parse(plan.valid_until);
+    });
+    if (previewCommand && (!previewInputsFresh(previewCommand.data.position_id) ||
+        estimatedTime(true) >= Date.parse(previewCommand.data.valid_until))) {
+      clearPreview(); message('预演条件已过期；原预留不自动释放，请重新核对库存和现金。', true);
+    }
+    freezeControls();
+  }
 
   function root() { return document.getElementById('planningWorkspace'); }
   function uid() {
@@ -47,8 +132,8 @@
   }
   function timeWindow() {
     // Server observation plus elapsed local duration; final authority is server validation.
-    const origin = book() && Date.parse(book().as_of);
-    const now = Number.isFinite(origin) ? origin + Math.max(0, Date.now() - requestedAt) : Date.now();
+    const now = estimatedTime(false);
+    if (!Number.isFinite(now)) throw new Error('缺少服务器时间，请重新加载');
     return { observed_at: new Date(now - 1000).toISOString(), expires_at: new Date(now + 9 * 60000).toISOString() };
   }
   function quantity(form, name) {
@@ -63,18 +148,25 @@
     if (!book()) throw new Error('计划库尚未启用');
     return { store_id: snapshot.store_id, command_id: uid(), expected_revision: book().revision, kind: kind, data: data };
   }
-  function actionable() { return !busy && !pending && snapshot && snapshot.enabled === true; }
+  function actionable() { return !busy && !pending && inSession() && snapshot.enabled === true; }
   function freezeControls() {
     if (!root()) return;
     root().querySelectorAll('form button, [data-plan-action], [data-mp="reserve"]').forEach(function (button) {
       const scenario = button.closest('form[data-form="scenario"]');
-      button.disabled = scenario ? Boolean(busy || pending || !snapshot) : !actionable();
+      button.disabled = scenario ? Boolean(busy || pending || !inSession()) : !actionable();
+      if (button.dataset.mp === 'reserve') button.disabled = button.disabled || !previewCommand;
+      const form = button.closest('form[data-form="t-preview"]');
+      if (form && !previewInputsFresh(form.dataset.position)) button.disabled = true;
     });
     root().querySelectorAll('form input, form select').forEach(function (control) {
       control.disabled = Boolean(busy || pending);
     });
     const retry = root().querySelector('[data-mp="retry"]');
-    if (retry) { retry.hidden = !pending; retry.disabled = busy; }
+    if (retry) {
+      retry.hidden = !pending;
+      retry.disabled = Boolean(busy || !pending || !inSession() || !book() ||
+        pending.scope !== snapshotScope || pending.command.store_id !== snapshot.store_id);
+    }
   }
 
   function allocationForm(p, allocation) {
@@ -125,17 +217,18 @@
     const valid = a && a.parent_matches;
     const allocated = valid ? a.sleeves.reduce(function (n,s) { return n+s.quantity; },0) : 0;
     return '<article class="mp-position" data-position-card="' + esc(p.position_id) + '"><h3>' + esc(p.symbol) + ' · ' + esc(p.market) + '</h3>' +
-      '<p>真实总仓 ' + esc(numberText(p.shares)) + ' 股 · 未分类 ' + esc(numberText(p.shares - allocated)) + ' 股</p>' +
+      '<p>已录入总仓 ' + esc(numberText(p.shares)) + ' 股 · 未分类 ' + esc(numberText(p.shares - allocated)) + ' 股</p>' +
       ((a && !a.parent_matches) || (inv && !inv.parent_matches) ? '<p class="mp-error">原持仓已变化：旧分配或库存必须重新核对。</p>' : '') +
       (valid ? '<div class="mp-purpose-tags">' + a.sleeves.map(function (s) { return '<span>' + esc(PURPOSES[s.purpose]) + ' ' + esc(s.quantity) + '股 / 核心 ' + esc(s.core_quantity) + '</span>'; }).join('') + '</div>' : '<p class="mp-note">尚未分类；不会根据盈亏推断长持或短线目的。</p>') +
       (b ? '<details><summary>持仓目的与原计划</summary>' + allocationForm(p,a) + '</details>' +
-      '<details><summary>可卖库存 · ' + (inv && inv.fresh && inv.parent_matches ? '人工确认有效' : '未确认或已过期') + '</summary>' + inventoryForm(p,inv) + '</details>' +
+      '<details><summary>可卖库存 · <span data-inventory-fresh="' + esc(p.position_id) + '">' + (inv && inv.fresh && inv.parent_matches ? '人工确认有效' : '未确认或已过期') + '</span></summary>' +
+      (inv ? '<p class="mp-note">人工快照：' + esc(inv.observed_at) + ' 至 ' + esc(inv.expires_at) + '</p>' : '') + inventoryForm(p,inv) + '</details>' +
       '<details><summary>做 T 条件预演</summary>' + tForm(p) + '</details>' : '') + '</article>';
   }
 
   function cashPanel(b) {
     return '<details class="mp-block"><summary>币种现金确认与对账</summary><p class="mp-note">只填单一本地资金池；已扣外部委托占用，尚未扣本工具预留。不要把多个币种或券商账户相加。</p>' +
-      Object.values(b.cash).map(function (c) { return '<p>' + esc(c.currency) + ' · 人工现金 ' + esc(c.available_cash) + ' · ' + (c.fresh ? '确认有效' : '已过期') + '</p>'; }).join('') +
+      Object.values(b.cash).map(function (c) { return '<p>' + esc(c.currency) + ' · 人工现金 ' + esc(c.available_cash) + ' · <span data-cash-fresh="' + esc(c.currency) + '">' + (c.fresh ? '确认有效' : '已过期') + '</span></p><p class="mp-note">快照：' + esc(c.observed_at) + ' 至 ' + esc(c.expires_at) + '</p>'; }).join('') +
       '<form data-form="cash"><div class="mp-fields">' + select('币种','currency',[['CNY','CNY'],['HKD','HKD'],['USD','USD']],'CNY') +
       input('当前可用现金','cash','','text','inputmode="decimal" required') + '</div>' + acknowledgement('checked','我刚核对了对应币种可用现金；未混用其他资金池') +
       '<button type="submit">确认现金（有效9分钟）</button></form><hr>' +
@@ -152,7 +245,7 @@
       return '<article class="mp-plan"><strong>' + esc(p.parent.symbol) + ' · ' + esc(STATUS[p.status] || '未知状态') + '</strong>' +
         '<p>' + esc(PURPOSES[p.purpose]) + ' / ' + (p.direction === 'BUY_THEN_SELL' ? '先买后卖旧仓' : '先卖旧仓后买回') + ' · ' + esc(p.quantity) + '股</p>' +
         '<p>预留现金 ' + esc(p.reserved_cash) + ' ' + esc(p.currency) + ' · 计划价差测算（非收益预测） ' + esc(p.scenario_net_spread) + '</p>' +
-        (p.expired && active ? '<p class="mp-error">条件已过期，额度仍保留。先确认外部操作，再取消或对账。</p>' : '') +
+        '<p class="mp-error" data-plan-expiry="' + esc(p.plan_id) + '"' + (p.expired && active ? '' : ' hidden') + '>条件已过期，额度仍保留。先确认外部操作，再取消或对账。</p>' +
         (!p.parent_matches && active ? '<p class="mp-error">原持仓变化或已关闭，必须对账。</p>' : '') +
         (p.status === 'RESERVED' ? '<button type="button" data-plan-action="CANCEL" data-plan="' + esc(p.plan_id) + '">确认未执行并取消</button> <button type="button" data-plan-action="MARK_EXECUTED" data-plan="' + esc(p.plan_id) + '">标记已转实际操作</button>' : '') +
         '<p class="mp-note">' + esc(p.plan_id) + ' · 不创建订单，不证明实际成交。</p></article>';
@@ -189,47 +282,79 @@
       html += '<p class="mp-note">人工未验证 · 计划版本 ' + esc(b.revision) + ' · 没有执行授权</p>' + cashPanel(b);
     }
     html += '<div class="mp-positions">' + (positions.length ? positions.map(function (p) { return positionCard(p,b); }).join('') : '<p>暂无持仓，请先使用上方持仓管理录入。</p>') + '</div>';
+    if (Array.isArray(data && data.position_issues) && data.position_issues.length) {
+      html += '<div class="mp-error">以下旧持仓需单独核对，本工具未替其推断数量或用途：' + data.position_issues.map(function(item) {
+        return esc(item.symbol) + '（' + esc(item.code) + '）';
+      }).join('、') + '</div>';
+    }
     if (b) html += '<div id="planningPreview" role="status"></div>' + plansPanel(b);
     return html + scenarioPanel();
   }
 
   async function load() {
-    if (!root() || busy) return;
-    busy = true;
-    freezeControls();
+    runtimeChanged();
+    if (!root() || busy) return false;
+    if (!runtimeContext().ready) { invalidatePrivate(); return false; }
+    const ticket = stamp(); const started = performance.now();
+    busy = true; clearPreview(); freezeControls();
     try {
       const value = await global.API.getPlanningBook();
+      if (!current(ticket)) return false;
       if (!value || value.schema !== 'manual-planning-api-v1' || typeof value.enabled !== 'boolean' || !Array.isArray(value.positions) ||
-          (value.enabled && (!value.book || value.book.schema !== 'manual-plan-book-v1' || !Number.isSafeInteger(value.book.revision)))) {
-        throw new Error('计划接口版本或数据无效，已暂停编辑');
-      }
-      snapshot = value; requestedAt = Date.now(); previewCommand = null;
+          (value.enabled && (!value.book || value.book.schema !== 'manual-plan-book-v1' || !Number.isSafeInteger(value.book.revision) ||
+          !Number.isFinite(Date.parse(value.book.as_of)) || ['allocations','inventory','cash','plans'].some(function(k) {
+            return !value.book[k] || typeof value.book[k] !== 'object' || Array.isArray(value.book[k]);
+          })))) throw new Error('计划接口版本或数据无效，已暂停编辑');
+      snapshot = value; snapshotScope = ticket.scope; snapshotAccess = ticket.access;
+      requestedAt = Date.now(); requestedMono = performance.now(); requestDuration = requestedMono - started;
       root().innerHTML = render(value);
-      if (pending) message('上一请求结果未确认；只可复用同一命令重试，勿在其他窗口重复创建。', true);
+      refreshTemporalState();
+      if (pending) message('上一请求结果仍未确认；只可在原引擎/计划库复用原ID重试，勿另建相同操作。', true);
+      return true;
     } catch (error) {
-      snapshot = null; previewCommand = null;
-      root().innerHTML = '<div id="planningMessage" role="alert" class="mp-message mp-error"></div><button data-mp="refresh" type="button">重新加载</button><button data-mp="retry" type="button" hidden>重试未确认请求</button>';
-      message(error.message || '无法读取计划；请检查认证与连接', true);
+      if (!current(ticket)) return false;
+      snapshot = null; clearPreview();
+      root().innerHTML = lockedView();
+      message((pending ? '原请求结果仍未确认。' : '') + (error.message || '无法读取计划；请检查认证与连接'), true);
+      return false;
     } finally { busy = false; freezeControls(); }
   }
 
   async function commit(cmd) {
-    if (busy || (pending && pending.command_id !== cmd.command_id)) return;
-    pending = cmd; busy = true; freezeControls();
+    runtimeChanged();
+    if (busy || !inSession() || (pending && pending.command.command_id !== cmd.command_id)) return;
+    if (cmd.store_id !== snapshot.store_id || (pending && pending.scope !== snapshotScope)) {
+      message('未确认请求属于另一引擎或计划库，禁止转发。请先返回原连接核对。', true); return;
+    }
+    const ticket = stamp();
+    const wasUncertain = Boolean(pending && pending.uncertain);
+    pending = pending || {command:JSON.parse(JSON.stringify(cmd)), scope:ticket.scope, uncertain:false};
+    const attempt = pending;
+    attempt.uncertain = true;
+    busy = true; clearPreview(); freezeControls();
     try {
-      await global.API.planningCommand(cmd);
-      pending = null; previewCommand = null; busy = false;
-      await load();
-      message('已保存到本地手工计划日志；没有发送任何交易指令。');
+      const result = await global.API.planningCommand(attempt.command);
+      if (!current(ticket)) return;
+      if (!result || result.schema !== 'manual-planning-command-response-v1' || result.store_id !== cmd.store_id || !result.book) {
+        throw new Error('写入回执身份无效，保持未确认状态');
+      }
+      pending = null; busy = false;
+      if (await load()) message('已保存到本地手工计划日志；没有发送任何交易指令。');
     } catch (error) {
-      if (error.status >= 400 && error.status < 500) pending = null;
-      message((pending ? '写入结果未确认，请复用原请求重试。' : '未保存：') + (error.message || '请求失败'), true);
+      if (!current(ticket)) return;
+      // A later rejection cannot establish that a previous lost response did not commit.
+      const definiteInitialRejection = !wasUncertain && [400,409,413].includes(error.status) &&
+        typeof error.code === 'string' && !error.code.startsWith('HTTP_');
+      if (definiteInitialRejection) pending = null;
+      message((pending ? '写入结果仍未确认，请恢复原连接并复用原ID重试。' : '未保存：') + (error.message || '请求失败'), true);
     } finally { busy = false; freezeControls(); }
   }
 
   async function submit(form) {
-    if (busy || pending) return;
+    runtimeChanged();
+    if (busy || pending || !inSession()) return;
     const type = form.dataset.form;
+    if (type === 't-preview') clearPreview();
     const pid = form.dataset.position;
     let data;
     if (type === 'scenario') {
@@ -238,9 +363,11 @@
       ['fees','mark_price'].forEach(function (k) { data[k]=value(form,k); });
       data.average_buy=data.buy_quantity ? value(form,'average_buy') : null;
       data.average_sell=data.sell_quantity ? value(form,'average_sell') : null;
+      const ticket=stamp();
       busy=true;freezeControls();
       try {
         const result=await global.API.planningAttribution(data);
+        if (!current(ticket)) return;
         document.getElementById('planningScenario').innerHTML='<div class="mp-result"><strong>相对继续持有的净值差：' + esc(result.relative_hold_delta) + ' ' + esc(result.currency) + '</strong><p>现金变化 ' + esc(result.cash_delta) + ' · 持仓变化 ' + esc(result.quantity_delta) + '股 · 未配对 ' + esc(result.unpaired_quantity) + '股</p><p>仅手工情景，不进入真实收益或胜率。</p></div>';
       } finally {busy=false;freezeControls();}
       return;
@@ -262,14 +389,24 @@
       await commit(command('CONFIRM_CASH',Object.assign(timeWindow(),{currency:value(form,'currency'),available_cash:value(form,'cash')})));
     } else if (type === 't-preview') {
       const inv=book().inventory[pid];const cash=inv && book().cash[inv.currency];
-      if (!inv || !cash) throw new Error('先确认该持仓库存和对应币种现金');
+      if (!inv || !cash || !previewInputsFresh(pid)) throw new Error('先重新确认该持仓库存和对应币种现金');
       data=Object.assign(anchor(pid),{plan_id:uid(),purpose:value(form,'purpose'),direction:value(form,'direction'),quantity:quantity(form,'quantity'),buy_limit:value(form,'buy'),sell_limit:value(form,'sell'),fee_buffer:value(form,'fees'),valid_until:new Date(Math.min(Date.parse(inv.expires_at),Date.parse(cash.expires_at))).toISOString(),manual_conditions_acknowledged:form.elements.checked.checked===true});
-      const cmd=command('RESERVE',data);
+      const cmd=command('RESERVE',data);const ticket=stamp();
       busy=true;freezeControls();
       try {
-        const result=await global.API.planningPreview(cmd);previewCommand=cmd;
-        document.getElementById('planningPreview').innerHTML='<div class="mp-result"><h3>人工条件预演 · 尚未预留</h3><p>股数 ' + esc(result.preview.quantity) + ' · 中途峰值 ' + esc(result.preview.peak_quantity) + '股 · 预留现金 ' + esc(result.preview.reserved_cash) + ' ' + esc(result.preview.currency) + '</p><p>按填写的目标价差扣费用：' + esc(result.preview.scenario_net_spread) + '。不是市场预测，尚未验证行情、实际交易规则或成交。</p><button type="button" data-mp="reserve">确认仅在本工具预留额度</button></div>';
-      } finally {busy=false;freezeControls();}
+        const result=await global.API.planningPreview(cmd);
+        if (!current(ticket)) return;
+        const resultPlan = result && result.preview;
+        if (!resultPlan || result.schema !== 'manual-t-preview-v1' || result.revision !== cmd.expected_revision ||
+            !resultPlan.parent || resultPlan.parent.symbol !== currentPosition(pid).symbol ||
+            Object.keys(cmd.data).some(function(k) {return resultPlan[k] !== cmd.data[k];})) {
+          throw new Error('预演回执与所选持仓/输入不一致，已清除');
+        }
+        if (!previewInputsFresh(pid) || estimatedTime(true) >= Date.parse(cmd.data.valid_until)) throw new Error('预演条件已过期');
+        previewCommand=cmd;
+        document.getElementById('planningPreview').innerHTML='<div class="mp-result"><h3>人工条件预演 · 尚未预留</h3><p><strong>' + esc(resultPlan.parent.symbol) + ' · ' + esc(PURPOSES[cmd.data.purpose]) + ' · ' + (cmd.data.direction === 'BUY_THEN_SELL' ? '先买后卖旧仓' : '先卖旧仓后买回') + '</strong></p><p>买入限价 ' + esc(cmd.data.buy_limit) + ' / 卖出限价 ' + esc(cmd.data.sell_limit) + ' · 股数 ' + esc(resultPlan.quantity) + ' · 中途峰值 ' + esc(resultPlan.peak_quantity) + '股 · 预留现金 ' + esc(resultPlan.reserved_cash) + ' ' + esc(resultPlan.currency) + '</p><p>按填写的目标价差扣费用：' + esc(resultPlan.scenario_net_spread) + '。不是市场预测，尚未验证行情、实际交易规则或成交。</p><button type="button" data-mp="reserve">确认仅在本工具预留额度</button></div>';
+      } catch (error) { clearPreview(); if (current(ticket)) throw error; }
+      finally {busy=false;freezeControls();}
     } else if(type==='reconcile') {
       const currency=value(form,'currency');
       const ids=Object.values(book().plans).filter(function (p) {return p.currency===currency && ACTIVE.includes(p.status);}).map(function(p){return p.plan_id;});
@@ -284,13 +421,23 @@
     if(!panel || !element) return;
     panel.addEventListener('toggle',function(){if(panel.open && !snapshot) load();});
     element.addEventListener('submit',function(event){const form=event.target;if(!form.matches('form[data-form]'))return;event.preventDefault();submit(form).catch(function(error){message(error.message || '输入无效',true);});});
-    element.addEventListener('input',function(event){if(event.target.closest('form[data-form="t-preview"]')){previewCommand=null;const p=document.getElementById('planningPreview');if(p)p.replaceChildren();}});
+    function edited(event) { if (event.target.closest('form[data-form="t-preview"]')) clearPreview(); }
+    element.addEventListener('input',edited);
+    element.addEventListener('change',edited);
+    if (global.Runtime && global.Runtime.onChange) global.Runtime.onChange(runtimeChanged);
+    global.setInterval(refreshTemporalState,1000);
+    document.addEventListener('visibilitychange',refreshTemporalState);
+    global.addEventListener('pageshow',refreshTemporalState);
     element.addEventListener('click',function(event){
       const button=event.target.closest('button');if(!button)return;
       const operation=button.dataset.mp;
       if(operation==='refresh'){load();return;}
-      if(operation==='retry' && pending){commit(pending);return;}
-      if(operation==='reserve' && previewCommand && actionable()){commit(previewCommand);return;}
+      if(operation==='retry' && pending){commit(pending.command);return;}
+      if(operation==='reserve'){
+        refreshTemporalState();
+        if(previewCommand && actionable()) commit(previewCommand);
+        return;
+      }
       const action=button.dataset.planAction;
       if(!action || !actionable())return;
       const prompt=action==='CANCEL'?'确认这个计划完全没有执行，且不存在相关未成交委托？':'确认已转到实际操作？工具不会报单或记入成交，额度将保留至人工对账。';

@@ -43,24 +43,40 @@ def configure(ctx: AppContext, runtime_database: str, logger: Any) -> None:
         logger.warning("Manual planning disabled: %s", getattr(exc, "code", "PLANNING_IO_ERROR"))
 
 
-def parents(ctx: AppContext) -> dict[str, Any]:
-    output: dict[str, dict[str, Any]] = {}
-    symbols: set[str] = set()
+def inspect_parents(ctx: AppContext) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    """Isolate unsupported legacy rows; never hide them as zero or block closure."""
+    output: dict[str, Any] = {}
+    issues: list[dict[str, str]] = []
+    symbols: dict[str, str] = {}
+    duplicate_ids: set[str] = set()
     for position in ctx.repo.load_positions():
         if position.closed_at is not None:
             continue
-        require(type(position.shares) in (int, float) and math.isfinite(position.shares)
-                and float(position.shares).is_integer(), "UNSUPPORTED_POSITION", "本版计划仅支持整股持仓")
-        require(type(position.cost) in (int, float) and math.isfinite(position.cost), "UNSUPPORTED_POSITION", "持仓成本无效")
-        parent = validate_parent({"position_id": position.id, "symbol": position.symbol,
-                                  "market": position.market.value, "shares": int(position.shares),
-                                  "cost": format(Decimal(str(position.cost)), "f"),
-                                  "added_at": position.added_at.isoformat()})
-        require(position.symbol not in symbols and position.id not in output,
-                "DUPLICATE_POSITION", "存在重复证券持仓，请先核对Portfolio", 409)
-        symbols.add(position.symbol)
-        output[position.id] = parent
-    return output
+        try:
+            require(type(position.shares) in (int, float) and math.isfinite(position.shares)
+                    and float(position.shares).is_integer(), "UNSUPPORTED_POSITION", "本版计划仅支持整股持仓")
+            require(type(position.cost) in (int, float) and math.isfinite(position.cost),
+                    "UNSUPPORTED_POSITION", "持仓成本无效")
+            parent = validate_parent({"position_id": position.id, "symbol": position.symbol,
+                                      "market": position.market.value, "shares": int(position.shares),
+                                      "cost": format(Decimal(str(position.cost)), "f"),
+                                      "added_at": position.added_at.isoformat()})
+            if position.id in output or position.symbol in symbols:
+                duplicate_ids.add(position.id)
+                if position.symbol in symbols:
+                    duplicate_ids.add(symbols[position.symbol])
+                raise PlanningError("DUPLICATE_POSITION", "重复证券或持仓身份需人工核对", status=409)
+            symbols[position.symbol] = position.id
+            output[position.id] = parent
+        except PlanningError as exc:
+            issues.append({"position_id": str(position.id)[:120], "symbol": str(position.symbol)[:120], "code": exc.code})
+    for pid in duplicate_ids:
+        output.pop(pid, None)
+    return output, issues
+
+
+def parents(ctx: AppContext) -> dict[str, Any]:
+    return inspect_parents(ctx)[0]
 
 
 def _store(ctx: AppContext) -> PlanningStore:
@@ -71,12 +87,13 @@ def _store(ctx: AppContext) -> PlanningStore:
 
 def get_book(ctx: AppContext) -> dict[str, Any]:
     try:
-        current = parents(ctx)
+        current, issues = inspect_parents(ctx)
         store = ctx.planning_store
         return {"schema": "manual-planning-api-v1", "enabled": store is not None,
                 "status": ctx.planning_status,
                 "store_id": store.store_id if store else None,
                 "positions": [{**p, "parent_hash": digest(p)} for p in current.values()],
+                "position_issues": issues,
                 "book": public_book(store.read(), current, datetime.now(timezone.utc)) if store else None,
                 "auto_trade": False, "assurance": "MANUAL_UNVERIFIED"}
     except PlanningError as error:
@@ -92,8 +109,7 @@ def checked_command(store: PlanningStore, payload: dict[str, Any]) -> dict[str, 
 def post_command(ctx: AppContext, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         store = _store(ctx)
-        current = parents(ctx)
-        result = store.apply(checked_command(store, payload), current, datetime.now(timezone.utc))
+        result = store.apply(checked_command(store, payload), lambda: parents(ctx), datetime.now(timezone.utc))
         # Latest independent Portfolio read flags a concurrent update. No cross-DB atomicity claim.
         result["book"] = public_book(result["book"], parents(ctx), datetime.now(timezone.utc))
         result.update(schema="manual-planning-command-response-v1", store_id=store.store_id, auto_trade=False)

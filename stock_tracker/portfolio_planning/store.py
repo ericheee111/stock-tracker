@@ -196,7 +196,7 @@ class PlanningStore:
             book, _, _ = self._replay(conn)
             return book
 
-    def apply(self, command: dict[str, Any], parents: dict[str, Any], now: datetime) -> dict[str, Any]:
+    def apply(self, command: dict[str, Any], parents: dict[str, Any] | Callable[[], dict[str, Any]], now: datetime) -> dict[str, Any]:
         timestamp = clock(now)
         fields(command, {"command_id", "expected_revision", "kind", "data"})
         cid = identifier(command["command_id"], "command_id")
@@ -210,10 +210,13 @@ class PlanningStore:
                 require(existing[1] == request_hash, "IDEMPOTENCY_CONFLICT", "相同ID对应不同命令", 409)
                 return {"book": book, "command_revision": existing[0], "idempotent": True}
             require(last_time is None or timestamp >= last_time, "CLOCK_ROLLBACK", "本机时钟回退，暂停写入", 409)
-            next_book = reduce_command(book, command, parents, timestamp)
+            # Idempotent retry and close-out do not need to parse unrelated Portfolio rows.
+            needed = command["kind"] in ("SET_ALLOCATION", "CONFIRM_INVENTORY", "RESERVE")
+            observed_parents = (parents() if callable(parents) else parents) if needed else {}
+            next_book = reduce_command(book, command, observed_parents, timestamp)
             # Store only the parent used by this command, not an unrelated private portfolio dump.
             pid = command["data"].get("position_id")
-            used_parents = {pid: parents[pid]} if pid in parents else {}
+            used_parents = {pid: observed_parents[pid]} if pid in observed_parents else {}
             record = {"schema": STORE_SCHEMA, "store_id": self.store_id, "sequence": next_book["revision"],
                       "previous_hash": previous, "recorded_at": timestamp.isoformat(), "command": command, "parents": used_parents}
             raw = canonical(record)

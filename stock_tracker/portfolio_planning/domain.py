@@ -111,7 +111,14 @@ def validate_parent(parent: Any) -> dict[str, Any]:
     require(suffix in {"A": ("SH", "SZ"), "HK": ("HK",), "US": ("US",)}[market],
             "IDENTITY_MISMATCH", "证券与市场不一致")
     integer(parent["shares"], "shares", minimum=1)
-    amount(parent["cost"], "cost", positive=True)
+    # A parent cost is a source fingerprint, not a six-decimal order amount.
+    # Preserve the complete finite legacy float's decimal representation.
+    cost = parent["cost"]
+    require(type(cost) is str and len(cost) <= 400
+            and re.fullmatch(r"(?:0|[1-9][0-9]*)(?:\.[0-9]+)?", cost) is not None,
+            "INVALID_PARENT_COST", "原持仓成本必须是有界十进制文本")
+    require(Decimal(cost).is_finite() and Decimal(cost) > 0,
+            "INVALID_PARENT_COST", "原持仓成本必须是有限正数，不做隐式舍入")
     # Legacy added_at remains an opaque source fingerprint; never attach a guessed timezone.
     text(parent["added_at"], "added_at", 64)
     return parent
