@@ -55,6 +55,18 @@ async function fillPreview(page,pid='p1') {
 async function preview(page,pid='p1') {const f=await fillPreview(page,pid);await f.locator('button').click();await page.locator('[data-mp="reserve"]').waitFor();return f;}
 async function idle(page){await page.waitForTimeout(80);}
 const cases={
+ 'resource-capacity-expires-and-reminder-becomes-due':async p=>{
+  await p.evaluate(()=>{const expiry=fixture.book.cash.CNY.expires_at;fixture.resources={schema:'manual-planning-resources-v1',revision:fixture.book.revision,as_of:fixture.book.as_of,currency_pools:[{currency:'CNY',state:'MANUAL_CONFIRMED',confirmed_cash:'10000',reserved_cash:'2010',remaining_cash:'7990',expires_at:expiry}],positions:[{position_id:'p1',symbol:'600519.SH',state:'MANUAL_CONFIRMED',allocated_quantity:1000,core_quantity:400,unclassified_quantity:0,reserved_old_quantity:200,remaining_old_quantity:800,remaining_tactical_quantity:400,expires_at:expiry}],review_items:[{symbol:'600519.SH',purpose:'SWING',review_at:new Date(Date.now()+60000).toISOString(),action:'REVIEW_ONLY',due:false}]};});
+  await p.evaluate(()=>PlanningUI.load());assert.equal((await p.locator('.mp-cash-remaining').innerText()).trim(),'7990');
+  await p.clock.fastForward(10*60000);await idle(p);assert.equal((await p.locator('.mp-cash-remaining').innerText()).trim(),'—');assert.equal((await p.locator('.mp-old-remaining').innerText()).trim(),'—');
+  assert((await p.locator('.mp-review-reminders').innerText()).includes('复核原计划，不自动退出'));
+  await p.evaluate(()=>emitRuntime({},''));await idle(p);assert.equal(await p.locator('#planningResources').count(),0);
+ },
+ 'clock-rollback-cannot-revive-expired-snapshot':async p=>{
+  await preview(p);const start=await p.evaluate(()=>Date.now());await p.clock.setSystemTime(start+11*60000);await p.clock.runFor(1100);
+  assert.equal(await p.locator('[data-mp="reserve"]').count(),0);await p.clock.setSystemTime(start);await p.clock.runFor(1100);
+  assert(!(await p.locator('#planningWorkspace').innerText()).includes('人工确认有效'));
+ },
  'scenario-edit-failure-and-negative-recalculation':async p=>{
   await p.evaluate(()=>{API.planningAttribution=async data=>{if(data.mark_price==='bad')throw Object.assign(new Error('invalid mark'),{status:400});return {currency:'CNY',relative_hold_delta:data.fees==='150'?'-50':'90',cash_delta:'90',quantity_delta:0,unpaired_quantity:0};};});
   const f=p.locator('form[data-form="scenario"]');await f.evaluate(el=>el.closest('details').open=true);

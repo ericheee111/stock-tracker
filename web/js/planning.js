@@ -13,6 +13,7 @@
   let requestedAt = 0;
   let requestedMono = 0;
   let requestDuration = 0;
+  let maximumEstimatedTime = 0;
   let generation = 0;
   let snapshotScope = '';
   let snapshotAccess = '';
@@ -71,7 +72,9 @@
     if (!Number.isFinite(origin)) return NaN;
     const mono = Math.max(0, global.performance.now() - requestedMono);
     const elapsed = conservative ? Math.max(mono, Date.now() - requestedAt, 0) + requestDuration : mono;
-    return origin + elapsed;
+    const estimate = origin + elapsed;
+    if (conservative) maximumEstimatedTime = Math.max(maximumEstimatedTime, estimate);
+    return conservative ? maximumEstimatedTime : estimate;
   }
   function isFresh(item) {
     const now = estimatedTime(true);
@@ -85,6 +88,11 @@
     runtimeChanged();
     if (!inSession() || !book() || !root()) return;
     const b = book();
+    const resourceElement = document.getElementById('planningResources');
+    if (resourceElement) {
+      const content = resourcesPanel(snapshot, estimatedTime(true));
+      if (resourceElement.innerHTML !== content) resourceElement.innerHTML = content;
+    }
     root().querySelectorAll('[data-inventory-fresh]').forEach(function(el) {
       const inv = b.inventory[el.dataset.inventoryFresh];
       el.textContent = inv && inv.parent_matches && isFresh(inv) ? '人工确认有效' : '未确认或已过期';
@@ -274,6 +282,30 @@
       '</div><button type="submit">计算手工情景</button></form><div id="planningScenario" role="status"></div></details>';
   }
 
+  function resourcesPanel(data, now) {
+    const resource = data && data.resources; const b = data && data.book;
+    if (!resource || !b || resource.schema !== 'manual-planning-resources-v1' || resource.revision !== b.revision ||
+        resource.as_of !== b.as_of || !Array.isArray(resource.currency_pools) || !Array.isArray(resource.positions) || !Array.isArray(resource.review_items)) {
+      return '<p class="mp-note">资源摘要暂不可用；不推断现金或可卖数量。</p>';
+    }
+    const states = {MANUAL_CONFIRMED:'人工确认',UNCONFIRMED:'尚未确认',UNCLASSIFIED:'未分类',STALE:'已过期',RECONCILIATION_REQUIRED:'待对账',INCONSISTENT:'需核对'};
+    function usable(row) { return row.state === 'MANUAL_CONFIRMED' && Number.isFinite(now) && now < Date.parse(row.expires_at); }
+    function cashValue(value) { return typeof value === 'string' && /^(0|[1-9][0-9]*)(\.[0-9]+)?$/.test(value) ? value : '—'; }
+    let html = '<section class="mp-block mp-resources"><h3>共享资源与复核事项</h3><p class="mp-note">快照 ' + esc(resource.as_of) + ' · 单一本地币种池，人工未验证。以下是内部账面余量，不是券商余额或成交许可。</p>';
+    html += '<div class="mp-resource-grid">' + resource.currency_pools.map(function(row) {
+      const state = row.state === 'MANUAL_CONFIRMED' && !usable(row) ? '已过期' : states[row.state] || '未知';
+      return '<div class="mp-resource-cell" data-resource-currency="' + esc(row.currency) + '"><strong>' + esc(row.currency) + ' · ' + esc(state) + '</strong><p>人工确认现金 ' + esc(cashValue(row.confirmed_cash)) + '</p><p>内部预留 ' + esc(cashValue(row.reserved_cash)) + ' · 账面余量 <span class="mp-cash-remaining">' + esc(usable(row) ? cashValue(row.remaining_cash) : '—') + '</span></p></div>';
+    }).join('') + '</div>';
+    html += resource.positions.map(function(row) {
+      return '<div class="mp-resource-position" data-resource-position="' + esc(row.position_id) + '"><strong>' + esc(row.symbol) + '</strong><p>用途分配 ' + esc(numberText(row.allocated_quantity)) + ' · 核心保留 ' + esc(numberText(row.core_quantity)) + ' · 未分类 ' + esc(numberText(row.unclassified_quantity)) + ' 股</p><p>内部预留旧仓 ' + esc(numberText(row.reserved_old_quantity)) + ' · 旧仓账面余量 <span class="mp-old-remaining">' + esc(usable(row) ? numberText(row.remaining_old_quantity) : '—') + '</span> · 机动分配余量 ' + esc(usable(row) ? numberText(row.remaining_tactical_quantity) : '—') + ' 股</p></div>';
+    }).join('');
+    const due = resource.review_items.filter(function(item) { return Date.parse(item.review_at) <= now; });
+    html += '<div class="mp-review-reminders"><strong>待复核 ' + due.length + ' 项</strong>' + (due.length ? due.map(function(item) {
+      return '<p>' + esc(item.symbol) + ' · ' + esc(PURPOSES[item.purpose] || '用途待核对') + ' · ' + esc(item.review_at) + ' · 复核原计划，不自动退出</p>';
+    }).join('') : '<p class="mp-note">没有到期复核提醒；这不代表持仓无风险。</p>') + '</div></section>';
+    return html;
+  }
+
   function render(data) {
     const b = data && data.enabled === true ? data.book : null;
     const positions = data && Array.isArray(data.positions) ? data.positions : [];
@@ -287,7 +319,8 @@
       html += '<div class="mp-disabled"><h3>手工计划库未启用</h3><p>保留原持仓及机会功能。请先在本地显式创建独立计划库，配置路径和 Store ID 后重启引擎。</p>' +
         '<code>python -m stock_tracker.portfolio_planning init --database &lt;绝对路径&gt;</code><p>配置 STOCK_TRACKER_PLANNING_DB 与 STOCK_TRACKER_PLANNING_STORE_ID。不要使用 stock_tracker.db；浏览器不会创建数据库。</p></div>';
     } else {
-      html += '<p class="mp-note">人工未验证 · 计划版本 ' + esc(b.revision) + ' · 没有执行授权</p>' + cashPanel(b);
+      html += '<p class="mp-note">人工未验证 · 计划版本 ' + esc(b.revision) + ' · 没有执行授权</p>' +
+        '<div id="planningResources">' + resourcesPanel(data, Date.parse(b.as_of)) + '</div>' + cashPanel(b);
     }
     html += '<div class="mp-positions">' + (positions.length ? positions.map(function (p) { return positionCard(p,b); }).join('') : '<p>暂无持仓，请先使用上方持仓管理录入。</p>') + '</div>';
     if (Array.isArray(data && data.position_issues) && data.position_issues.length) {
@@ -315,6 +348,7 @@
           })))) throw new Error('计划接口版本或数据无效，已暂停编辑');
       snapshot = value; snapshotScope = ticket.scope; snapshotAccess = ticket.access;
       requestedAt = Date.now(); requestedMono = performance.now(); requestDuration = requestedMono - started;
+      maximumEstimatedTime = value.book ? Date.parse(value.book.as_of) + requestDuration : 0;
       root().innerHTML = render(value);
       refreshTemporalState();
       if (pending) message('上一请求结果仍未确认；只可在原引擎/计划库复用原ID重试，勿另建相同操作。', true);

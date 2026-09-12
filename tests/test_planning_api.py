@@ -97,6 +97,9 @@ class TestPlanningAPI(unittest.TestCase):
         self.assertEqual(status,200);self.assertTrue(body["enabled"])
         self.assertEqual(len(body["positions"]),1)
         self.assertEqual(body["book"]["allocations"],{})
+        self.assertEqual(body["resources"]["revision"], body["book"]["revision"])
+        self.assertEqual(body["resources"]["as_of"], body["book"]["as_of"])
+        self.assertTrue(all(pool["remaining_cash"] is None for pool in body["resources"]["currency_pools"]))
         self.assertEqual(self.ctx.planning_store.path.read_bytes(),before)
         self.assertFalse(body["auto_trade"])
 

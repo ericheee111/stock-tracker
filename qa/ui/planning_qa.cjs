@@ -12,7 +12,7 @@ for (const address of [base, disabledBase]) {
 }
 const output = process.env.PLANNING_QA_REPORT_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'planning-qa-'));
 fs.mkdirSync(output,{recursive:true});
-const expected = ['dual-primary','empty-holdings-visible','mobile-summary','planner-enabled','allocation','xss-escaped','cash','inventory','core-protected','preview-no-write','preview-invalidates','lost-response','retry-idempotent','mark-started','no-implicit-release','reconcile','relative-hold','stale-banner','responsive-360','responsive-768','responsive-1440','disabled-mode','error-mode','no-page-errors'];
+const expected = ['dual-primary','empty-holdings-visible','mobile-summary','planner-enabled','allocation','xss-escaped','cash','inventory','core-protected','preview-no-write','preview-invalidates','lost-response','retry-idempotent','mark-started','no-implicit-release','reconcile','relative-hold','stale-banner','responsive-360','responsive-768','responsive-1440','disabled-mode','error-mode','no-page-errors','resources-reserved','resources-after-start','resource-review-reminder'];
 const results = [];
 const errors = [];
 let browser;
@@ -63,9 +63,13 @@ async function main() {
   await check('planner-enabled',async()=>{const b=await getBook(page);assert.equal(b.enabled,true);assert.equal(b.book.revision,0);assert.equal(b.book.execution_authorized,false);});
   await check('allocation',async()=>{
     const f=await openForm(page,'allocation');
-    for(const [name,value] of Object.entries({SWING_quantity:'600',SWING_core:'200',SWING_thesis:'波段 <img src=x onerror="window.fixtureXss=true">',SWING_invalidation:'日线结构失效后复核',LONG_TERM_quantity:'400',LONG_TERM_core:'400',LONG_TERM_thesis:'长期逻辑',LONG_TERM_invalidation:'逻辑改变后人工复核'})) await f.locator('[name="'+name+'"]').fill(value);
+    for(const [name,value] of Object.entries({SWING_quantity:'600',SWING_core:'200',SWING_review:'2026-01-01',SWING_thesis:'波段 <img src=x onerror="window.fixtureXss=true">',SWING_invalidation:'日线结构失效后复核',LONG_TERM_quantity:'400',LONG_TERM_core:'400',LONG_TERM_thesis:'长期逻辑',LONG_TERM_invalidation:'逻辑改变后人工复核'})) await f.locator('[name="'+name+'"]').fill(value);
     await save(page,f);
     const b=await getBook(page);const a=Object.values(b.book.allocations)[0];assert.equal(a.sleeves.length,2);assert.equal(a.sleeves.reduce((n,s)=>n+s.quantity,0),1000);
+  });
+  await check('resource-review-reminder',async()=>{
+    const b=await getBook(page);assert.equal(b.resources.review_items.filter(r=>r.due).length,1);
+    assert((await page.locator('#planningResources').innerText()).includes('复核原计划，不自动退出'));
   });
   await check('xss-escaped',async()=>{assert.equal(await page.evaluate(()=>window.fixtureXss),undefined);assert.equal(await page.locator('#planningWorkspace img').count(),0);});
   await check('cash',async()=>{const f=await openForm(page,'cash');await f.locator('[name="cash"]').fill('10000');await f.locator('[name="checked"]').check();await save(page,f);assert.equal((await getBook(page)).book.cash.CNY.available_cash,'10000');});
@@ -112,10 +116,21 @@ async function main() {
     await page.locator('[data-mp="retry"]').click();await page.waitForFunction(()=>document.getElementById('planningMessage').textContent.includes('已保存'));
     const b=await getBook(page);assert.equal(Object.keys(b.book.plans).length,1);assert.equal(b.book.revision,4);assert.equal(retryIds.length,2);assert.equal(retryIds[0],retryIds[1]);
   });
+  await check('resources-reserved',async()=>{
+    const r=(await getBook(page)).resources;const c=r.currency_pools.find(x=>x.currency==='CNY');
+    assert.equal(c.reserved_cash,'2010');assert.equal(c.remaining_cash,'7990');
+    assert.equal(r.positions[0].remaining_old_quantity,500);assert.equal(r.positions[0].remaining_tactical_quantity,200);
+    assert.equal((await page.locator('[data-resource-currency="CNY"] .mp-cash-remaining').innerText()).trim(),'7990');
+  });
   await page.unroute('**/api/planning/commands');
   await check('mark-started',async()=>{
     await page.locator('[data-plan-action="MARK_EXECUTED"]').click();await page.waitForFunction(()=>document.getElementById('planningMessage').textContent.includes('已保存') && !document.querySelector('[data-plan-action="MARK_EXECUTED"]'));
     assert.equal(Object.values((await getBook(page)).book.plans)[0].status,'RECONCILIATION_REQUIRED');
+  });
+  await check('resources-after-start',async()=>{
+    const r=(await getBook(page)).resources;assert.equal(r.currency_pools[0].remaining_cash,null);
+    assert.equal((await page.locator('[data-resource-currency="CNY"] .mp-cash-remaining').innerText()).trim(),'—');
+    assert.equal((await page.locator('.mp-old-remaining').innerText()).trim(),'—');
   });
   await check('no-implicit-release',async()=>{const b=await getBook(page);assert.equal(Object.values(b.book.plans)[0].reserved_cash,'2010');assert.equal(await page.locator('[data-plan-action="CANCEL"]').count(),0);});
   await check('reconcile',async()=>{

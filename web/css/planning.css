@@ -38,3 +38,8 @@
 #planningWorkspace :focus-visible, .tb-dual-jumps a:focus-visible, .planning-panel > summary:focus-visible { outline:2px solid var(--accent,#77a7ff); outline-offset:3px; }
 @media(max-width:900px) { .tb-dual-lanes, #planningWorkspace .mp-positions { grid-template-columns:1fr; } }
 @media(max-width:540px) { .planning-panel { padding:12px; } #planningWorkspace .mp-fields { grid-template-columns:1fr; } #planningWorkspace .mp-block, #planningWorkspace .mp-position { padding:12px; } .tb-dual-jumps { gap:8px; } .tb-dual-jumps a { padding:12px; } }
+
+/* Read-only summary; updating expiry must not recreate editable form inputs. */
+#planningWorkspace .mp-resource-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr)); gap:12px; }
+#planningWorkspace .mp-resource-cell { padding:12px; border:1px solid var(--border,rgba(125,140,165,.25)); border-radius:10px; min-width:0; }
+#planningWorkspace .mp-resource-position, #planningWorkspace .mp-review-reminders { margin-top:14px; padding-top:12px; border-top:1px solid var(--border,rgba(125,140,165,.25)); }

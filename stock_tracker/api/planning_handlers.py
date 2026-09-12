@@ -18,6 +18,7 @@ from ..portfolio_planning.domain import (
     require,
     validate_parent,
 )
+from ..portfolio_planning.resources import resource_summary
 from ..portfolio_planning.store import PlanningStore
 from .handlers import APIError, AppContext
 
@@ -89,12 +90,15 @@ def get_book(ctx: AppContext) -> dict[str, Any]:
     try:
         current, issues = inspect_parents(ctx)
         store = ctx.planning_store
+        raw_book = store.read() if store else None
+        as_of = datetime.now(timezone.utc)
         return {"schema": "manual-planning-api-v1", "enabled": store is not None,
                 "status": ctx.planning_status,
                 "store_id": store.store_id if store else None,
                 "positions": [{**p, "parent_hash": digest(p)} for p in current.values()],
                 "position_issues": issues,
-                "book": public_book(store.read(), current, datetime.now(timezone.utc)) if store else None,
+                "book": public_book(raw_book, current, as_of) if raw_book is not None else None,
+                "resources": resource_summary(raw_book, current, as_of) if raw_book is not None else None,
                 "auto_trade": False, "assurance": "MANUAL_UNVERIFIED"}
     except PlanningError as error:
         raise APIError(error.status, error.code, str(error)) from error
