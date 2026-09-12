@@ -73,3 +73,9 @@ py -3.14 -B -m basedpyright --level error stock_tracker/portfolio_planning stock
 浏览器工具需要本地 Playwright；可由 `PLAYWRIGHT_MODULE` 或 `PLAYWRIGHT_PATH` 指定已安装路径。`PLANNING_QA_REPORT_DIR` 决定合成截图/JSON输出目录。集成脚本只创建临时两个数据库，失败退出非0，清理不改原生产库。
 
 结果表、独立审查身份、提交树和保护哈希见本轮 `MULTIHORIZON-P1-P3-VALIDATION.md` 及仓库外 evidence package。前端自动验收不等于完整无障碍或真实多交易日验收；内部hash日志不是独立数字签名。
+
+## 7. 资源摘要与恢复提示（2026-09-12）
+
+计划面板顶部展示分币种现金、内部预留和账面余量；同股旧仓预留与机动分配余量分开，不表示可成交授权。过期或待对账时余量未知，已有预留不释放。复核提醒只要求检查原计划，不自动卖出。
+
+页面清除认证/连接失效会清除私有展示与预演；原不确定命令仅保留内存并绑定原引擎/Store ID，恢复连接后使用原ID重试。401不能证明之前未提交。情景输入改变会清除旧结果。NOT_CONFIGURED才显示初始化；UNAVAILABLE要求核对并恢复原库，不要新建空库绕过旧记录。

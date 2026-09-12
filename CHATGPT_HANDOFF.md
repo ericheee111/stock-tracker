@@ -1,6 +1,6 @@
 # ChatGPT Handoff
 
-> **当前执行切片（2026-09-11）：** P1–P3 手工持仓计划已实现为待独立审查候选：用途分层/核心保留量、人工库存与币种现金、T条件预演与预留/取消/对账、双主线首页及相对持有情景测算。使用独立显式初始化的计划库，不修改生产Portfolio、不生成券商订单或真实绩效。具体边界见 `docs/MULTIHORIZON-P1-P3-IMPLEMENTATION.md` 和 `docs/MULTIHORIZON-MANUAL-PLANNING-RUNBOOK.md`；测试与发布身份以 `docs/MULTIHORIZON-P1-P3-VALIDATION.md` 为准。旧文档中的“仅设计/未实现”保留其当时历史范围；多周期策略、真实fill/部分成交、B1d/B2/B3仍未完成。
+> **当前交付（2026-09-12）：** 已有手工多周期计划收口与资源摘要已实现，最终实现 `10a81253d1f155a6e3fb4df929f37e8cab343ec8` 已通过独立只读Review和完整工程门禁。持仓/机会并重，波段数周至数月；人工计划、库存现金与情景均非券商/成交验证。见 `docs/MULTIHORIZON-P1-P3-VALIDATION.md` 与 `docs/MULTIHORIZON-CLOSURE-20260912.md`。下一阶段是拆分隔离的指标/策略基线修复与B1d/B2/B3接线；未审查算法草稿不自动合并。历史计划/状态段落不得覆盖本条，所有安全和真实证据门禁保留。
 
 ## User profile confirmed — 2026-09-11
 
