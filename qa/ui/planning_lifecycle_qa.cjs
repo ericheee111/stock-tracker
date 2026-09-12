@@ -55,6 +55,23 @@ async function fillPreview(page,pid='p1') {
 async function preview(page,pid='p1') {const f=await fillPreview(page,pid);await f.locator('button').click();await page.locator('[data-mp="reserve"]').waitFor();return f;}
 async function idle(page){await page.waitForTimeout(80);}
 const cases={
+ 'scenario-edit-failure-and-negative-recalculation':async p=>{
+  await p.evaluate(()=>{API.planningAttribution=async data=>{if(data.mark_price==='bad')throw Object.assign(new Error('invalid mark'),{status:400});return {currency:'CNY',relative_hold_delta:data.fees==='150'?'-50':'90',cash_delta:'90',quantity_delta:0,unpaired_quantity:0};};});
+  const f=p.locator('form[data-form="scenario"]');await f.evaluate(el=>el.closest('details').open=true);
+  for(const [n,v] of Object.entries({starting_quantity:'1000',sellable_old_quantity:'1000',buy_quantity:'100',sell_quantity:'100',average_buy:'10',average_sell:'11',fees:'10',mark_price:'12'}))await f.locator('[name="'+n+'"]').fill(v);
+  await f.locator('button').click();await idle(p);assert((await p.locator('#planningScenario').innerText()).includes('90'));
+  await f.locator('[name="fees"]').fill('150');assert.equal(await p.locator('#planningScenario .mp-result').count(),0);
+  await f.locator('[name="mark_price"]').fill('bad');await f.locator('button').click();await idle(p);assert.equal(await p.locator('#planningScenario .mp-result').count(),0);
+  await f.locator('[name="mark_price"]').fill('12');await f.locator('button').click();await idle(p);assert((await p.locator('#planningScenario').innerText()).includes('-50'));
+ },
+ 'unavailable-store-preserves-recovery-boundary':async p=>{
+  await p.evaluate(()=>{fixture.enabled=false;fixture.book=null;fixture.status='UNAVAILABLE';});await p.evaluate(()=>PlanningUI.load());
+  const text=await p.locator('#planningWorkspace').innerText();assert(text.includes('原计划库'));assert(!text.includes('portfolio_planning init'));assert.equal(await p.locator('.mp-unavailable').count(),1);
+ },
+ 'unconfigured-store-shows-explicit-init-only':async p=>{
+  await p.evaluate(()=>{fixture.enabled=false;fixture.book=null;fixture.status='NOT_CONFIGURED';});await p.evaluate(()=>PlanningUI.load());
+  assert((await p.locator('#planningWorkspace').innerText()).includes('portfolio_planning init'));assert.equal(await p.locator('form[data-form="allocation"]').count(),0);
+ },
  'preview-failure-clears-other-position':async p=>{
   const b=await fillPreview(p,'p2');await preview(p);await p.evaluate(()=>previewMode='fail-p2');await b.locator('button').click();await idle(p);
   assert.equal(await p.locator('[data-mp="reserve"]').count(),0);assert.equal(await p.evaluate(()=>calls.length),0);

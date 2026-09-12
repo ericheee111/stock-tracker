@@ -36,6 +36,12 @@
     const ctx = runtimeContext();
     return Boolean(snapshot && ctx.ready && ctx.scope === snapshotScope && ctx.access === snapshotAccess);
   }
+  let scenarioGeneration = 0;
+  function clearScenario() {
+    scenarioGeneration++;
+    const element = document.getElementById('planningScenario');
+    if (element) element.replaceChildren();
+  }
   function clearPreview() {
     previewCommand = null;
     const element = document.getElementById('planningPreview');
@@ -275,7 +281,9 @@
       '<p class="mp-note">几周至数月波段为主；长持、短线与做 T 分层。此处只管理人工计划，不改变原信号、真实持仓或券商委托。</p>' +
       '<div id="planningMessage" class="mp-message" role="status" aria-live="polite"></div>' +
       '<button type="button" data-mp="retry" hidden>重试未确认请求（复用原命令ID）</button>';
-    if (!b) {
+    if (!b && data && data.status !== 'NOT_CONFIGURED') {
+      html += '<div class="mp-unavailable mp-error"><h3>原计划库暂不可用</h3><p>配置或完整性校验失败。请核对原计划库路径和 Store ID，保留原记录并恢复原库；不要新建空库绕过未关闭预留。修复后重新启动引擎并加载。</p></div>';
+    } else if (!b) {
       html += '<div class="mp-disabled"><h3>手工计划库未启用</h3><p>保留原持仓及机会功能。请先在本地显式创建独立计划库，配置路径和 Store ID 后重启引擎。</p>' +
         '<code>python -m stock_tracker.portfolio_planning init --database &lt;绝对路径&gt;</code><p>配置 STOCK_TRACKER_PLANNING_DB 与 STOCK_TRACKER_PLANNING_STORE_ID。不要使用 stock_tracker.db；浏览器不会创建数据库。</p></div>';
     } else {
@@ -358,6 +366,8 @@
     const pid = form.dataset.position;
     let data;
     if (type === 'scenario') {
+      clearScenario();
+      const scenarioTicket = scenarioGeneration;
       data = {currency:value(form,'currency')};
       ['starting_quantity','sellable_old_quantity','buy_quantity','sell_quantity'].forEach(function (k) { data[k]=quantity(form,k); });
       ['fees','mark_price'].forEach(function (k) { data[k]=value(form,k); });
@@ -367,7 +377,7 @@
       busy=true;freezeControls();
       try {
         const result=await global.API.planningAttribution(data);
-        if (!current(ticket)) return;
+        if (!current(ticket) || scenarioTicket !== scenarioGeneration) return;
         document.getElementById('planningScenario').innerHTML='<div class="mp-result"><strong>相对继续持有的净值差：' + esc(result.relative_hold_delta) + ' ' + esc(result.currency) + '</strong><p>现金变化 ' + esc(result.cash_delta) + ' · 持仓变化 ' + esc(result.quantity_delta) + '股 · 未配对 ' + esc(result.unpaired_quantity) + '股</p><p>仅手工情景，不进入真实收益或胜率。</p></div>';
       } finally {busy=false;freezeControls();}
       return;
@@ -421,7 +431,10 @@
     if(!panel || !element) return;
     panel.addEventListener('toggle',function(){if(panel.open && !snapshot) load();});
     element.addEventListener('submit',function(event){const form=event.target;if(!form.matches('form[data-form]'))return;event.preventDefault();submit(form).catch(function(error){message(error.message || '输入无效',true);});});
-    function edited(event) { if (event.target.closest('form[data-form="t-preview"]')) clearPreview(); }
+    function edited(event) {
+      if (event.target.closest('form[data-form="t-preview"]')) clearPreview();
+      if (event.target.closest('form[data-form="scenario"]')) clearScenario();
+    }
     element.addEventListener('input',edited);
     element.addEventListener('change',edited);
     if (global.Runtime && global.Runtime.onChange) global.Runtime.onChange(runtimeChanged);
