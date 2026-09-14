@@ -1,0 +1,20 @@
+.ec-panel { margin: 16px 0; padding: 14px; border: 1px solid var(--border, rgba(128,128,128,.3)); border-radius: 12px; font-size: 14px; line-height: 1.6; min-width: 0; overflow-wrap: anywhere; }
+.ec-panel > summary { cursor: pointer; padding: 6px 0; font-weight: 600; }
+.ec-mode { display: inline-block; margin-left: 12px; font-size: 12px; font-weight: 400; }
+.ec-panel p { margin: 10px 0; }
+.ec-meta { font-size: 12px; }
+.ec-scroll { overflow-x: auto; max-width: 100%; margin: 14px 0; }
+.ec-panel table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.ec-panel caption { text-align: left; padding: 0 0 6px; font-size: 12px; }
+.ec-panel th, .ec-panel td { border-bottom: 1px solid var(--border, rgba(128,128,128,.3)); padding: 8px 10px; text-align: right; }
+.ec-panel th:first-child { text-align: left; }
+.ec-findings { padding-left: 20px; }
+.ec-findings li { margin: 6px 0; }
+.ec-group { border-top: 1px solid var(--border, rgba(128,128,128,.3)); }
+.ec-group summary { cursor: pointer; padding: 10px 2px; }
+.ec-group ul { padding: 0; margin: 0 0 12px; list-style: none; }
+.ec-group li { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 4px 12px; padding: 7px 6px; }
+.ec-group strong { font-variant-numeric: tabular-nums; text-align: right; }
+.ec-group small { grid-column: 1 / -1; }
+.ec-panel summary:focus-visible, .ec-scroll:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; border-radius: 3px; }
+@media (max-width: 480px) { .ec-panel { padding: 10px; } .ec-panel th, .ec-panel td { padding: 7px 4px; font-size: 12px; } .ec-mode { margin-left: 8px; } }

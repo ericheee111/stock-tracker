@@ -1,5 +1,9 @@
 # Stock Tracker v1.1 项目概览
 
+<!-- N4_CONTINUATION_CURRENT_BEGIN -->
+> **当前续作（2026-09-14）：** VALIDATION_IN_PROGRESS：阶段代码已完成专项和界面检查，正在对精确候选执行完整门禁与独立只读Review；未发布。历史通过数不替代当前候选结果。 详见 `docs/N4-CONTINUATION-20260914.md`。
+<!-- N4_CONTINUATION_CURRENT_END -->
+
 <!-- NUMERICAL_INTEGRATION_CURRENT_BEGIN -->
 > **当前交付（2026-09-14）：** 数值基础与已发布指标诊断UI已受控合并，实现 `97e3694aadf11929f308e732755123ae51c1a0e1` 通过独立只读Review；组合Runtime 921通过/1skip、Quant 753通过。保留两个作者历史、诊断UI/API和参数上限；加入HTTPS无重定向及数值下溢防御，评价v3保留有序非空输入。已合并不等于实盘有效，真实策略、数据准入与B1d仍待推进。见 `docs/NUMERICAL-INTEGRATION-VALIDATION-20260914.md`、`docs/NEXT-PRODUCT-STAGES-20260914.md`。本段覆盖下方两分支各自历史状态；最终push身份见外部DELIVERY.json。
 <!-- NUMERICAL_INTEGRATION_CURRENT_END -->

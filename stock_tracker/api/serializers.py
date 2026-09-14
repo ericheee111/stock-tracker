@@ -261,6 +261,22 @@ def serialize_runtime_holding(
     }
 
 
+def _elapsed_quote_ms(now: datetime, source: datetime) -> int:
+    """Align the known system clock; never attach a guessed zone to source data.
+
+    Legacy naive sources retain their existing system-local label semantics.
+    Aware source instants can be compared with datetime.now()'s local clock.
+    This compatibility path does not upgrade legacy timestamps to PIT evidence.
+    """
+    source_aware = source.tzinfo is not None and source.utcoffset() is not None
+    clock_aware = now.tzinfo is not None and now.utcoffset() is not None
+    if source_aware and not clock_aware:
+        now = now.astimezone()
+    elif clock_aware and not source_aware:
+        now = now.astimezone().replace(tzinfo=None)
+    return max(0, int((now - source).total_seconds() * 1000))
+
+
 def _quote_age_ms(q: T.Quote, now: datetime) -> int:
     """真实观察年龄：当前时钟 - 源时间戳（秒→毫秒）。
 
@@ -268,10 +284,10 @@ def _quote_age_ms(q: T.Quote, now: datetime) -> int:
     """
     ts = q.timestamp
     if ts is not None and getattr(ts, "year", 0) >= 2000:
-        return max(0, int((now - ts).total_seconds() * 1000))
+        return _elapsed_quote_ms(now, ts)
     ra = q.received_at
     if ra is not None:
-        return max(0, int((now - ra).total_seconds() * 1000))
+        return _elapsed_quote_ms(now, ra)
     return int(q.observed_age_ms or 0)
 
 

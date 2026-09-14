@@ -43,6 +43,7 @@ from ..storage.repository import (
 )
 from . import serializers as S
 from .sse import SSEHub
+from .evidence_handlers import evidence_detail
 
 
 @dataclass
@@ -245,7 +246,9 @@ def get_quote_detail(ctx: AppContext, symbol: str) -> dict | None:
     raw_recent = ctx.repo.load_recent_bars(symbol, "1d", n=MAX_DIAGNOSTIC_BARS)
     recent = [bar for bar in raw_recent if type(bar) is T.Bar and bar.symbol == symbol
               and bar.market is market and bar.interval == "1d"][-80:]
-    diagnostics = daily_window_diagnostics(raw_recent, symbol, market, datetime.now(timezone.utc))
+    diagnostic_at = datetime.now(timezone.utc)
+    diagnostics = daily_window_diagnostics(raw_recent, symbol, market, diagnostic_at)
+    comparison = evidence_detail(q, raw_recent, symbol, market, diagnostic_at)
     indicators = S.serialize_indicators(FS.build_indicators(recent, market)) if recent else None
     recent_bars = [S.serialize_bar(b) for b in recent[-30:]] if recent else []
     return {
@@ -256,6 +259,7 @@ def get_quote_detail(ctx: AppContext, symbol: str) -> dict | None:
         "indicators": indicators,
         "recent_bars": recent_bars,
         "indicator_diagnostics": diagnostics,
+        "evidence_comparison": comparison,
         "bar_count": len(recent) if recent else 0,
     }
 
