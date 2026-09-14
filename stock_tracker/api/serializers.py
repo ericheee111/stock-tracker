@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from typing import Optional
 
@@ -384,11 +385,21 @@ def serialize_health(h: T.ProviderHealth) -> dict:
 def serialize_indicators(ind: dict) -> dict:
     """指标快照 → dict（已是 ``dict[str, float|None]``，直接透传）。
 
-    仅做 JSON 安全化：None 保持 None，其余转为 float（指标均为标量）。
+    仅做标量 JSON 安全化：缺失、bool、非数值及非有限结果均为 None，不隐式强制转换。
     """
     if not ind:
         return {}
-    return {k: (None if v is None else float(v)) for k, v in ind.items()}
+    result = {}
+    for key, value in ind.items():
+        if type(value) not in (int, float):
+            result[key] = None
+            continue
+        try:
+            number = float(value)
+            result[key] = number if math.isfinite(number) else None
+        except (OverflowError, ValueError):
+            result[key] = None
+    return result
 
 
 def serialize_bar(bar: T.Bar) -> dict:

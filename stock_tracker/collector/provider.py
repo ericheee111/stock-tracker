@@ -51,11 +51,12 @@ class RateLimiter:
 
 
 def _ssl_ctx() -> ssl.SSLContext:
-    """禁用证书校验的旧 Runtime 上下文；研究 exact-raw 通道禁止使用。"""
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    return ctx
+    """Runtime HTTPS verifies system CA and hostname; certificate errors propagate.
+
+    Research retains its own stricter URL/header/redirect/response-size contract.
+    This does not turn legacy HTTP sources into authenticated transport.
+    """
+    return ssl.create_default_context()
 
 
 class _NoRedirectHandler(urllib_request.HTTPRedirectHandler):
