@@ -22,6 +22,19 @@ class TestSourceDistribution(unittest.TestCase):
             self.skipTest("source-distribution check requires a Git checkout")
 
         critical = (
+            "stock_tracker/features/indicator_diagnostics.py",
+            "stock_tracker/features/indicators.py",
+            "stock_tracker/quant/evaluation/metrics.py",
+            "scripts/run_numerical_baseline.py",
+            "tests/fixtures/numerical_legacy_v1.json",
+            "tests/test_numerical_baseline.py",
+            "tests/test_indicator_baseline_vectors.py",
+            "tests/test_indicator_diagnostics.py",
+            "tests_quant/test_metric_contract_edges.py",
+            "qa/ui/indicator_diagnostics_qa.cjs",
+            "web/js/indicator_diagnostics.js",
+            "web/css/indicator_diagnostics.css",
+            "docs/NUMERICAL-BASELINE-20260914-PLAN.md",
             "stock_tracker/portfolio_planning/resources.py",
             "tests/test_planning_resources.py",
             "qa/ui/planning_lifecycle_qa.cjs",

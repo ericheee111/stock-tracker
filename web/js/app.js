@@ -636,7 +636,7 @@
     sheet.appendChild(box);
     try {
       const d = await API.getQuote(symbol);
-      if (!d) { box.remove(); return; }
+      if (!d || d.symbol !== symbol) { box.remove(); return; }
       box.innerHTML = renderQuotePanel(d);
     } catch (e) {
       box.innerHTML = '<div class="ind-empty">指标加载失败（展示增强，不影响信号详情）</div>';
@@ -660,7 +660,7 @@
     }).join('');
     return '<div class="quote-panel-head">K线指标 · ' + F.esc(name) +
       ' <span class="quote-count">' + (d.bar_count || 0) + ' 根</span></div>' +
-      ind +
+      ind + (window.IndicatorDiagnostics ? window.IndicatorDiagnostics.render(d.indicator_diagnostics, d.symbol) : '') +
       (rows ? '<div class="qb-scroll"><table class="qb-table"><thead><tr>' +
         '<th>日期</th><th>开</th><th>高</th><th>低</th><th>收</th><th>量</th>' +
         '</tr></thead><tbody>' + rows + '</tbody></table></div>' : '');

@@ -48,13 +48,13 @@ def build_indicators(bars: list[T.Bar], market: T.Market = T.Market.A) -> dict:
         valid_bars: list[T.Bar] = []
         for bar in sorted(bars, key=lambda item: item.timestamp):
             prices = (bar.open, bar.high, bar.low, bar.close)
-            if any(not math.isfinite(value) or value <= 0 for value in prices):
+            if any(not I.valid_number(value) or value <= 0 for value in prices):
                 continue
             if bar.low > min(bar.open, bar.close, bar.high):
                 continue
             if bar.high < max(bar.open, bar.close, bar.low):
                 continue
-            if bar.volume < 0:
+            if type(bar.volume) is not int or bar.volume < 0:
                 continue
             valid_bars.append(bar)
         if not valid_bars:

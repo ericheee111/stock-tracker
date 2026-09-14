@@ -30,6 +30,10 @@ from ..decision.types import (
     UserPortfolioProfile,
 )
 from ..features import feature_snapshot as FS
+from ..features.indicator_diagnostics import (
+    MAX_DIAGNOSTIC_BARS,
+    daily_window_diagnostics,
+)
 from ..signals.crowding import crowding_for
 from ..storage.repository import (
     Repository,
@@ -237,7 +241,11 @@ def get_quote_detail(ctx: AppContext, symbol: str) -> dict | None:
     quote_d = S.serialize_quote(q, _market_cfg(ctx, market)) if q is not None else None
     name = (q.name if (q is not None and q.name) else symbol)
     # 加载足够计算全部指标的历史（roc60/ma60 需 ~61 根）
-    recent = _load_bars_for_indicators(ctx, symbol, market, 80)
+    # One bounded cache read. Keep the old detail window separate from new diagnostics.
+    raw_recent = ctx.repo.load_recent_bars(symbol, "1d", n=MAX_DIAGNOSTIC_BARS)
+    recent = [bar for bar in raw_recent if type(bar) is T.Bar and bar.symbol == symbol
+              and bar.market is market and bar.interval == "1d"][-80:]
+    diagnostics = daily_window_diagnostics(raw_recent, symbol, market, datetime.now(timezone.utc))
     indicators = S.serialize_indicators(FS.build_indicators(recent, market)) if recent else None
     recent_bars = [S.serialize_bar(b) for b in recent[-30:]] if recent else []
     return {
@@ -247,6 +255,7 @@ def get_quote_detail(ctx: AppContext, symbol: str) -> dict | None:
         "quote": quote_d,
         "indicators": indicators,
         "recent_bars": recent_bars,
+        "indicator_diagnostics": diagnostics,
         "bar_count": len(recent) if recent else 0,
     }
 

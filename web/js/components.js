@@ -724,8 +724,8 @@
     }
     function cell(label, val, opts) {
       opts = opts || {};
-      const v = (val == null || (typeof val === 'number' && isNaN(val)))
-        ? '—' : (opts.pct ? F.fmtPct(val) : (opts.percent ? F.num(val).toFixed(1) + '%' : F.num(val)));
+      const v = (typeof val !== 'number' || !Number.isFinite(val))
+        ? '—' : (opts.pct ? F.fmtPct(val) : (opts.percent ? val.toFixed(1) + '%' : F.num(val)));
       const cls = opts.cls ? (' ' + opts.cls) : '';
       return '<div class="ind-cell' + cls + '">' +
         '<span class="ind-k">' + esc(label) + '</span>' +
@@ -733,11 +733,13 @@
     }
     // 52周位置：用进度条直观展示（0=最低，1=最高）
     const pos = ind.pos52w;
-    const posPct = (typeof pos === 'number' && !isNaN(pos)) ? (pos * 100).toFixed(0) : null;
+    const posPct = (typeof pos === 'number' && Number.isFinite(pos) && pos >= 0 && pos <= 1) ? (pos * 100).toFixed(0) : null;
+    const rankLabel = Number.isSafeInteger(ind.bar_count) && ind.bar_count > 0
+      ? '近' + Math.min(252,ind.bar_count) + '根日线收盘排名' : '样本窗口收盘排名';
     const posBar = posPct == null
       ? ''
       : '<div class="ind-posbar"><div class="ind-posfill" style="width:' + esc(posPct) + '%"></div>' +
-        '<span class="ind-poslabel">' + esc(posPct) + '% · 52周位置</span></div>';
+        '<span class="ind-poslabel">' + esc(posPct) + '% · ' + esc(rankLabel) + '</span></div>';
 
     return '<div class="ind-grid">' +
       cell('MA5', ind.ma5) + cell('MA10', ind.ma10) + cell('MA20', ind.ma20) + cell('MA60', ind.ma60) +
