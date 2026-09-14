@@ -1,6 +1,6 @@
 # 两条数值工作线的受控集成
 
-2026-09-14。状态 INTEGRATION_PENDING_TESTS_AND_INDEPENDENT_REVIEW。
+2026-09-14。状态 INDEPENDENT_REVIEW_AND_ENGINEERING_GATES_PASSED。
 
 起点main `1088ac668aed788738b175ea98ef322aeaef5017` 已包含指标诊断UI/API、严格有序非空评价输入、period上限和安全类型序列化；数值基础分支 `7c9545dbb42657ce370663300a027f9dbd7b99a1` 已包含更强Runtime HTTPS、冻结源向量及独立审查发现的算术下溢防御。两条线分别通过的事实不冒充合并提交已通过。
 
@@ -24,3 +24,7 @@
 ## 初步执行记录
 
 组合聚焦125项初次两项冻结样本hash失败：新Windows worktree checkout自动将LF转CRLF，Git blob与固定hash一致。未改fixture期望或固定hash，而是对两份样本增加精确eol=lf属性，并实际在core.autocrlf=true的临时checkout-index中验证字节一致。修正后125项通过，Ruff/类型/compile/pip/smoke/benchmark通过，两套基线均保留。后续完整测试、精确树重建与独立审查仍待执行。
+
+## 最终候选结果
+
+精确集成提交 `97e3694aadf11929f308e732755123ae51c1a0e1` 的完整门禁、两条来源字节保护和独立Review已通过。最终记录见 `NUMERICAL-INTEGRATION-VALIDATION-20260914.md`；历史初步测试文字不表示当前仍待审。后续任务见 `NEXT-PRODUCT-STAGES-20260914.md`，本批不自动开启后续模型、数据或交易功能。

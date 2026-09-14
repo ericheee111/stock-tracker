@@ -1,7 +1,7 @@
 # Stock Tracker v1.1 项目概览
 
 <!-- NUMERICAL_INTEGRATION_CURRENT_BEGIN -->
-> **当前集成（2026-09-14）：** 已发布main `1088ac6…` 与数值基础分支 `7c9545d…` 正在新隔离worktree合并。保留指标诊断UI/API、valid_number和最大period；加入HTTPS无重定向及下溢防御。评价policy显式v3，保持main的有序且非空输入，空回撤不能回退为0。两分支历史审查不自动等于集成通过；最终门禁和独立Review待完成。见 `docs/NUMERICAL-INTEGRATION-20260914.md`。
+> **当前交付（2026-09-14）：** 数值基础与已发布指标诊断UI已受控合并，实现 `97e3694aadf11929f308e732755123ae51c1a0e1` 通过独立只读Review；组合Runtime 921通过/1skip、Quant 753通过。保留两个作者历史、诊断UI/API和参数上限；加入HTTPS无重定向及数值下溢防御，评价v3保留有序非空输入。已合并不等于实盘有效，真实策略、数据准入与B1d仍待推进。见 `docs/NUMERICAL-INTEGRATION-VALIDATION-20260914.md`、`docs/NEXT-PRODUCT-STAGES-20260914.md`。本段覆盖下方两分支各自历史状态；最终push身份见外部DELIVERY.json。
 <!-- NUMERICAL_INTEGRATION_CURRENT_END -->
 
 > **当前交付（2026-09-14）：** N1传输/数值输入防御、N2固定公式基线、N3日线样本窗口核对已实现并通过独立Review。实现 `b299363b6358bda2868362c84d5be83f55d29374`；见 `docs/NUMERICAL-BASELINE-20260914-VALIDATION.md`。这是数值诊断，不是新波段策略或T信号；评分权重/风险参数不变，下一顺序见 `docs/NUMERICAL-NEXT-STAGES-20260914.md`。已有手工持仓/机会双主线与证据安全边界保持。历史记录不覆盖本条。
