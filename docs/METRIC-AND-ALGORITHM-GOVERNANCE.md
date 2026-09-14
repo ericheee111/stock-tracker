@@ -1,5 +1,9 @@
 # 指标与算法治理合同：再评估提案
 
+<!-- NUMERICAL_INTEGRATION_CURRENT_BEGIN -->
+> **当前集成（2026-09-14）：** 已发布main `1088ac6…` 与数值基础分支 `7c9545d…` 正在新隔离worktree合并。保留指标诊断UI/API、valid_number和最大period；加入HTTPS无重定向及下溢防御。评价policy显式v3，保持main的有序且非空输入，空回撤不能回退为0。两分支历史审查不自动等于集成通过；最终门禁和独立Review待完成。见 `NUMERICAL-INTEGRATION-20260914.md`。
+<!-- NUMERICAL_INTEGRATION_CURRENT_END -->
+
 ## 用户画像约束（2026-09-11 已确认）
 
 几周到几个月波段是主线，兼容长持/短线，做 T 作为持仓附加层；具体设计见 `PRODUCT-TRADING-PROFILE-20260911.md`。指标、标签、校准与实验按持仓目的/周期分组，不混用短线和波段概率。T 除配对差价还必须报告费用后相对同条件持有的净值增量，包含未完成腿和库存偏离；T 次数不得放大波段独立样本数。此为设计约束，不代表公式或模型已上线。

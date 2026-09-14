@@ -5,7 +5,8 @@ import math
 import ssl
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+from urllib.request import HTTPSHandler
 
 from stock_tracker.api.serializers import serialize_indicators
 from stock_tracker.collector.provider import MarketDataProvider, _ssl_ctx
@@ -20,15 +21,17 @@ class TestRuntimeTLSBaseline(unittest.TestCase):
 
     def test_certificate_rejection_is_not_retried_insecurely(self):
         instance = SimpleNamespace(timeout=1, _with_host=lambda url: url)
+        opener = MagicMock()
+        opener.open.side_effect = ssl.SSLCertVerificationError('synthetic rejection')
         with (
-            patch('stock_tracker.collector.provider.urllib_request.urlopen',
-                  side_effect=ssl.SSLCertVerificationError('synthetic rejection')) as request,
+            patch('stock_tracker.collector.provider.urllib_request.build_opener', return_value=opener) as builder,
             self.assertRaises(ssl.SSLCertVerificationError),
         ):
             MarketDataProvider._request(instance, 'https://fixture.invalid/quotes')
-        self.assertEqual(request.call_count, 1)
-        self.assertTrue(request.call_args.kwargs['context'].check_hostname)
-        self.assertEqual(request.call_args.kwargs['context'].verify_mode, ssl.CERT_REQUIRED)
+        self.assertEqual(opener.open.call_count, 1)
+        handler = next(h for h in builder.call_args.args if isinstance(h, HTTPSHandler))
+        self.assertTrue(handler._context.check_hostname)
+        self.assertEqual(handler._context.verify_mode, ssl.CERT_REQUIRED)
 
 
 class TestIndicatorDomains(unittest.TestCase):

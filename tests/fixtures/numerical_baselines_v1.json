@@ -1,0 +1,6504 @@
+{
+  "schema": "numerical-compatibility-baseline-v1",
+  "source_commit": "cdf8c1b4114252ead3bf5eb19d2f624be8929bd8",
+  "source_sha256": {
+    "indicators": "88b4d90cab5cad7615cebfd7ba2d24067ff65b702caa171216c812a08d88444a",
+    "metrics": "1decfa11f67e8dad0f29b4119b62b52d306858561e2be5208789825647f956b8"
+  },
+  "assurance": "SYNTHETIC_COMPATIBILITY_ONLY_NOT_FORMULA_AUTHORITY_OR_PERFORMANCE",
+  "series": {
+    "flat": [
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0,
+      10.0
+    ],
+    "up": [
+      10.0,
+      10.125,
+      10.25,
+      10.375,
+      10.5,
+      10.625,
+      10.75,
+      10.875,
+      11.0,
+      11.125,
+      11.25,
+      11.375,
+      11.5,
+      11.625,
+      11.75,
+      11.875,
+      12.0,
+      12.125,
+      12.25,
+      12.375,
+      12.5,
+      12.625,
+      12.75,
+      12.875,
+      13.0,
+      13.125,
+      13.25,
+      13.375,
+      13.5,
+      13.625,
+      13.75,
+      13.875,
+      14.0,
+      14.125,
+      14.25,
+      14.375,
+      14.5,
+      14.625,
+      14.75,
+      14.875,
+      15.0,
+      15.125,
+      15.25,
+      15.375,
+      15.5,
+      15.625,
+      15.75,
+      15.875,
+      16.0,
+      16.125,
+      16.25,
+      16.375,
+      16.5,
+      16.625,
+      16.75,
+      16.875,
+      17.0,
+      17.125,
+      17.25,
+      17.375,
+      17.5,
+      17.625,
+      17.75,
+      17.875,
+      18.0,
+      18.125,
+      18.25,
+      18.375,
+      18.5,
+      18.625,
+      18.75,
+      18.875,
+      19.0,
+      19.125,
+      19.25,
+      19.375,
+      19.5,
+      19.625,
+      19.75,
+      19.875,
+      20.0,
+      20.125,
+      20.25,
+      20.375,
+      20.5,
+      20.625,
+      20.75,
+      20.875,
+      21.0,
+      21.125,
+      21.25,
+      21.375,
+      21.5,
+      21.625,
+      21.75,
+      21.875,
+      22.0,
+      22.125,
+      22.25,
+      22.375,
+      22.5,
+      22.625,
+      22.75,
+      22.875,
+      23.0,
+      23.125,
+      23.25,
+      23.375,
+      23.5,
+      23.625,
+      23.75,
+      23.875,
+      24.0,
+      24.125,
+      24.25,
+      24.375,
+      24.5,
+      24.625,
+      24.75,
+      24.875,
+      25.0,
+      25.125,
+      25.25,
+      25.375,
+      25.5,
+      25.625,
+      25.75,
+      25.875
+    ],
+    "down": [
+      100.0,
+      99.875,
+      99.75,
+      99.625,
+      99.5,
+      99.375,
+      99.25,
+      99.125,
+      99.0,
+      98.875,
+      98.75,
+      98.625,
+      98.5,
+      98.375,
+      98.25,
+      98.125,
+      98.0,
+      97.875,
+      97.75,
+      97.625,
+      97.5,
+      97.375,
+      97.25,
+      97.125,
+      97.0,
+      96.875,
+      96.75,
+      96.625,
+      96.5,
+      96.375,
+      96.25,
+      96.125,
+      96.0,
+      95.875,
+      95.75,
+      95.625,
+      95.5,
+      95.375,
+      95.25,
+      95.125,
+      95.0,
+      94.875,
+      94.75,
+      94.625,
+      94.5,
+      94.375,
+      94.25,
+      94.125,
+      94.0,
+      93.875,
+      93.75,
+      93.625,
+      93.5,
+      93.375,
+      93.25,
+      93.125,
+      93.0,
+      92.875,
+      92.75,
+      92.625,
+      92.5,
+      92.375,
+      92.25,
+      92.125,
+      92.0,
+      91.875,
+      91.75,
+      91.625,
+      91.5,
+      91.375,
+      91.25,
+      91.125,
+      91.0,
+      90.875,
+      90.75,
+      90.625,
+      90.5,
+      90.375,
+      90.25,
+      90.125,
+      90.0,
+      89.875,
+      89.75,
+      89.625,
+      89.5,
+      89.375,
+      89.25,
+      89.125,
+      89.0,
+      88.875,
+      88.75,
+      88.625,
+      88.5,
+      88.375,
+      88.25,
+      88.125,
+      88.0,
+      87.875,
+      87.75,
+      87.625,
+      87.5,
+      87.375,
+      87.25,
+      87.125,
+      87.0,
+      86.875,
+      86.75,
+      86.625,
+      86.5,
+      86.375,
+      86.25,
+      86.125,
+      86.0,
+      85.875,
+      85.75,
+      85.625,
+      85.5,
+      85.375,
+      85.25,
+      85.125,
+      85.0,
+      84.875,
+      84.75,
+      84.625,
+      84.5,
+      84.375,
+      84.25,
+      84.125
+    ],
+    "mixed": [
+      29.11741,
+      31.21734,
+      31.67058,
+      30.71573,
+      33.31216,
+      32.42169,
+      32.4629,
+      31.31503,
+      33.18329,
+      30.30357,
+      26.91056,
+      31.51828,
+      25.61461,
+      32.22032,
+      26.63006,
+      27.26125,
+      32.86235,
+      25.95364,
+      28.46777,
+      33.41559,
+      29.72433,
+      29.44836,
+      29.63439,
+      32.8385,
+      25.90006,
+      30.07118,
+      28.23376,
+      30.4537,
+      34.05509,
+      33.73935,
+      31.10928,
+      27.88941,
+      28.78802,
+      33.7861,
+      26.26077,
+      32.30745,
+      33.69077,
+      30.44244,
+      25.984,
+      28.38112,
+      29.52021,
+      33.58507,
+      28.4987,
+      27.59977,
+      30.29543,
+      26.24804,
+      25.31652,
+      25.11382,
+      28.83703,
+      31.78209,
+      32.81226,
+      25.13142,
+      34.24704,
+      32.87829,
+      29.71699,
+      28.65121,
+      31.13954,
+      30.35433,
+      32.71142,
+      32.07517,
+      26.55755,
+      28.69453,
+      31.3591,
+      28.61182,
+      33.73024,
+      27.53008,
+      29.14865,
+      31.5557,
+      34.43651,
+      34.30925,
+      28.2193,
+      31.26072,
+      29.7205,
+      27.65064,
+      28.93788,
+      26.33408,
+      29.6528,
+      30.55996,
+      28.36996,
+      30.42718,
+      30.54555,
+      25.24579,
+      25.62852,
+      26.00812,
+      29.32214,
+      26.04192,
+      29.60263,
+      33.51117,
+      33.56169,
+      33.32773,
+      31.18822,
+      31.17371,
+      29.64654,
+      25.67623,
+      26.40111,
+      33.14963,
+      25.75012,
+      27.8637,
+      30.61532,
+      25.72219,
+      33.15362,
+      26.99388,
+      30.48886,
+      33.39889,
+      30.80974,
+      30.32152,
+      33.26914,
+      28.5492,
+      27.70501,
+      26.85495,
+      25.60243,
+      28.05129,
+      31.09011,
+      25.35623,
+      29.98516,
+      29.80914,
+      25.82686,
+      33.88143,
+      27.05067,
+      30.53405,
+      26.74581,
+      29.72021,
+      28.95407,
+      30.39006,
+      33.55631,
+      25.66256,
+      27.74008,
+      34.32233
+    ],
+    "integer": [
+      10,
+      27,
+      13,
+      30,
+      16,
+      33,
+      19,
+      36,
+      22,
+      39,
+      25,
+      11,
+      28,
+      14,
+      31,
+      17,
+      34,
+      20,
+      37,
+      23,
+      40,
+      26,
+      12,
+      29,
+      15,
+      32,
+      18,
+      35,
+      21,
+      38,
+      24,
+      10,
+      27,
+      13,
+      30,
+      16,
+      33,
+      19,
+      36,
+      22,
+      39,
+      25,
+      11,
+      28,
+      14,
+      31,
+      17,
+      34,
+      20,
+      37,
+      23,
+      40,
+      26,
+      12,
+      29,
+      15,
+      32,
+      18,
+      35,
+      21,
+      38,
+      24,
+      10,
+      27,
+      13,
+      30,
+      16,
+      33,
+      19,
+      36,
+      22,
+      39,
+      25,
+      11,
+      28,
+      14,
+      31,
+      17,
+      34,
+      20,
+      37,
+      23,
+      40,
+      26,
+      12,
+      29,
+      15,
+      32,
+      18,
+      35,
+      21,
+      38,
+      24,
+      10,
+      27,
+      13,
+      30,
+      16,
+      33,
+      19,
+      36,
+      22,
+      39,
+      25,
+      11,
+      28,
+      14,
+      31,
+      17,
+      34,
+      20,
+      37,
+      23,
+      40,
+      26,
+      12,
+      29,
+      15,
+      32,
+      18,
+      35,
+      21,
+      38,
+      24,
+      10,
+      27,
+      13,
+      30
+    ]
+  },
+  "indicator_cases": [
+    {
+      "series": "flat",
+      "length": 0,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 0,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 0,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "flat",
+      "length": 0,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 0,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 0,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 0,
+      "function": "stdev",
+      "args": [],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 0,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 0,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 1,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 1,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 1,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "flat",
+      "length": 1,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 1,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 1,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 1,
+      "function": "stdev",
+      "args": [],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 1,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 1,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 2,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 2,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 2,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "flat",
+      "length": 2,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 2,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 2,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 2,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 2,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 2,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 5,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 5,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 5,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "flat",
+      "length": 5,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 5,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 5,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 5,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 5,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 5,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 13,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 13,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 13,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "flat",
+      "length": 13,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 13,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 13,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 13,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 13,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 13,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 14,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 14,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 14,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "flat",
+      "length": 14,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 14,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 14,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 14,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 14,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 14,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 15,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "flat",
+      "length": 15,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 15,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "flat",
+      "length": 15,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 100.0
+    },
+    {
+      "series": "flat",
+      "length": 15,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 15,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 15,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 15,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 15,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "flat",
+      "length": 20,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 20,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 20,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "flat",
+      "length": 20,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 100.0
+    },
+    {
+      "series": "flat",
+      "length": 20,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 20,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 20,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 20,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 20,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "flat",
+      "length": 25,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 25,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 25,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "flat",
+      "length": 25,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 100.0
+    },
+    {
+      "series": "flat",
+      "length": 25,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 25,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 25,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 25,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 25,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "flat",
+      "length": 26,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 26,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 26,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        0.0,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "flat",
+      "length": 26,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 100.0
+    },
+    {
+      "series": "flat",
+      "length": 26,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 26,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 26,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 26,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 26,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "flat",
+      "length": 33,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 33,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 33,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        0.0,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "flat",
+      "length": 33,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 100.0
+    },
+    {
+      "series": "flat",
+      "length": 33,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 33,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 33,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 33,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 33,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "flat",
+      "length": 34,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 34,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 34,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "series": "flat",
+      "length": 34,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 100.0
+    },
+    {
+      "series": "flat",
+      "length": 34,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 34,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 34,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 34,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 34,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "flat",
+      "length": 60,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 60,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 60,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "series": "flat",
+      "length": 60,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 100.0
+    },
+    {
+      "series": "flat",
+      "length": 60,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 60,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 60,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 60,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 60,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "flat",
+      "length": 128,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 128,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 128,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "series": "flat",
+      "length": 128,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 100.0
+    },
+    {
+      "series": "flat",
+      "length": 128,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 128,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "flat",
+      "length": 128,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 128,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "flat",
+      "length": 128,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "up",
+      "length": 0,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 0,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 0,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "up",
+      "length": 0,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 0,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 0,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 0,
+      "function": "stdev",
+      "args": [],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 0,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 0,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 1,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 1,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "up",
+      "length": 1,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "up",
+      "length": 1,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 1,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 1,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 1,
+      "function": "stdev",
+      "args": [],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 1,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "up",
+      "length": 1,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 2,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 2,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.0625
+    },
+    {
+      "series": "up",
+      "length": 2,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "up",
+      "length": 2,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 2,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 2,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "up",
+      "length": 2,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.08838834764831845
+    },
+    {
+      "series": "up",
+      "length": 2,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.0625
+    },
+    {
+      "series": "up",
+      "length": 2,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 5,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 5,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.25
+    },
+    {
+      "series": "up",
+      "length": 5,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "up",
+      "length": 5,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 5,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 5,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 10.25
+    },
+    {
+      "series": "up",
+      "length": 5,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.19764235376052372
+    },
+    {
+      "series": "up",
+      "length": 5,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.1767766952966369
+    },
+    {
+      "series": "up",
+      "length": 5,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 13,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 13,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.75
+    },
+    {
+      "series": "up",
+      "length": 13,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "up",
+      "length": 13,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 13,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 5.747126436781609
+    },
+    {
+      "series": "up",
+      "length": 13,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 10.75
+    },
+    {
+      "series": "up",
+      "length": 13,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.48680506023116343
+    },
+    {
+      "series": "up",
+      "length": 13,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.46770717334674267
+    },
+    {
+      "series": "up",
+      "length": 13,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 14,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 14,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.8125
+    },
+    {
+      "series": "up",
+      "length": 14,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "up",
+      "length": 14,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 14,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 5.681818181818182
+    },
+    {
+      "series": "up",
+      "length": 14,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 10.75
+    },
+    {
+      "series": "up",
+      "length": 14,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.5229125165837972
+    },
+    {
+      "series": "up",
+      "length": 14,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.5038911092686593
+    },
+    {
+      "series": "up",
+      "length": 14,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 15,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "up",
+      "length": 15,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.875
+    },
+    {
+      "series": "up",
+      "length": 15,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "up",
+      "length": 15,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 100.0
+    },
+    {
+      "series": "up",
+      "length": 15,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 5.617977528089887
+    },
+    {
+      "series": "up",
+      "length": 15,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 10.875
+    },
+    {
+      "series": "up",
+      "length": 15,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.5590169943749475
+    },
+    {
+      "series": "up",
+      "length": 15,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.5400617248673217
+    },
+    {
+      "series": "up",
+      "length": 15,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "up",
+      "length": 20,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 11.1875
+    },
+    {
+      "series": "up",
+      "length": 20,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 11.1875
+    },
+    {
+      "series": "up",
+      "length": 20,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "up",
+      "length": 20,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 100.0
+    },
+    {
+      "series": "up",
+      "length": 20,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 5.319148936170213
+    },
+    {
+      "series": "up",
+      "length": 20,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 11.25
+    },
+    {
+      "series": "up",
+      "length": 20,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.739509972887452
+    },
+    {
+      "series": "up",
+      "length": 20,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.7207851621669248
+    },
+    {
+      "series": "up",
+      "length": 20,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "up",
+      "length": 25,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 11.8125
+    },
+    {
+      "series": "up",
+      "length": 25,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 11.8125
+    },
+    {
+      "series": "up",
+      "length": 25,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "up",
+      "length": 25,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 100.0
+    },
+    {
+      "series": "up",
+      "length": 25,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 5.05050505050505
+    },
+    {
+      "series": "up",
+      "length": 25,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 11.875
+    },
+    {
+      "series": "up",
+      "length": 25,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.919975090242484
+    },
+    {
+      "series": "up",
+      "length": 25,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.9013878188659973
+    },
+    {
+      "series": "up",
+      "length": 25,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "up",
+      "length": 26,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 11.9375
+    },
+    {
+      "series": "up",
+      "length": 26,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 11.9375
+    },
+    {
+      "series": "up",
+      "length": 26,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        0.875,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "up",
+      "length": 26,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 100.0
+    },
+    {
+      "series": "up",
+      "length": 26,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 5.0
+    },
+    {
+      "series": "up",
+      "length": 26,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 12.0
+    },
+    {
+      "series": "up",
+      "length": 26,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.9560661587986472
+    },
+    {
+      "series": "up",
+      "length": 26,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.9375
+    },
+    {
+      "series": "up",
+      "length": 26,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "up",
+      "length": 33,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 12.8125
+    },
+    {
+      "series": "up",
+      "length": 33,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 12.8125
+    },
+    {
+      "series": "up",
+      "length": 33,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        0.875,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "up",
+      "length": 33,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 100.0
+    },
+    {
+      "series": "up",
+      "length": 33,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 4.672897196261682
+    },
+    {
+      "series": "up",
+      "length": 33,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 12.875
+    },
+    {
+      "series": "up",
+      "length": 33,
+      "function": "stdev",
+      "args": [],
+      "expected": 1.2086924753633572
+    },
+    {
+      "series": "up",
+      "length": 33,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 1.1902380714238083
+    },
+    {
+      "series": "up",
+      "length": 33,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "up",
+      "length": 34,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 12.9375
+    },
+    {
+      "series": "up",
+      "length": 34,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 12.9375
+    },
+    {
+      "series": "up",
+      "length": 34,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        0.875,
+        0.875,
+        0.0
+      ]
+    },
+    {
+      "series": "up",
+      "length": 34,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 100.0
+    },
+    {
+      "series": "up",
+      "length": 34,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 4.62962962962963
+    },
+    {
+      "series": "up",
+      "length": 34,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 13.0
+    },
+    {
+      "series": "up",
+      "length": 34,
+      "function": "stdev",
+      "args": [],
+      "expected": 1.244780770524138
+    },
+    {
+      "series": "up",
+      "length": 34,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 1.2263385543967864
+    },
+    {
+      "series": "up",
+      "length": 34,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "up",
+      "length": 60,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 16.1875
+    },
+    {
+      "series": "up",
+      "length": 60,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 16.1875
+    },
+    {
+      "series": "up",
+      "length": 60,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        0.875,
+        0.8750000000000002,
+        -2.220446049250313e-16
+      ]
+    },
+    {
+      "series": "up",
+      "length": 60,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 100.0
+    },
+    {
+      "series": "up",
+      "length": 60,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 3.731343283582089
+    },
+    {
+      "series": "up",
+      "length": 60,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 16.25
+    },
+    {
+      "series": "up",
+      "length": 60,
+      "function": "stdev",
+      "args": [],
+      "expected": 2.1830311495716224
+    },
+    {
+      "series": "up",
+      "length": 60,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 2.164762785310822
+    },
+    {
+      "series": "up",
+      "length": 60,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "up",
+      "length": 128,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 24.6875
+    },
+    {
+      "series": "up",
+      "length": 128,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 24.6875
+    },
+    {
+      "series": "up",
+      "length": 128,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        0.875,
+        0.8750000000000002,
+        -2.220446049250313e-16
+      ]
+    },
+    {
+      "series": "up",
+      "length": 128,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 100.0
+    },
+    {
+      "series": "up",
+      "length": 128,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 2.4752475247524752
+    },
+    {
+      "series": "up",
+      "length": 128,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 24.75
+    },
+    {
+      "series": "up",
+      "length": 128,
+      "function": "stdev",
+      "args": [],
+      "expected": 4.636809247747852
+    },
+    {
+      "series": "up",
+      "length": 128,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 4.618661196710579
+    },
+    {
+      "series": "up",
+      "length": 128,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "down",
+      "length": 0,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 0,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 0,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "down",
+      "length": 0,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 0,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 0,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 0,
+      "function": "stdev",
+      "args": [],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 0,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 0,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 1,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 1,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 100.0
+    },
+    {
+      "series": "down",
+      "length": 1,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "down",
+      "length": 1,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 1,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 1,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 1,
+      "function": "stdev",
+      "args": [],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 1,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "down",
+      "length": 1,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 2,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 2,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 99.9375
+    },
+    {
+      "series": "down",
+      "length": 2,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "down",
+      "length": 2,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 2,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 2,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 99.875
+    },
+    {
+      "series": "down",
+      "length": 2,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.08838834764831845
+    },
+    {
+      "series": "down",
+      "length": 2,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.0625
+    },
+    {
+      "series": "down",
+      "length": 2,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 5,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 5,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 99.75
+    },
+    {
+      "series": "down",
+      "length": 5,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "down",
+      "length": 5,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 5,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 5,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 99.75
+    },
+    {
+      "series": "down",
+      "length": 5,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.19764235376052372
+    },
+    {
+      "series": "down",
+      "length": 5,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.1767766952966369
+    },
+    {
+      "series": "down",
+      "length": 5,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 13,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 13,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 99.25
+    },
+    {
+      "series": "down",
+      "length": 13,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "down",
+      "length": 13,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 13,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -0.6305170239596469
+    },
+    {
+      "series": "down",
+      "length": 13,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 99.25
+    },
+    {
+      "series": "down",
+      "length": 13,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.48680506023116343
+    },
+    {
+      "series": "down",
+      "length": 13,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.46770717334674267
+    },
+    {
+      "series": "down",
+      "length": 13,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 14,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 14,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 99.1875
+    },
+    {
+      "series": "down",
+      "length": 14,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "down",
+      "length": 14,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 14,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -0.6313131313131313
+    },
+    {
+      "series": "down",
+      "length": 14,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 99.125
+    },
+    {
+      "series": "down",
+      "length": 14,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.5229125165837972
+    },
+    {
+      "series": "down",
+      "length": 14,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.5038911092686593
+    },
+    {
+      "series": "down",
+      "length": 14,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 15,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "down",
+      "length": 15,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 99.125
+    },
+    {
+      "series": "down",
+      "length": 15,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "down",
+      "length": 15,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 0.0
+    },
+    {
+      "series": "down",
+      "length": 15,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -0.6321112515802781
+    },
+    {
+      "series": "down",
+      "length": 15,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 99.125
+    },
+    {
+      "series": "down",
+      "length": 15,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.5590169943749475
+    },
+    {
+      "series": "down",
+      "length": 15,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.5400617248673217
+    },
+    {
+      "series": "down",
+      "length": 15,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "down",
+      "length": 20,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 98.8125
+    },
+    {
+      "series": "down",
+      "length": 20,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 98.8125
+    },
+    {
+      "series": "down",
+      "length": 20,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "down",
+      "length": 20,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 0.0
+    },
+    {
+      "series": "down",
+      "length": 20,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -0.6361323155216284
+    },
+    {
+      "series": "down",
+      "length": 20,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 98.875
+    },
+    {
+      "series": "down",
+      "length": 20,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.739509972887452
+    },
+    {
+      "series": "down",
+      "length": 20,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.7207851621669248
+    },
+    {
+      "series": "down",
+      "length": 20,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "down",
+      "length": 25,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 98.1875
+    },
+    {
+      "series": "down",
+      "length": 25,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 98.1875
+    },
+    {
+      "series": "down",
+      "length": 25,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "down",
+      "length": 25,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 0.0
+    },
+    {
+      "series": "down",
+      "length": 25,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -0.6402048655569782
+    },
+    {
+      "series": "down",
+      "length": 25,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 98.25
+    },
+    {
+      "series": "down",
+      "length": 25,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.919975090242484
+    },
+    {
+      "series": "down",
+      "length": 25,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.9013878188659973
+    },
+    {
+      "series": "down",
+      "length": 25,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "down",
+      "length": 26,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 98.0625
+    },
+    {
+      "series": "down",
+      "length": 26,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 98.0625
+    },
+    {
+      "series": "down",
+      "length": 26,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        -0.875,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "down",
+      "length": 26,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 0.0
+    },
+    {
+      "series": "down",
+      "length": 26,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -0.641025641025641
+    },
+    {
+      "series": "down",
+      "length": 26,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 98.125
+    },
+    {
+      "series": "down",
+      "length": 26,
+      "function": "stdev",
+      "args": [],
+      "expected": 0.9560661587986472
+    },
+    {
+      "series": "down",
+      "length": 26,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.9375
+    },
+    {
+      "series": "down",
+      "length": 26,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "down",
+      "length": 33,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 97.1875
+    },
+    {
+      "series": "down",
+      "length": 33,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 97.1875
+    },
+    {
+      "series": "down",
+      "length": 33,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        -0.875,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "down",
+      "length": 33,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 0.0
+    },
+    {
+      "series": "down",
+      "length": 33,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -0.646830530401035
+    },
+    {
+      "series": "down",
+      "length": 33,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 97.25
+    },
+    {
+      "series": "down",
+      "length": 33,
+      "function": "stdev",
+      "args": [],
+      "expected": 1.2086924753633572
+    },
+    {
+      "series": "down",
+      "length": 33,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 1.1902380714238083
+    },
+    {
+      "series": "down",
+      "length": 33,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "down",
+      "length": 34,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 97.0625
+    },
+    {
+      "series": "down",
+      "length": 34,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 97.0625
+    },
+    {
+      "series": "down",
+      "length": 34,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        -0.875,
+        -0.875,
+        0.0
+      ]
+    },
+    {
+      "series": "down",
+      "length": 34,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 0.0
+    },
+    {
+      "series": "down",
+      "length": 34,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -0.6476683937823834
+    },
+    {
+      "series": "down",
+      "length": 34,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 97.125
+    },
+    {
+      "series": "down",
+      "length": 34,
+      "function": "stdev",
+      "args": [],
+      "expected": 1.244780770524138
+    },
+    {
+      "series": "down",
+      "length": 34,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 1.2263385543967864
+    },
+    {
+      "series": "down",
+      "length": 34,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "down",
+      "length": 60,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 93.8125
+    },
+    {
+      "series": "down",
+      "length": 60,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 93.8125
+    },
+    {
+      "series": "down",
+      "length": 60,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        -0.875,
+        -0.8750000000000002,
+        2.220446049250313e-16
+      ]
+    },
+    {
+      "series": "down",
+      "length": 60,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 0.0
+    },
+    {
+      "series": "down",
+      "length": 60,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -0.6702412868632708
+    },
+    {
+      "series": "down",
+      "length": 60,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 93.875
+    },
+    {
+      "series": "down",
+      "length": 60,
+      "function": "stdev",
+      "args": [],
+      "expected": 2.1830311495716224
+    },
+    {
+      "series": "down",
+      "length": 60,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 2.164762785310822
+    },
+    {
+      "series": "down",
+      "length": 60,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "down",
+      "length": 128,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 85.3125
+    },
+    {
+      "series": "down",
+      "length": 128,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 85.3125
+    },
+    {
+      "series": "down",
+      "length": 128,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        -0.875,
+        -0.8750000000000002,
+        2.220446049250313e-16
+      ]
+    },
+    {
+      "series": "down",
+      "length": 128,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 0.0
+    },
+    {
+      "series": "down",
+      "length": 128,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -0.7374631268436578
+    },
+    {
+      "series": "down",
+      "length": 128,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 85.375
+    },
+    {
+      "series": "down",
+      "length": 128,
+      "function": "stdev",
+      "args": [],
+      "expected": 4.636809247747852
+    },
+    {
+      "series": "down",
+      "length": 128,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 4.618661196710579
+    },
+    {
+      "series": "down",
+      "length": 128,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 2.0
+    },
+    {
+      "series": "mixed",
+      "length": 0,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 0,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 0,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "mixed",
+      "length": 0,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 0,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 0,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 0,
+      "function": "stdev",
+      "args": [],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 0,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 0,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 1,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 1,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 29.11741
+    },
+    {
+      "series": "mixed",
+      "length": 1,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "mixed",
+      "length": 1,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 1,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 1,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 1,
+      "function": "stdev",
+      "args": [],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 1,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "mixed",
+      "length": 1,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 2,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 2,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 30.167375
+    },
+    {
+      "series": "mixed",
+      "length": 2,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "mixed",
+      "length": 2,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 2,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 2,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 29.11741
+    },
+    {
+      "series": "mixed",
+      "length": 2,
+      "function": "stdev",
+      "args": [],
+      "expected": 1.484874743017067
+    },
+    {
+      "series": "mixed",
+      "length": 2,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 1.0499650000000003
+    },
+    {
+      "series": "mixed",
+      "length": 2,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 5,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 5,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 31.206644
+    },
+    {
+      "series": "mixed",
+      "length": 5,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "mixed",
+      "length": 5,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 5,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 5,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 31.21734
+    },
+    {
+      "series": "mixed",
+      "length": 5,
+      "function": "stdev",
+      "args": [],
+      "expected": 1.521055875446395
+    },
+    {
+      "series": "mixed",
+      "length": 5,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 1.360473734029437
+    },
+    {
+      "series": "mixed",
+      "length": 5,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 13,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 13,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 30.751011538461537
+    },
+    {
+      "series": "mixed",
+      "length": 13,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "mixed",
+      "length": 13,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 13,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -18.203463320967604
+    },
+    {
+      "series": "mixed",
+      "length": 13,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 31.31503
+    },
+    {
+      "series": "mixed",
+      "length": 13,
+      "function": "stdev",
+      "args": [],
+      "expected": 2.3124457863369328
+    },
+    {
+      "series": "mixed",
+      "length": 13,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 2.221726047242916
+    },
+    {
+      "series": "mixed",
+      "length": 13,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 14,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 14,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 30.855962142857145
+    },
+    {
+      "series": "mixed",
+      "length": 14,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "mixed",
+      "length": 14,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 14,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -2.901972649487132
+    },
+    {
+      "series": "mixed",
+      "length": 14,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 31.31503
+    },
+    {
+      "series": "mixed",
+      "length": 14,
+      "function": "stdev",
+      "args": [],
+      "expected": 2.256162990583719
+    },
+    {
+      "series": "mixed",
+      "length": 14,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 2.1740930575601225
+    },
+    {
+      "series": "mixed",
+      "length": 14,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 15,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "mixed",
+      "length": 15,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 30.57423533333333
+    },
+    {
+      "series": "mixed",
+      "length": 15,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "mixed",
+      "length": 15,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 46.81373271145601
+    },
+    {
+      "series": "mixed",
+      "length": 15,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -12.122367100641938
+    },
+    {
+      "series": "mixed",
+      "length": 15,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 31.31503
+    },
+    {
+      "series": "mixed",
+      "length": 15,
+      "function": "stdev",
+      "args": [],
+      "expected": 2.432535827279445
+    },
+    {
+      "series": "mixed",
+      "length": 15,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 2.3500528747806695
+    },
+    {
+      "series": "mixed",
+      "length": 15,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 3.9066128571428576
+    },
+    {
+      "series": "mixed",
+      "length": 20,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 30.3287065
+    },
+    {
+      "series": "mixed",
+      "length": 20,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 30.3287065
+    },
+    {
+      "series": "mixed",
+      "length": 20,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "mixed",
+      "length": 20,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 50.94404713643785
+    },
+    {
+      "series": "mixed",
+      "length": 20,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 25.48071615309917
+    },
+    {
+      "series": "mixed",
+      "length": 20,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 31.31503
+    },
+    {
+      "series": "mixed",
+      "length": 20,
+      "function": "stdev",
+      "args": [],
+      "expected": 2.632861899725078
+    },
+    {
+      "series": "mixed",
+      "length": 20,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 2.5661963474903375
+    },
+    {
+      "series": "mixed",
+      "length": 20,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 4.854855714285715
+    },
+    {
+      "series": "mixed",
+      "length": 25,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 29.9043275
+    },
+    {
+      "series": "mixed",
+      "length": 25,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 29.968397141349715
+    },
+    {
+      "series": "mixed",
+      "length": 25,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "mixed",
+      "length": 25,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 49.12292305053699
+    },
+    {
+      "series": "mixed",
+      "length": 25,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -22.49108874031553
+    },
+    {
+      "series": "mixed",
+      "length": 25,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 30.30357
+    },
+    {
+      "series": "mixed",
+      "length": 25,
+      "function": "stdev",
+      "args": [],
+      "expected": 2.570423882929169
+    },
+    {
+      "series": "mixed",
+      "length": 25,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 2.5184907743359632
+    },
+    {
+      "series": "mixed",
+      "length": 25,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 5.250923571428572
+    },
+    {
+      "series": "mixed",
+      "length": 26,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 29.786802
+    },
+    {
+      "series": "mixed",
+      "length": 26,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 29.978185985030695
+    },
+    {
+      "series": "mixed",
+      "length": 26,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        -0.4922736202624094,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "mixed",
+      "length": 26,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 48.73437803920691
+    },
+    {
+      "series": "mixed",
+      "length": 26,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 1.166889211632356
+    },
+    {
+      "series": "mixed",
+      "length": 26,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 30.07118
+    },
+    {
+      "series": "mixed",
+      "length": 26,
+      "function": "stdev",
+      "args": [],
+      "expected": 2.5185576860933416
+    },
+    {
+      "series": "mixed",
+      "length": 26,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 2.4696489975959692
+    },
+    {
+      "series": "mixed",
+      "length": 26,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 5.219737857142858
+    },
+    {
+      "series": "mixed",
+      "length": 33,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 29.9348205
+    },
+    {
+      "series": "mixed",
+      "length": 33,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 30.234839993277262
+    },
+    {
+      "series": "mixed",
+      "length": 33,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        -0.15403071583298455,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "mixed",
+      "length": 33,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 50.41985914758039
+    },
+    {
+      "series": "mixed",
+      "length": 33,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -5.46954885613243
+    },
+    {
+      "series": "mixed",
+      "length": 33,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 29.72433
+    },
+    {
+      "series": "mixed",
+      "length": 33,
+      "function": "stdev",
+      "args": [],
+      "expected": 2.487413183613758
+    },
+    {
+      "series": "mixed",
+      "length": 33,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 2.4494351796213296
+    },
+    {
+      "series": "mixed",
+      "length": 33,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 3.8901028571428578
+    },
+    {
+      "series": "mixed",
+      "length": 34,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 30.013109500000002
+    },
+    {
+      "series": "mixed",
+      "length": 34,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 30.573055232012763
+    },
+    {
+      "series": "mixed",
+      "length": 34,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        0.14687758323336197,
+        -0.12851703144727247,
+        0.2753946146806344
+      ]
+    },
+    {
+      "series": "mixed",
+      "length": 34,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 50.485112489378224
+    },
+    {
+      "series": "mixed",
+      "length": 34,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -0.7898672415782848
+    },
+    {
+      "series": "mixed",
+      "length": 34,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 29.72433
+    },
+    {
+      "series": "mixed",
+      "length": 34,
+      "function": "stdev",
+      "args": [],
+      "expected": 2.5231285708708424
+    },
+    {
+      "series": "mixed",
+      "length": 34,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 2.4857468217926475
+    },
+    {
+      "series": "mixed",
+      "length": 34,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 3.8936928571428573
+    },
+    {
+      "series": "mixed",
+      "length": 60,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 29.825717500000003
+    },
+    {
+      "series": "mixed",
+      "length": 60,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 30.35373032363566
+    },
+    {
+      "series": "mixed",
+      "length": 60,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        0.482071648988061,
+        0.14797890192588192,
+        0.33409274706217906
+      ]
+    },
+    {
+      "series": "mixed",
+      "length": 60,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 57.77119975205265
+    },
+    {
+      "series": "mixed",
+      "length": 60,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 7.935460489100682
+    },
+    {
+      "series": "mixed",
+      "length": 60,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 30.29543
+    },
+    {
+      "series": "mixed",
+      "length": 60,
+      "function": "stdev",
+      "args": [],
+      "expected": 2.681755994224469
+    },
+    {
+      "series": "mixed",
+      "length": 60,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 2.659314126928763
+    },
+    {
+      "series": "mixed",
+      "length": 60,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 3.7811535714285713
+    },
+    {
+      "series": "mixed",
+      "length": 128,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 28.941938
+    },
+    {
+      "series": "mixed",
+      "length": 128,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 29.55179936742126
+    },
+    {
+      "series": "mixed",
+      "length": 128,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        0.31260880771351296,
+        0.02307509987199588,
+        0.2895337078415171
+      ]
+    },
+    {
+      "series": "mixed",
+      "length": 128,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 58.02831565917772
+    },
+    {
+      "series": "mixed",
+      "length": 128,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": 18.54060586300993
+    },
+    {
+      "series": "mixed",
+      "length": 128,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 28.95407
+    },
+    {
+      "series": "mixed",
+      "length": 128,
+      "function": "stdev",
+      "args": [],
+      "expected": 2.71233369450558
+    },
+    {
+      "series": "mixed",
+      "length": 128,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 2.701717866316851
+    },
+    {
+      "series": "mixed",
+      "length": 128,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 5.064165714285715
+    },
+    {
+      "series": "integer",
+      "length": 0,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 0,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 0,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "integer",
+      "length": 0,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 0,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 0,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 0,
+      "function": "stdev",
+      "args": [],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 0,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 0,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 1,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 1,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 10.0
+    },
+    {
+      "series": "integer",
+      "length": 1,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "integer",
+      "length": 1,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 1,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 1,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 1,
+      "function": "stdev",
+      "args": [],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 1,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 0.0
+    },
+    {
+      "series": "integer",
+      "length": 1,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 2,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 2,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 18.5
+    },
+    {
+      "series": "integer",
+      "length": 2,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "integer",
+      "length": 2,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 2,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 2,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 10
+    },
+    {
+      "series": "integer",
+      "length": 2,
+      "function": "stdev",
+      "args": [],
+      "expected": 12.020815280171307
+    },
+    {
+      "series": "integer",
+      "length": 2,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 8.5
+    },
+    {
+      "series": "integer",
+      "length": 2,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 5,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 5,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 19.2
+    },
+    {
+      "series": "integer",
+      "length": 5,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "integer",
+      "length": 5,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 5,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 5,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 16
+    },
+    {
+      "series": "integer",
+      "length": 5,
+      "function": "stdev",
+      "args": [],
+      "expected": 8.814760348415605
+    },
+    {
+      "series": "integer",
+      "length": 5,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 7.884161337770809
+    },
+    {
+      "series": "integer",
+      "length": 5,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 13,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 13,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 23.76923076923077
+    },
+    {
+      "series": "integer",
+      "length": 13,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "integer",
+      "length": 13,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 13,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -22.22222222222222
+    },
+    {
+      "series": "integer",
+      "length": 13,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 25
+    },
+    {
+      "series": "integer",
+      "length": 13,
+      "function": "stdev",
+      "args": [],
+      "expected": 9.531997396085165
+    },
+    {
+      "series": "integer",
+      "length": 13,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 9.158046870660092
+    },
+    {
+      "series": "integer",
+      "length": 13,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 14,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 14,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 23.071428571428573
+    },
+    {
+      "series": "integer",
+      "length": 14,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "integer",
+      "length": 14,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 14,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -36.36363636363637
+    },
+    {
+      "series": "integer",
+      "length": 14,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 22
+    },
+    {
+      "series": "integer",
+      "length": 14,
+      "function": "stdev",
+      "args": [],
+      "expected": 9.52296241653894
+    },
+    {
+      "series": "integer",
+      "length": 14,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 9.17655619900349
+    },
+    {
+      "series": "integer",
+      "length": 14,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 15,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": null
+    },
+    {
+      "series": "integer",
+      "length": 15,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 23.6
+    },
+    {
+      "series": "integer",
+      "length": 15,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "integer",
+      "length": 15,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 54.83870967741936
+    },
+    {
+      "series": "integer",
+      "length": 15,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -20.51282051282051
+    },
+    {
+      "series": "integer",
+      "length": 15,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 25
+    },
+    {
+      "series": "integer",
+      "length": 15,
+      "function": "stdev",
+      "args": [],
+      "expected": 9.402127418834526
+    },
+    {
+      "series": "integer",
+      "length": 15,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 9.083318042800586
+    },
+    {
+      "series": "integer",
+      "length": 15,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 16.5
+    },
+    {
+      "series": "integer",
+      "length": 20,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 24.25
+    },
+    {
+      "series": "integer",
+      "length": 20,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 24.25
+    },
+    {
+      "series": "integer",
+      "length": 20,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "integer",
+      "length": 20,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 47.66355140186916
+    },
+    {
+      "series": "integer",
+      "length": 20,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -25.806451612903224
+    },
+    {
+      "series": "integer",
+      "length": 20,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 25
+    },
+    {
+      "series": "integer",
+      "length": 20,
+      "function": "stdev",
+      "args": [],
+      "expected": 9.101041004655514
+    },
+    {
+      "series": "integer",
+      "length": 20,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 8.870597499605086
+    },
+    {
+      "series": "integer",
+      "length": 20,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 16.285714285714285
+    },
+    {
+      "series": "integer",
+      "length": 25,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 25.55
+    },
+    {
+      "series": "integer",
+      "length": 25,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 23.951901471094864
+    },
+    {
+      "series": "integer",
+      "length": 25,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "integer",
+      "length": 25,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 47.66355140186916
+    },
+    {
+      "series": "integer",
+      "length": 25,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -34.78260869565217
+    },
+    {
+      "series": "integer",
+      "length": 25,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 26
+    },
+    {
+      "series": "integer",
+      "length": 25,
+      "function": "stdev",
+      "args": [],
+      "expected": 9.316293969885951
+    },
+    {
+      "series": "integer",
+      "length": 25,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 9.128066607995365
+    },
+    {
+      "series": "integer",
+      "length": 25,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 16.285714285714285
+    },
+    {
+      "series": "integer",
+      "length": 26,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 25.5
+    },
+    {
+      "series": "integer",
+      "length": 26,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 24.718387045276305
+    },
+    {
+      "series": "integer",
+      "length": 26,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        0.6604842978846364,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "integer",
+      "length": 26,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 54.83870967741936
+    },
+    {
+      "series": "integer",
+      "length": 26,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -20.0
+    },
+    {
+      "series": "integer",
+      "length": 26,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 26
+    },
+    {
+      "series": "integer",
+      "length": 26,
+      "function": "stdev",
+      "args": [],
+      "expected": 9.252775051510014
+    },
+    {
+      "series": "integer",
+      "length": 26,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 9.07309241202578
+    },
+    {
+      "series": "integer",
+      "length": 26,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 16.5
+    },
+    {
+      "series": "integer",
+      "length": 33,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 25.15
+    },
+    {
+      "series": "integer",
+      "length": 33,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 24.553649762760998
+    },
+    {
+      "series": "integer",
+      "length": 33,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        -0.04613738058749561,
+        null,
+        null
+      ]
+    },
+    {
+      "series": "integer",
+      "length": 33,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 47.66355140186916
+    },
+    {
+      "series": "integer",
+      "length": 33,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -22.857142857142858
+    },
+    {
+      "series": "integer",
+      "length": 33,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 26
+    },
+    {
+      "series": "integer",
+      "length": 33,
+      "function": "stdev",
+      "args": [],
+      "expected": 9.1921821196717
+    },
+    {
+      "series": "integer",
+      "length": 33,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 9.051835219711622
+    },
+    {
+      "series": "integer",
+      "length": 33,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 16.285714285714285
+    },
+    {
+      "series": "integer",
+      "length": 34,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 25.1
+    },
+    {
+      "series": "integer",
+      "length": 34,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 23.45330216630757
+    },
+    {
+      "series": "integer",
+      "length": 34,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        -0.9590506516326549,
+        0.3644872790590298,
+        -1.3235379306916846
+      ]
+    },
+    {
+      "series": "integer",
+      "length": 34,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 47.66355140186916
+    },
+    {
+      "series": "integer",
+      "length": 34,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -38.095238095238095
+    },
+    {
+      "series": "integer",
+      "length": 34,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 26
+    },
+    {
+      "series": "integer",
+      "length": 34,
+      "function": "stdev",
+      "args": [],
+      "expected": 9.268090658616153
+    },
+    {
+      "series": "integer",
+      "length": 34,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 9.130778020871825
+    },
+    {
+      "series": "integer",
+      "length": 34,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 16.285714285714285
+    },
+    {
+      "series": "integer",
+      "length": 60,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 25.35
+    },
+    {
+      "series": "integer",
+      "length": 60,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 25.135991999326166
+    },
+    {
+      "series": "integer",
+      "length": 60,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        0.011200127692227113,
+        0.1473642897156974,
+        -0.1361641620234703
+      ]
+    },
+    {
+      "series": "integer",
+      "length": 60,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 47.66355140186916
+    },
+    {
+      "series": "integer",
+      "length": 60,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -27.586206896551722
+    },
+    {
+      "series": "integer",
+      "length": 60,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 26
+    },
+    {
+      "series": "integer",
+      "length": 60,
+      "function": "stdev",
+      "args": [],
+      "expected": 9.008094288575382
+    },
+    {
+      "series": "integer",
+      "length": 60,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 8.932711421138228
+    },
+    {
+      "series": "integer",
+      "length": 60,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 16.285714285714285
+    },
+    {
+      "series": "integer",
+      "length": 128,
+      "function": "sma",
+      "args": [
+        20
+      ],
+      "expected": 25.05
+    },
+    {
+      "series": "integer",
+      "length": 128,
+      "function": "ema",
+      "args": [
+        20
+      ],
+      "expected": 24.31200843038192
+    },
+    {
+      "series": "integer",
+      "length": 128,
+      "function": "macd",
+      "args": [],
+      "expected": [
+        -0.6281403212404655,
+        -0.3193907942980685,
+        -0.308749526942397
+      ]
+    },
+    {
+      "series": "integer",
+      "length": 128,
+      "function": "rsi",
+      "args": [
+        14
+      ],
+      "expected": 47.66355140186916
+    },
+    {
+      "series": "integer",
+      "length": 128,
+      "function": "roc",
+      "args": [
+        5
+      ],
+      "expected": -21.052631578947366
+    },
+    {
+      "series": "integer",
+      "length": 128,
+      "function": "rolling_percentile",
+      "args": [
+        20,
+        50
+      ],
+      "expected": 26
+    },
+    {
+      "series": "integer",
+      "length": 128,
+      "function": "stdev",
+      "args": [],
+      "expected": 9.012185538978677
+    },
+    {
+      "series": "integer",
+      "length": 128,
+      "function": "stdev_pop",
+      "args": [],
+      "expected": 8.976912661795257
+    },
+    {
+      "series": "integer",
+      "length": 128,
+      "function": "atr",
+      "args": [
+        14
+      ],
+      "expected": 16.285714285714285
+    }
+  ],
+  "metric_cases": [
+    {
+      "function": "brier_score",
+      "args": [
+        [
+          0,
+          1,
+          0,
+          1,
+          1,
+          0,
+          1,
+          0
+        ],
+        [
+          0.1,
+          0.8,
+          0.3,
+          0.6,
+          0.9,
+          0.4,
+          0.5,
+          0.2
+        ]
+      ],
+      "kwargs": {},
+      "expected": 0.095
+    },
+    {
+      "function": "log_loss",
+      "args": [
+        [
+          0,
+          1,
+          0,
+          1,
+          1,
+          0,
+          1,
+          0
+        ],
+        [
+          0.1,
+          0.8,
+          0.3,
+          0.6,
+          0.9,
+          0.4,
+          0.5,
+          0.2
+        ]
+      ],
+      "kwargs": {},
+      "expected": 0.3410601882468414
+    },
+    {
+      "function": "expected_calibration_error",
+      "args": [
+        [
+          0,
+          1,
+          0,
+          1,
+          1,
+          0,
+          1,
+          0
+        ],
+        [
+          0.1,
+          0.8,
+          0.3,
+          0.6,
+          0.9,
+          0.4,
+          0.5,
+          0.2
+        ]
+      ],
+      "kwargs": {
+        "bins": 5
+      },
+      "expected": 0.175
+    },
+    {
+      "function": "precision_at_k",
+      "args": [
+        [
+          0,
+          1,
+          0,
+          1,
+          1,
+          0,
+          1,
+          0
+        ],
+        [
+          0.1,
+          0.8,
+          0.3,
+          0.6,
+          0.9,
+          0.4,
+          0.5,
+          0.2
+        ],
+        3
+      ],
+      "kwargs": {},
+      "expected": 1.0
+    },
+    {
+      "function": "top_k_net_expectancy",
+      "args": [
+        [
+          -0.02,
+          0.04,
+          -0.01,
+          0.025,
+          0.06,
+          -0.015,
+          0.02,
+          -0.03
+        ],
+        [
+          0.1,
+          0.8,
+          0.3,
+          0.6,
+          0.9,
+          0.4,
+          0.5,
+          0.2
+        ],
+        3
+      ],
+      "kwargs": {
+        "costs_r": [
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001
+        ]
+      },
+      "expected": 0.04066666666666666
+    },
+    {
+      "function": "max_drawdown",
+      "args": [
+        [
+          -0.02,
+          0.04,
+          -0.01,
+          0.025,
+          0.06,
+          -0.015,
+          0.02,
+          -0.03
+        ]
+      ],
+      "kwargs": {},
+      "expected": 0.029999999999999916
+    },
+    {
+      "function": "profit_factor",
+      "args": [
+        [
+          -0.02,
+          0.04,
+          -0.01,
+          0.025,
+          0.06,
+          -0.015,
+          0.02,
+          -0.03
+        ]
+      ],
+      "kwargs": {},
+      "expected": 1.9333333333333333
+    },
+    {
+      "function": "probability_metrics",
+      "args": [
+        [
+          0,
+          1,
+          0,
+          1,
+          1,
+          0,
+          1,
+          0
+        ],
+        [
+          0.1,
+          0.8,
+          0.3,
+          0.6,
+          0.9,
+          0.4,
+          0.5,
+          0.2
+        ]
+      ],
+      "kwargs": {
+        "k": 3,
+        "returns_r": [
+          -0.02,
+          0.04,
+          -0.01,
+          0.025,
+          0.06,
+          -0.015,
+          0.02,
+          -0.03
+        ],
+        "costs_r": [
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001,
+          0.001
+        ]
+      },
+      "expected": {
+        "brier": 0.095,
+        "logloss": 0.3410601882468414,
+        "ece": 0.275,
+        "precision_at_k": 1.0,
+        "top_k_net_expectancy": 0.04066666666666666
+      }
+    }
+  ]
+}
