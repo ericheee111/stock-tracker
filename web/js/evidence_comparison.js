@@ -10,6 +10,22 @@
   const familyDependencies = Object.freeze({TREND_REQUIRED:'trend',MOMENTUM_REQUIRED:'momentum',
     RELATIVE_STRENGTH_REQUIRED:'relative_strength',LIQUIDITY_REQUIRED:'volume_liquidity',VOLUME_LIQUIDITY_REQUIRED:'volume_liquidity',
     STRUCTURE_REQUIRED:'price_structure',PRICE_STRUCTURE_REQUIRED:'price_structure'});
+  // Input graph of the fixed Python recipe. No coefficients or score calculations live here.
+  const termSchema = Object.freeze({
+    trend:{base:[],ma20_distance:['LAST_REQUIRED','MA20_REQUIRED'],ma60_distance:['LAST_REQUIRED','MA60_REQUIRED'],
+      ma_order:['MA20_REQUIRED','MA60_REQUIRED'],atr_proxy:['ATR14_REQUIRED','LAST_REQUIRED']},
+    momentum:{base:[],rsi:['RSI14_REQUIRED'],roc_mean:['ROC5_REQUIRED','ROC10_REQUIRED','ROC20_REQUIRED'],macd:['MACD_HIST_REQUIRED']},
+    relative_strength:{sector_rs:['SECTOR_RS_REQUIRED'],day_proxy:['DAY_CHANGE_REQUIRED']},
+    volume_liquidity:{liquidity_proxy:['TURNOVER_REQUIRED','AMOUNT_REQUIRED']},
+    price_structure:{base:[],intraday_position:['LAST_REQUIRED','HIGH_REQUIRED','LOW_REQUIRED'],breakout:['LAST_REQUIRED','SIX_BARS_REQUIRED']},
+    opportunity:{relative_strength:['RELATIVE_STRENGTH_REQUIRED'],trend_momentum:['TREND_REQUIRED','MOMENTUM_REQUIRED'],
+      sector:['SECTOR_SCORE_REQUIRED'],catalyst:['SECTOR_CATALYST_CONTEXT_REQUIRED'],liquidity:['LIQUIDITY_REQUIRED'],
+      structure:['STRUCTURE_REQUIRED'],regime:['REGIME_REQUIRED'],persistence:['SECTOR_PERSISTENCE_REQUIRED'],risk_penalty:['RISK_REQUIRED']},
+    timing:{trend:['TREND_REQUIRED'],momentum:['MOMENTUM_REQUIRED'],structure:['STRUCTURE_REQUIRED']},
+    risk:{base:[],gain_from_low:['LAST_REQUIRED','HIGH_REQUIRED','LOW_REQUIRED'],crowding:['SECTOR_CROWDING_REQUIRED'],
+      regime_risk:['REGIME_REQUIRED'],range:['HIGH_REQUIRED','LOW_REQUIRED','PREV_CLOSE_REQUIRED']},
+    confidence:{dq:['DQ_REQUIRED'],agreement:['TREND_REQUIRED','MOMENTUM_REQUIRED','RELATIVE_STRENGTH_REQUIRED','VOLUME_LIQUIDITY_REQUIRED','PRICE_STRUCTURE_REQUIRED'],regime:['REGIME_REQUIRED']}
+  });
   const labels = {trend:'趋势', momentum:'动量', relative_strength:'相对强弱', volume_liquidity:'量能与流动性',
     price_structure:'价格结构', opportunity:'机会规则分', timing:'时机规则分', risk:'风险规则分', confidence:'规则置信分（非概率）'};
   const reasons = {
@@ -49,10 +65,29 @@
     if (group.multiplier !== null && (!finite(group.multiplier) || ![.8,.9,1].includes(group.multiplier))) return false;
     if (group.multiplier === null && group.value !== null) return false;
     if (group.status !== (group.value === null ? 'MISSING_INPUT' : 'NUMERIC_ONLY')) return false;
+    if (!Object.hasOwn(termSchema,key)) return false;
+    const shape = termSchema[key];
+    if (group.terms.length !== Object.keys(shape).length) return false;
     const names = new Set();
     const termsValid = group.terms.every(t => {
       if (!object(t) || !text(t.key) || names.has(t.key) || !text(t.label) || !texts(t.missing) || !object(t.inputs)) return false;
       names.add(t.key);
+      if (!Object.hasOwn(shape,t.key)) return false;
+      let required = shape[t.key];
+      if (key === 'volume_liquidity') {
+        const turnover = t.inputs.TURNOVER_REQUIRED;
+        if (turnover !== null && (!finite(turnover) || turnover < 0)) return false;
+        required = turnover !== null && turnover > 0 ? ['TURNOVER_REQUIRED'] : ['TURNOVER_REQUIRED','AMOUNT_REQUIRED'];
+      }
+      if (!keysEqual(t.inputs,required)) return false;
+      const inputTypesValid = Object.entries(t.inputs).every(([dependency,input]) => {
+        if (input === null) return true;
+        if (key === 'risk' && t.key === 'regime_risk' && dependency === 'REGIME_REQUIRED') {
+          return ['RISK_OFF','OVERHEATED','PANIC_REBOUND','ROTATION','RISK_ON_TREND'].includes(input);
+        }
+        return finite(input);
+      });
+      if (!inputTypesValid) return false;
       if (t.value !== null && (!finite(t.value) || Math.abs(t.value)>1e100)) return false;
       if ((t.value === null) !== (t.missing.length>0)) return false;
       if (!['NUMERIC_ONLY','MISSING_INPUT','NUMERIC_UNAVAILABLE'].includes(t.status)) return false;

@@ -13,7 +13,8 @@ fs.mkdirSync(output,{recursive:true});
 const scenarioIds=['complete','rsi-zero','ma60-short','rsi-short','macd-short','dq-missing','dq-degraded','contexts-missing','no-bars','quote-missing','zero-turnover','invalid-identity'];
 const extraIds=['wrong-symbol','wrong-market','wrong-interval','unknown-schema','unknown-policy','untrusted-assurance','auto-trade','probability','duplicate-family','missing-score','wrong-delta','bool-score','nonfinite-term','false-sample-count','numeric-term-missing-dependency','nonfinite-multiplier','null-multiplier-with-total','split-capture-clock','prototype-market','missing-enhancement','escaping','unknown-not-zero','real-zero-term','keyboard','mobile-360','desktop-1440','app-wiring'];
 const reviewIds=['missing-term-with-total','missing-group-dependency','missing-family-with-numeric-dependent-score','missing-quote-status','unknown-quote-status','nonlive-without-warning','live-with-false-warning','status-live','status-delayed','status-stale','status-unknown'];
-const expected=[...scenarioIds,...extraIds,...reviewIds];
+const schemaIds=['omitted-each-contribution','omitted-each-input','omitted-input-with-missing-family','added-contribution','added-input','liquidity-branch-shape','invalid-input-value-type'];
+const expected=[...scenarioIds,...extraIds,...reviewIds,...schemaIds];
 const results=[],pageErrors=[];let browser,page,fatal=null;
 const clone=v=>JSON.parse(JSON.stringify(v));
 async function check(id,fn){try{await fn();results.push({id,status:'PASS'});console.log('PASS '+id);}catch(e){results.push({id,status:'FAIL',error:String(e.stack||e)});console.error('FAIL '+id+': '+e);}}
@@ -79,6 +80,43 @@ async function expand(){const panel=page.locator('details.ec-panel');if(await pa
       assert(text.includes(label));assert(text.includes(state));assert(text.includes('未经独立认证'));
       if(state!=='LIVE')assert(text.includes('报价未声明为实时'));
       assert(text.includes('不改变排序或仓位'));
+    });
+    await check('omitted-each-contribution',async()=>{
+      for(const section of ['families','scores'])for(let gi=0;gi<reports.complete.candidate[section].length;gi++)for(let ti=0;ti<reports.complete.candidate[section][gi].terms.length;ti++){
+        const d=clone(reports.complete);const removed=d.candidate[section][gi].terms.splice(ti,1)[0];
+        const r=await render(d);assert.equal(r.accepted,false,section+'/'+gi+'/'+removed.key);assert.equal(r.tableRows,0);
+      }
+    });
+    await check('omitted-each-input',async()=>{
+      for(const source of [reports.complete,reports['zero-turnover']])for(const section of ['families','scores'])for(let gi=0;gi<source.candidate[section].length;gi++)for(let ti=0;ti<source.candidate[section][gi].terms.length;ti++)for(const key of Object.keys(source.candidate[section][gi].terms[ti].inputs)){
+        const d=clone(source);delete d.candidate[section][gi].terms[ti].inputs[key];
+        assert.equal((await render(d)).accepted,false,section+'/'+gi+'/'+ti+'/'+key);
+      }
+    });
+    await check('omitted-input-with-missing-family',async()=>{
+      const d=clone(reports.complete),family=d.candidate.families[0];family.value=null;family.status='MISSING_INPUT';family.missing=['NUMERIC_UNAVAILABLE'];d.status='PARTIAL';d.differences[0].candidate_value=null;d.differences[0].delta=null;
+      for(const group of d.candidate.scores)for(const term of group.terms)delete term.inputs.TREND_REQUIRED;
+      assert.equal((await render(d)).accepted,false);
+    });
+    await check('added-contribution',async()=>{
+      const d=clone(reports.complete),term=clone(d.candidate.families[0].terms[0]);term.key='invented-contribution';d.candidate.families[0].terms.push(term);
+      assert.equal((await render(d)).accepted,false);
+    });
+    await check('added-input',async()=>{
+      const d=clone(reports.complete);d.candidate.families[0].terms[1].inputs.INVENTED_REQUIRED=1;
+      assert.equal((await render(d)).accepted,false);
+    });
+    await check('liquidity-branch-shape',async()=>{
+      assert.equal((await render(reports.complete)).accepted,true);assert.equal((await render(reports['zero-turnover'])).accepted,true);
+      const d=clone(reports.complete);d.candidate.families[3].terms[0].inputs.AMOUNT_REQUIRED=1;
+      assert.equal((await render(d)).accepted,false);
+      const z=clone(reports['zero-turnover']);delete z.candidate.families[3].terms[0].inputs.AMOUNT_REQUIRED;
+      assert.equal((await render(z)).accepted,false);
+    });
+    await check('invalid-input-value-type',async()=>{
+      for(const value of ['10',true,{},[],Infinity]){const d=clone(reports.complete);d.candidate.families[0].terms[1].inputs.LAST_REQUIRED=value;assert.equal((await render(d)).accepted,false);}
+      const d=clone(reports.complete);d.candidate.scores.find(g=>g.key==='risk').terms.find(t=>t.key==='regime_risk').inputs.REGIME_REQUIRED='MADE_UP_REGIME';
+      assert.equal((await render(d)).accepted,false);
     });
     await check('prototype-market',async()=>{const d=clone(reports.complete);d.market='__proto__';const r=await render(d,d.symbol,'__proto__');assert.equal(r.accepted,false);});
     await check('missing-enhancement',async()=>{await render(null);assert.equal(await page.locator('#target').innerHTML(),'');});
