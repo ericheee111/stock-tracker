@@ -50,12 +50,26 @@ class RateLimiter:
         return wait
 
 
+RUNTIME_HTTPS_POLICY_ID = "runtime-https-v2-ca-hostname-no-redirect"
+
+
 def _ssl_ctx() -> ssl.SSLContext:
-    """禁用证书校验的旧 Runtime 上下文；研究 exact-raw 通道禁止使用。"""
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    return ctx
+    """System trust and hostname checks; certificate failures never downgrade TLS."""
+    return ssl.create_default_context()
+
+
+def _runtime_https_url(url: str) -> str:
+    """Reject normalization surprises before urllib opens a remote resource."""
+    if (type(url) is not str or not url or url != url.strip() or "\\" in url
+            or any(ord(char) < 33 or ord(char) == 127 for char in url)):
+        raise ValueError("runtime quote URL must be canonical HTTPS")
+    parsed = urlparse(url)
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username is not None
+            or parsed.password is not None or parsed.fragment or "#" in url):
+        raise ValueError("runtime quote URL requires HTTPS without credentials or fragment")
+    if parsed.port is not None and parsed.port == 0:
+        raise ValueError("runtime quote port must be in [1, 65535]")
+    return url
 
 
 class _NoRedirectHandler(urllib_request.HTTPRedirectHandler):
@@ -337,12 +351,18 @@ class MarketDataProvider(ABC):
         return raw
 
     def _request(self, url: str, headers: dict | None = None) -> bytes:
-        """发起 HTTP GET，返回原始字节；失败/超时直接抛异常。"""
+        """Verified HTTPS GET, exact bytes, no redirects or insecure fallback."""
         hdrs = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         if headers:
             hdrs.update(headers)
-        req = urllib_request.Request(self._with_host(url), headers=hdrs)
-        with urllib_request.urlopen(req, timeout=self.timeout, context=_ssl_ctx()) as resp:
+        target = _runtime_https_url(self._with_host(_runtime_https_url(url)))
+        req = urllib_request.Request(target, headers=hdrs)
+        # A fresh opener avoids global handlers silently weakening this request.
+        # Runtime proxy configuration is retained; the research lane forbids proxies separately.
+        opener = urllib_request.build_opener(
+            urllib_request.HTTPSHandler(context=_ssl_ctx()), _NoRedirectHandler(),
+        )
+        with opener.open(req, timeout=self.timeout) as resp:
             return resp.read()
 
     # ---- 批量拉取（HOT/WARM） ----
