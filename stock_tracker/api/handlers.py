@@ -42,8 +42,8 @@ from ..storage.repository import (
     to_jsonable,
 )
 from . import serializers as S
-from .sse import SSEHub
 from .evidence_handlers import evidence_detail
+from .sse import SSEHub
 
 
 @dataclass

@@ -23,3 +23,7 @@
 ## 保护和状态
 
 本任务仅修改隔离的chatgpt/n4-continuation-20260914及新外部证据目录`n4-release-closure-20260914`。保护快照包含其他worktree及生产DB/WAL/SHM的文件哈希；不连接生产SQLite、不apply迁移、不调用真实Provider、自动交易false。每个阶段更新两个Handoff、AGENTS和Overview；最后更新PRD/Gap/指标治理和后续任务。
+
+## 精确实现复审与最后格式修正
+
+修复提交247f79a2315e4a0ce98638d62414c1333f286712取得独立只读Review通过；其500组完整输入/43项Node内存检查为独立结果，时区依赖缺失造成的失败也保留，不冒充全套通过。本机完整Runtime999运行/1skip、Quant753与Chromium50通过。扩展Ruff时发现handlers新增import排序I001；已仅交换相邻两个import的位置，没有改功能。需对最终微小差异补审并重新核对最终树；旧API serializers仍有15项继承lint告警，本轮不得新增。后续阶段设计见`N4-NEXT-STAGES-20260914.md`，不代表已实现B1d或Path/Fill。
