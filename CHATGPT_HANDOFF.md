@@ -1,5 +1,7 @@
 # ChatGPT Handoff
 
+> **当前交付（2026-09-14）：** N1传输/数值输入防御、N2固定公式基线、N3日线样本窗口核对已实现并通过独立Review。实现 `b299363b6358bda2868362c84d5be83f55d29374`；见 `docs/NUMERICAL-BASELINE-20260914-VALIDATION.md`。这是数值诊断，不是新波段策略或T信号；评分权重/风险参数不变，下一顺序见 `docs/NUMERICAL-NEXT-STAGES-20260914.md`。已有手工持仓/机会双主线与证据安全边界保持。历史记录不覆盖本条。
+
 > **当前交付（2026-09-12）：** 已有手工多周期计划收口与资源摘要已实现，最终实现 `10a81253d1f155a6e3fb4df929f37e8cab343ec8` 已通过独立只读Review和完整工程门禁。持仓/机会并重，波段数周至数月；人工计划、库存现金与情景均非券商/成交验证。见 `docs/MULTIHORIZON-P1-P3-VALIDATION.md` 与 `docs/MULTIHORIZON-CLOSURE-20260912.md`。下一阶段是拆分隔离的指标/策略基线修复与B1d/B2/B3接线；未审查算法草稿不自动合并。历史计划/状态段落不得覆盖本条，所有安全和真实证据门禁保留。
 
 ## User profile confirmed — 2026-09-11

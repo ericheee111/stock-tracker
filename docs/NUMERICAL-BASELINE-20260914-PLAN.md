@@ -1,6 +1,6 @@
 # N1–N3 数值基线、输入防御与波段窗口展示
 
-日期：2026-09-14。基线：`cdf8c1b4114252ead3bf5eb19d2f624be8929bd8`。状态：IMPLEMENTATION_IN_PROGRESS。用户主画像：数周到数月波段、期间做T，兼有长持和短线；持仓和新机会同为主线。
+日期：2026-09-14。基线：`cdf8c1b4114252ead3bf5eb19d2f624be8929bd8`。状态：IMPLEMENTED / INDEPENDENT_REVIEW_PASSED（范围与证据见同日VALIDATION）。用户主画像：数周到数月波段、期间做T，兼有长持和短线；持仓和新机会同为主线。
 
 ## 切片及出口
 

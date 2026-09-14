@@ -1,5 +1,7 @@
 # AGENTS.md
 
+> **当前交付（2026-09-14）：** N1传输/数值输入防御、N2固定公式基线、N3日线样本窗口核对已实现并通过独立Review。实现 `b299363b6358bda2868362c84d5be83f55d29374`；见 `docs/NUMERICAL-BASELINE-20260914-VALIDATION.md`。这是数值诊断，不是新波段策略或T信号；评分权重/风险参数不变，下一顺序见 `docs/NUMERICAL-NEXT-STAGES-20260914.md`。已有手工持仓/机会双主线与证据安全边界保持。历史记录不覆盖本条。
+
 > **当前交付（2026-09-12）：** 已有手工多周期计划收口与资源摘要已实现，最终实现 `10a81253d1f155a6e3fb4df929f37e8cab343ec8` 已通过独立只读Review和完整工程门禁。持仓/机会并重，波段数周至数月；人工计划、库存现金与情景均非券商/成交验证。见 `docs/MULTIHORIZON-P1-P3-VALIDATION.md` 与 `docs/MULTIHORIZON-CLOSURE-20260912.md`。下一阶段是拆分隔离的指标/策略基线修复与B1d/B2/B3接线；未审查算法草稿不自动合并。历史计划/状态段落不得覆盖本条，所有安全和真实证据门禁保留。
 
 > **用户画像约束（2026-09-11 已确认）：** 几周到几个月波段为主，期间做 T，兼有部分长持和短线；持仓管理与新机会发现并重，紧急风险置顶不等于弱化机会入口。`docs/PRODUCT-TRADING-PROFILE-20260911.md` 记录本次画像与设计。不得再沿用“A股主周期1—20日”或重新要求用户二选一；T 层不能改写父计划、虚增可卖数量、绕过证券交易制度或启用下单。具体资金比例/参数未确认不得代设，现有安全与证据门禁不变。
@@ -146,7 +148,7 @@ qa/                       前端/可视化 QA 工具
 
 ### 5.4 Stage 2G Golden Raw / Reconciliation 边界
 
-- `fetch_bars_raw()` 的正式研究抓取必须使用系统 CA、hostname 校验、无 Proxy、无 Redirect、禁止 Host Override 的研究请求通道；不得复用旧 Runtime Quote 的跳过证书校验 `_request()`；
+- `fetch_bars_raw()` 的正式研究抓取必须使用系统 CA、hostname 校验、无 Proxy、无 Redirect、禁止 Host Override 的研究请求通道；不得复用 Runtime Quote `_request()` 代替研究请求合同；N1虽已恢复该Runtime HTTPS证书/hostname检查，但研究URL/Header/Redirect/大小边界仍独立；
 - Tencent 当前只可声明 `qfq`；严格 Parser 缺少 `qfqday` 时必须失败关闭，不得回退未复权 `day`；
 - committed A/HK/US Golden Payload 是 vendor-shaped synthetic fixture，只证明 Parser、Artifact、Reconciliation 和 Coverage 合同；
 - `STRUCTURALLY_CONSTRUCTIBLE` 只表示没有 HARD_BLOCK，不等于 verified、complete、T2、T3 或 research grade；
