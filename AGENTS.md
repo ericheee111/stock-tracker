@@ -1,7 +1,7 @@
 # AGENTS.md
 
 <!-- NUMERICAL_FOUNDATION_CURRENT_BEGIN -->
-> **当前执行（2026-09-14）：** N1/N2/N3专项通过，完整门禁及独立精确提交审查待完成。不要将旧R2/R3计数或算法草稿视为本轮通过。 详见 `docs/NUMERICAL-FOUNDATION-20260914.md`。
+> **当前交付候选（2026-09-14）：** N1严格HTTPS、N2合法指标向量/输入边界、N3费用与回撤数值合同已实现。修复实现 `c3c0ece027d11ad42044bd6272f52aa86c226165` 取得独立只读Review通过；全套Runtime 887通过/1skip、Quant 740通过。默认评分/权重/风险/界面未改，非实盘有效性证明。见 `docs/NUMERICAL-FOUNDATION-VALIDATION-20260914.md`。另一个数值诊断worktree在独立推进，保持隔离，不可盲目覆盖其代码或假称已合入；下一步先收口该诊断UI候选与当前输入合同的兼容，再做多周期对照与B1d。实际push身份见外部DELIVERY.json。
 <!-- NUMERICAL_FOUNDATION_CURRENT_END -->
 
 > **当前交付（2026-09-12）：** 已有手工多周期计划收口与资源摘要已实现，最终实现 `10a81253d1f155a6e3fb4df929f37e8cab343ec8` 已通过独立只读Review和完整工程门禁。持仓/机会并重，波段数周至数月；人工计划、库存现金与情景均非券商/成交验证。见 `docs/MULTIHORIZON-P1-P3-VALIDATION.md` 与 `docs/MULTIHORIZON-CLOSURE-20260912.md`。下一阶段是拆分隔离的指标/策略基线修复与B1d/B2/B3接线；未审查算法草稿不自动合并。历史计划/状态段落不得覆盖本条，所有安全和真实证据门禁保留。
@@ -150,7 +150,7 @@ qa/                       前端/可视化 QA 工具
 
 ### 5.4 Stage 2G Golden Raw / Reconciliation 边界
 
-- `fetch_bars_raw()` 的正式研究抓取必须使用系统 CA、hostname 校验、无 Proxy、无 Redirect、禁止 Host Override 的研究请求通道；不得复用旧 Runtime Quote 的跳过证书校验 `_request()`；
+- `fetch_bars_raw()` 的正式研究抓取必须使用系统 CA、hostname 校验、无 Proxy、无 Redirect、禁止 Host Override 的研究请求通道；不得以已校验HTTPS的 Runtime Quote `_request()` 替代研究通道的额外URL/Header/Proxy/Redirect/响应大小合同；
 - Tencent 当前只可声明 `qfq`；严格 Parser 缺少 `qfqday` 时必须失败关闭，不得回退未复权 `day`；
 - committed A/HK/US Golden Payload 是 vendor-shaped synthetic fixture，只证明 Parser、Artifact、Reconciliation 和 Coverage 合同；
 - `STRUCTURALLY_CONSTRUCTIBLE` 只表示没有 HARD_BLOCK，不等于 verified、complete、T2、T3 或 research grade；
