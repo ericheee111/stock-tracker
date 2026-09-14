@@ -29,6 +29,10 @@ py -3.14 -X utf8 -B -m stock_tracker.features.horizon_cli --input D:\Temp\declar
 
 `--fixture` 只运行内置合成样例；`--input` 只读调用方显式提供的UTF-8 JSON（最多2MiB），不抓行情或读SQLite。输出默认stdout；只有显式 `--output` 才新建 `.json` 文件，既有文件绝不覆盖。输出目录必须事先存在，请使用单独临时/报告目录，不放进物理Evidence Store或生产data目录。写入中断后的残留报告不作为通过证据；更换新输出路径重新运行，不以手工编辑结果冒充重算。
 
+### 时区数据前提与失败恢复
+
+周线计算需要解释器可以解析对应市场的IANA时区数据库；某些Windows解释器可能缺少该数据。缺少时区时输出结构化 `n4-offline-horizon-error-v1`、`code=TIMEZONE_DATABASE_UNAVAILABLE`、exit2，不产生成功报告或输出文件。请在正常环境配置中核对系统时区数据或已批准的tzdata依赖；本工具不自动安装、不静默改成固定UTC偏移、不猜测美国夏令时。实验分区仅使用已明确偏移的时间戳，其不需要市场时区的路径仍可运行。记录失败，不将缺依赖解释为市场无数据。
+
 ### 周线文档
 
 schema=`n4-declared-week-input-v2`；顶层字段恰为schema/symbol/market/as_of/calendar/observations。用 `fixture_document('week')` 生成示例对象再查看结构；它是演示数据不是交易所日历。
@@ -50,8 +54,12 @@ samples包含sample_id、episode_id、purpose、market、decision_at、feature_k
 ## 回归入口
 
 ```text
-py -3.14 -X utf8 -B -m unittest tests.test_evidence_comparison tests.test_evidence_diagnostic_api tests.test_evidence_http tests.test_evidence_recipe_identity tests.test_horizon_research tests.test_horizon_cli tests.test_n4_continuation_edges tests.test_quote_age_clock_basis -v
+py -3.14 -X utf8 -B -m unittest tests.test_evidence_comparison tests.test_evidence_diagnostic_api tests.test_evidence_http tests.test_evidence_recipe_identity tests.test_horizon_research tests.test_horizon_cli tests.test_n4_continuation_edges tests.test_quote_age_clock_basis tests.test_n4_review_closure -v
 node qa/ui/evidence_comparison_qa.cjs
 ```
 
 浏览器命令使用已安装的Playwright，可由PLAYWRIGHT_MODULE或PLAYWRIGHT_PATH指定；截图/结果写外部临时目录或显式EVIDENCE_QA_REPORT_DIR。不清除运行器安全保护。错误必须保留原始退出码和日志，不能因为出现部分PASS文字就宣告通过。
+
+## 报价状态与缺失依赖核验
+
+解释区显示LIVE/DELAYED/STALE/UNKNOWN的**来源声明**，明确未经独立认证。非LIVE声明同时显示警告，字段缺失、非法类型或警告矛盾会使解释区不可用；不能据此升级数据Tier或授权交易。任何贡献项缺失都必须使依赖总分不可用；分组missing覆盖子项missing，分数组不能另填不同的证据族值。渲染层只做结构一致性校验，不另外复制一套Python评分算法。

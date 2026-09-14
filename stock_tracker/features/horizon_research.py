@@ -13,7 +13,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal, localcontext
 from enum import StrEnum
 from typing import Any
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..core.types import Market
 
@@ -22,6 +22,16 @@ ZONES = {Market.A: "Asia/Shanghai", Market.HK: "Asia/Hong_Kong", Market.US: "Ame
 
 class HorizonResearchError(ValueError):
     pass
+
+
+def _market_zone(market: Market) -> ZoneInfo:
+    """Missing IANA data is an expected environment failure, never a guessed offset."""
+    if type(market) is not Market:
+        raise HorizonResearchError("CALENDAR_MARKET_REQUIRED")
+    try:
+        return ZoneInfo(ZONES[market])
+    except ZoneInfoNotFoundError as exc:
+        raise HorizonResearchError("TIMEZONE_DATABASE_UNAVAILABLE") from exc
 
 
 class HoldingPurpose(StrEnum):
@@ -85,7 +95,7 @@ class DeclaredCalendarDay:
         _available(self.known_at, self.usable_from)
         _id(self.evidence_id)
         if self.is_open:
-            if _time(self.close_at).astimezone(ZoneInfo(ZONES[self.market])).date() != self.day:
+            if _time(self.close_at).astimezone(_market_zone(self.market)).date() != self.day:
                 raise HorizonResearchError("CALENDAR_LOCAL_CLOSE_DATE_MISMATCH")
         elif self.close_at is not None:
             raise HorizonResearchError("CLOSED_DAY_HAS_CLOSE")
@@ -116,7 +126,7 @@ class DeclaredDailyObservation:
         _id(self.source_id)
         if _time(self.known_at) < _time(self.close_at):
             raise HorizonResearchError("DAILY_BAR_KNOWN_BEFORE_CLOSE")
-        if self.close_at.astimezone(ZoneInfo(ZONES[self.market])).date() != self.day:
+        if self.close_at.astimezone(_market_zone(self.market)).date() != self.day:
             raise HorizonResearchError("LOCAL_CLOSE_DATE_MISMATCH")
         for v in (self.open, self.high, self.low, self.close):
             _price(v)
@@ -143,7 +153,7 @@ def closed_week_facts(
     _security(symbol, market)
     if len(calendar) % 7 or calendar[0].day.weekday() != 0:
         raise HorizonResearchError("FULL_LOCAL_WEEKS_REQUIRED")
-    zone = ZoneInfo(ZONES[market])
+    zone = _market_zone(market)
     rows: dict[date, DeclaredDailyObservation] = {}
     for item in observations:
         if type(item) is not DeclaredDailyObservation or replace(item) != item:

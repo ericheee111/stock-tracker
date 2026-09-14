@@ -12,7 +12,8 @@ const output=process.env.EVIDENCE_QA_REPORT_DIR||fs.mkdtempSync(path.join(os.tmp
 fs.mkdirSync(output,{recursive:true});
 const scenarioIds=['complete','rsi-zero','ma60-short','rsi-short','macd-short','dq-missing','dq-degraded','contexts-missing','no-bars','quote-missing','zero-turnover','invalid-identity'];
 const extraIds=['wrong-symbol','wrong-market','wrong-interval','unknown-schema','unknown-policy','untrusted-assurance','auto-trade','probability','duplicate-family','missing-score','wrong-delta','bool-score','nonfinite-term','false-sample-count','numeric-term-missing-dependency','nonfinite-multiplier','null-multiplier-with-total','split-capture-clock','prototype-market','missing-enhancement','escaping','unknown-not-zero','real-zero-term','keyboard','mobile-360','desktop-1440','app-wiring'];
-const expected=[...scenarioIds,...extraIds];
+const reviewIds=['missing-term-with-total','missing-group-dependency','missing-family-with-numeric-dependent-score','missing-quote-status','unknown-quote-status','nonlive-without-warning','live-with-false-warning','status-live','status-delayed','status-stale','status-unknown'];
+const expected=[...scenarioIds,...extraIds,...reviewIds];
 const results=[],pageErrors=[];let browser,page,fatal=null;
 const clone=v=>JSON.parse(JSON.stringify(v));
 async function check(id,fn){try{await fn();results.push({id,status:'PASS'});console.log('PASS '+id);}catch(e){results.push({id,status:'FAIL',error:String(e.stack||e)});console.error('FAIL '+id+': '+e);}}
@@ -61,6 +62,24 @@ async function expand(){const panel=page.locator('details.ec-panel');if(await pa
       ['split-capture-clock',d=>{d.sample_info.computed_at='2026-01-01T00:00:00+00:00';}]
     ];
     for(const [id,mutate] of negative)await check(id,async()=>{const d=clone(reports.complete);mutate(d);const r=await render(d);assert.equal(r.accepted,false);assert.equal(r.tableRows,0);assert((await page.locator('#target').innerText()).includes('暂不可用'));});
+    const reviewNegative=[
+      ['missing-term-with-total',d=>{const t=d.candidate.families[0].terms[1];t.inputs.MA20_REQUIRED=null;t.value=null;t.status='MISSING_INPUT';t.missing=['MA20_REQUIRED'];}],
+      ['missing-group-dependency',d=>{const g=d.candidate.families[0],t=g.terms[1];t.inputs.MA20_REQUIRED=null;t.value=null;t.status='MISSING_INPUT';t.missing=['MA20_REQUIRED'];g.value=null;g.status='MISSING_INPUT';g.missing=['NUMERIC_UNAVAILABLE'];d.status='PARTIAL';d.differences[0].candidate_value=null;d.differences[0].delta=null;}],
+      ['missing-family-with-numeric-dependent-score',d=>{const g=d.candidate.families[0];g.value=null;g.status='MISSING_INPUT';g.missing=['NUMERIC_UNAVAILABLE'];d.status='PARTIAL';d.differences[0].candidate_value=null;d.differences[0].delta=null;}],
+      ['missing-quote-status',d=>{delete d.sample_info.quote_declared_status;}],
+      ['unknown-quote-status',d=>{d.sample_info.quote_declared_status='VERIFIED_LIVE';}],
+      ['nonlive-without-warning',d=>{d.sample_info.quote_declared_status='STALE';d.warnings=d.warnings.filter(k=>k!=='QUOTE_NOT_DECLARED_LIVE');}],
+      ['live-with-false-warning',d=>{d.sample_info.quote_declared_status='LIVE';d.warnings=[...d.warnings.filter(k=>k!=='QUOTE_NOT_DECLARED_LIVE'),'QUOTE_NOT_DECLARED_LIVE'];}]
+    ];
+    for(const [id,mutate] of reviewNegative)await check(id,async()=>{const d=clone(reports.complete);mutate(d);const r=await render(d);assert.equal(r.accepted,false);assert.equal(r.tableRows,0);});
+    for(const [state,label] of [['LIVE','声明实时'],['DELAYED','声明延迟'],['STALE','声明过期'],['UNKNOWN','声明未知']])await check('status-'+state.toLowerCase(),async()=>{
+      const d=clone(reports.complete);d.sample_info.quote_declared_status=state;d.warnings=d.warnings.filter(k=>k!=='QUOTE_NOT_DECLARED_LIVE');
+      if(state!=='LIVE')d.warnings.push('QUOTE_NOT_DECLARED_LIVE');
+      assert.equal((await render(d)).accepted,true);await expand();const text=await page.locator('#target').innerText();
+      assert(text.includes(label));assert(text.includes(state));assert(text.includes('未经独立认证'));
+      if(state!=='LIVE')assert(text.includes('报价未声明为实时'));
+      assert(text.includes('不改变排序或仓位'));
+    });
     await check('prototype-market',async()=>{const d=clone(reports.complete);d.market='__proto__';const r=await render(d,d.symbol,'__proto__');assert.equal(r.accepted,false);});
     await check('missing-enhancement',async()=>{await render(null);assert.equal(await page.locator('#target').innerHTML(),'');});
     await check('escaping',async()=>{

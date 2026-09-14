@@ -1,7 +1,7 @@
 # stock-tracker 交接文档（HANDOFF）
 
 <!-- N4_CONTINUATION_CURRENT_BEGIN -->
-> **当前续作（2026-09-14）：** VALIDATION_IN_PROGRESS：阶段代码已完成专项和界面检查，正在对精确候选执行完整门禁与独立只读Review；未发布。历史通过数不替代当前候选结果。 详见 `N4-CONTINUATION-20260914.md`。
+> **当前续作（2026-09-14）：** FULL_VALIDATION_AND_INDEPENDENT_REVIEW_RUNNING：N4a/b候选及修复已本地提交；正反例已通过，完整回归与独立只读审查仍待完成，未push。 详见 `N4-CONTINUATION-20260914.md`；原始和本轮审查日志分别保留在continuation-audit与n4-release-closure证据目录。
 <!-- N4_CONTINUATION_CURRENT_END -->
 
 <!-- NUMERICAL_INTEGRATION_CURRENT_BEGIN -->

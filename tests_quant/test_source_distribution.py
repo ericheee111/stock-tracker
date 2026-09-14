@@ -22,6 +22,8 @@ class TestSourceDistribution(unittest.TestCase):
             self.skipTest("source-distribution check requires a Git checkout")
 
         critical = (
+            "tests/test_n4_review_closure.py",
+            "docs/N4-REVIEW-CLOSURE-20260914.md",
             "stock_tracker/api/handlers.py",
             "stock_tracker/api/serializers.py",
             "stock_tracker/api/evidence_handlers.py",
