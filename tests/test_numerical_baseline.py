@@ -73,6 +73,12 @@ class TestIndicatorDomains(unittest.TestCase):
         self.assertIsNone(I.sma([1e308]*20, 20))
         self.assertIsNone(I.stdev([1e308, -1e308]))
 
+    def test_mixed_finite_big_integer_overflow_is_unknown(self):
+        values = [10**308, 10**308] + [1.0]*68
+        self.assertIsNone(I.sma(values[:20], 20))
+        self.assertIsNone(I.ema(values[:20], 20))
+        self.assertEqual(I.macd(values), (None, None, None))
+
     def test_percentile_controls(self):
         for window, pct in ((0, 50), (True, 50), (5, True), (5, -1), (5, 101), (5, math.nan)):
             with self.subTest(window=window, pct=pct):

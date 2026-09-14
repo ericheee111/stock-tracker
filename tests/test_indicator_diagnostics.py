@@ -28,6 +28,15 @@ def report(bars):
 
 
 class TestDailyIndicatorDiagnostics(unittest.TestCase):
+    def test_mixed_large_integer_diagnostic_does_not_raise(self):
+        data = rows(20)
+        for index, value in enumerate([10**308, 10**308]+[1.0]*18):
+            data[index] = replace(data[index], open=value, high=value, low=value, close=value)
+        result = report(data)
+        self.assertEqual(result['windows'][0]['state'], 'NUMERIC_UNAVAILABLE')
+        self.assertIsNone(result['windows'][0]['mean_close'])
+        json.dumps(result, allow_nan=False)
+
     def test_empty_is_unknown_not_zero(self):
         result = report([])
         self.assertEqual(result['status'], 'NO_DATA')

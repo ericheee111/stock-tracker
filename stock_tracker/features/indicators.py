@@ -8,9 +8,25 @@ require a separate versioned comparison. Unknown/invalid inputs return None.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
+from functools import wraps
+from typing import ParamSpec
 
 INDICATOR_INPUT_POLICY_ID = "runtime-indicator-input-v2-legacy-formulas"
 MAX_PERIOD = 1_000_000
+
+P = ParamSpec('P')
+
+
+def _overflow_unknown(function: Callable[P, float | None]) -> Callable[P, float | None]:
+    """Only arithmetic overflow is unavailable; other implementation errors stay visible."""
+    @wraps(function)
+    def guarded(*args: P.args, **kwargs: P.kwargs) -> float | None:
+        try:
+            return function(*args, **kwargs)
+        except OverflowError:
+            return None
+    return guarded
 
 
 def valid_number(value: object) -> bool:
@@ -36,6 +52,7 @@ def _finite(value: float) -> float | None:
     return value if math.isfinite(value) else None
 
 
+@_overflow_unknown
 def sma(values: list[float], period: int) -> float | None:
     """Complete-window arithmetic mean, or unknown."""
     if not _period(period) or not _series(values) or len(values) < period:
@@ -43,6 +60,7 @@ def sma(values: list[float], period: int) -> float | None:
     return _finite(sum(values[-period:]) / period)
 
 
+@_overflow_unknown
 def ema(values: list[float], period: int) -> float | None:
     """SMA-seeded EMA; legacy short-series mean is not a fully warmed EMA."""
     if not _period(period) or not _series(values):
@@ -59,26 +77,29 @@ def ema(values: list[float], period: int) -> float | None:
 def macd(values: list[float], fast: int = 12, slow: int = 26, signal: int = 9
          ) -> tuple[float | None, float | None, float | None]:
     """SMA-seeded DIF, signal EMA, DIF-DEA (not twice the histogram)."""
-    if (not all(_period(p) for p in (fast, slow, signal)) or fast >= slow
-            or not _series(values) or len(values) < slow):
+    try:
+        if (not all(_period(p) for p in (fast, slow, signal)) or fast >= slow
+                or not _series(values) or len(values) < slow):
+            return None, None, None
+        fast_k, slow_k = 2.0 / (fast + 1), 2.0 / (slow + 1)
+        pf, ps = sum(values[:fast]) / fast, sum(values[:slow]) / slow
+        difs: list[float] = []
+        for i, value in enumerate(values):
+            pf = value * fast_k + pf * (1 - fast_k) if i >= fast else pf
+            ps = value * slow_k + ps * (1 - slow_k) if i >= slow else ps
+            if i >= slow - 1:
+                difs.append(pf - ps)
+        if not _series(difs):
+            return None, None, None
+        if len(difs) < signal:
+            return difs[-1], None, None
+        dea, dif = ema(difs, signal), difs[-1]
+        hist = _finite(dif - dea) if dea is not None else None
+        return dif, dea, hist
+    except OverflowError:
         return None, None, None
-    fast_k, slow_k = 2.0 / (fast + 1), 2.0 / (slow + 1)
-    pf, ps = sum(values[:fast]) / fast, sum(values[:slow]) / slow
-    difs: list[float] = []
-    for i, value in enumerate(values):
-        pf = value * fast_k + pf * (1 - fast_k) if i >= fast else pf
-        ps = value * slow_k + ps * (1 - slow_k) if i >= slow else ps
-        if i >= slow - 1:
-            difs.append(pf - ps)
-    if not _series(difs):
-        return None, None, None
-    if len(difs) < signal:
-        return difs[-1], None, None
-    dea, dif = ema(difs, signal), difs[-1]
-    hist = _finite(dif - dea) if dea is not None else None
-    return dif, dea, hist
 
-
+@_overflow_unknown
 def rsi(values: list[float], period: int = 14) -> float | None:
     """Rolling arithmetic RSI. Legacy zero-loss rule is 100, including flat."""
     if not _period(period) or not _series(values) or len(values) < period + 1:
@@ -99,6 +120,7 @@ def rsi(values: list[float], period: int = 14) -> float | None:
     return _finite(100.0 - (100.0 / (1.0 + ratio)))
 
 
+@_overflow_unknown
 def atr(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> float | None:
     """Arithmetic true-range average. Misaligned arrays cannot be truncated."""
     if not _period(period) or not all(_series(s) for s in (highs, lows, closes)):
@@ -113,6 +135,7 @@ def atr(highs: list[float], lows: list[float], closes: list[float], period: int 
     return _finite(sum(ranges[-period:]) / period)
 
 
+@_overflow_unknown
 def roc(values: list[float], period: int) -> float | None:
     """Change in percent, requiring period+1 samples and a nonzero base."""
     if not _period(period) or not _series(values) or len(values) <= period:
@@ -123,6 +146,7 @@ def roc(values: list[float], period: int) -> float | None:
     return _finite((values[-1] - base) / base * 100.0)
 
 
+@_overflow_unknown
 def rolling_percentile(values: list[float], window: int, pct: float) -> float | None:
     """Legacy rounded-index order statistic; short window uses available samples."""
     if (not _period(window) or not valid_number(pct) or not 0 <= pct <= 100

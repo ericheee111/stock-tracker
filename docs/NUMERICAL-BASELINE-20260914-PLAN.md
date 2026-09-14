@@ -18,6 +18,10 @@
 
 指标默认有效域结果不得借防御性修复偷偷换公式；确需改变的边界须逐项在验证表说明。确定性计算不等于真实策略有效。证据外置：`D:\Projects\stock-tracker-review\numerical-baseline-20260914\`。
 
+## 首次独立审查及修复
+
+独立只读审查 `d40c05f3…` 发现三项：源码SHA误用文本归一化结果、有限int/float混算溢出可逃逸、前端未绑定市场/周期。已分别补红测并修复：从BASE原始Git blob重算全部414个expected字段，确认数值完全未变，只修正provenance元数据与fixture校验哈希；验证脚本在Git checkout中重新检查实际BASE源码，无Git时明确仅PINNED_MANIFEST_ONLY；指标只捕获特定OverflowError返回未知，不吞其他异常；前端要求证券后缀与market一致且interval=1d。当前聚焦89项、浏览器18/18通过，最终独立复审和全量结果以后续验证记录为准。原失败日志保留，不把旧候选的通过数当新发布证据。
+
 ## 技术依据
 
 Python 3.14 ssl 官方文档：`https://docs.python.org/3.14/library/ssl.html`（2026-09-14查阅）；`create_default_context`使用默认CA与客户端校验，hostname与链必须一起检查。只改变本轮声明的Runtime HTTPS上下文，研究通道仍维持独立严格接口。Indicator和metrics公式定义以当前基线源码/固定向量为准，不宣称与第三方库等价。

@@ -8,7 +8,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||process.env.PLAYWRIGHT_P
 const ROOT=path.resolve(__dirname,'../..');
 const output=process.env.NUMERICAL_QA_REPORT_DIR||fs.mkdtempSync(path.join(os.tmpdir(),'numerical-qa-'));
 fs.mkdirSync(output,{recursive:true});
-const expected=['full-windows','short-history','zero-change','nonfinite-hidden','wrong-symbol','unknown-schema','untrusted-assurance','duplicate-window','empty-input','invalid-input','escaping','honest-rank-label','legacy-invalid-scalar','mobile-360','desktop-1440','keyboard-details'];
+const expected=['full-windows','short-history','zero-change','nonfinite-hidden','wrong-symbol','wrong-market','wrong-interval','unknown-schema','untrusted-assurance','duplicate-window','empty-input','invalid-input','escaping','honest-rank-label','legacy-invalid-scalar','mobile-360','desktop-1440','keyboard-details'];
 const results=[];let browser;let page;const pageErrors=[];
 function fixture(n=260){return {schema:'daily-window-diagnostics-v1',symbol:'600519.SH',market:'A',interval:'1d',assurance:'RUNTIME_DIAGNOSTIC_ONLY',auto_trade:false,execution_authorized:false,calendar_coverage_verified:false,status:'NUMERIC_ONLY',computed_at:'2026-09-14T04:00:00+00:00',sample_count:n,same_day_excluded:1,first_date:'2025-12-01',last_date:'2026-09-13',time_basis:'MARKET_LOCAL_DATE',issues:[],windows:[20,60,120,252].map(w=>({sample_window:w,available_samples:Math.min(n,w),state:n>=w?'NUMERIC_ONLY':'INSUFFICIENT_SAMPLES',mean_close:n>=w?20:null,change_percent:n>w?0:null})),methods:[{key:'rsi14',label:'RSI14',required_samples:15,available_samples:Math.min(n,15)}]};}
 async function render(data,symbol='600519.SH') {await page.evaluate(({data,symbol})=>{document.querySelector('#target').innerHTML=IndicatorDiagnostics.render(data,symbol);},{data,symbol});}
@@ -28,6 +28,8 @@ async function check(id,fn){try{await fn();results.push({id,status:'PASS'});cons
   await check('zero-change',async()=>{await render(fixture());assert.equal((await page.locator('[data-window="20"] .nd-change').innerText()).trim(),'0.00%');});
   await check('nonfinite-hidden',async()=>{const f=fixture();f.windows[0].mean_close=Infinity;f.windows[0].change_percent=true;await render(f);assert.equal((await page.locator('[data-window="20"] .nd-mean').innerText()).trim(),'—');assert.equal((await page.locator('[data-window="20"] .nd-change').innerText()).trim(),'—');});
   await check('wrong-symbol',async()=>{await render(fixture(),'000001.SZ');assert.equal(await page.locator('table').count(),0);});
+  await check('wrong-market',async()=>{await render({...fixture(),market:'US'});assert.equal(await page.locator('table').count(),0);});
+  await check('wrong-interval',async()=>{await render({...fixture(),interval:'1m'});assert.equal(await page.locator('table').count(),0);});
   await check('unknown-schema',async()=>{await render({...fixture(),schema:'future'});assert.equal(await page.locator('table').count(),0);});
   await check('untrusted-assurance',async()=>{await render({...fixture(),assurance:'TRUSTED_ADMITTED'});assert.equal(await page.locator('table').count(),0);});
   await check('duplicate-window',async()=>{const f=fixture();f.windows[1]=f.windows[0];await render(f);assert.equal(await page.locator('table').count(),0);});

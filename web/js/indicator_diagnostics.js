@@ -18,7 +18,10 @@
   }
   function unavailable() { return '<div class="ind-empty nd-unavailable">窗口核对暂不可用；不推断缺失指标。</div>'; }
   function render(data, symbol) {
-    if (!data || data.schema !== 'daily-window-diagnostics-v1' || data.symbol !== symbol ||
+    const suffix = typeof symbol === 'string' ? symbol.split('.').pop() : '';
+    const market = {SH:'A', SZ:'A', BJ:'A', HK:'HK', US:'US'}[suffix];
+    if (!data || !market || data.market !== market || data.interval !== '1d' ||
+        data.schema !== 'daily-window-diagnostics-v1' || data.symbol !== symbol ||
         data.assurance !== 'RUNTIME_DIAGNOSTIC_ONLY' || data.auto_trade !== false ||
         data.execution_authorized !== false || data.calendar_coverage_verified !== false ||
         !count(data.sample_count) || !count(data.same_day_excluded) ||
