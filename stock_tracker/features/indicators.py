@@ -1,126 +1,174 @@
-"""技术指标纯函数（§7.1）。
+"""Legacy indicator formulas with explicit input and arithmetic failure behavior.
 
-仅作原始输入，不直接当“共振证据”。所有函数输入输出均为 ``list[float]`` 或标量，
-对空/不足长度输入返回 ``None`` 或安全默认值，绝不抛异常。
+Missing/invalid values return None (three Nones for MACD), never manufactured zero.
+RSI and ATR use rolling arithmetic averages, NOT Wilder smoothing. EMA's short-
+window mean, flat RSI=100 and histogram=DIF-DEA remain compatibility conventions.
+No statistical independence, forecasting skill or third-party equivalence is implied.
 """
-
 from __future__ import annotations
 
 import math
-from typing import Optional, Tuple
+from typing import cast
+
+INDICATOR_INPUT_POLICY_ID = "runtime-indicator-input-v2-legacy-formulas"
+INDICATOR_FORMULA_VERSION = "runtime-indicator-legacy-formulas-v1"
 
 
-def sma(values: list[float], period: int) -> Optional[float]:
-    """简单移动平均；不足长度返回 None。"""
-    if not values or len(values) < period or period <= 0:
+def _number(value: object) -> bool:
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(cast(float, value))
+    except OverflowError:
+        return False
+
+
+def _series(values: object) -> tuple[float, ...] | None:
+    if type(values) not in (list, tuple):
         return None
-    return sum(values[-period:]) / period
+    frozen = tuple(cast("list[float] | tuple[float, ...]", values))
+    return frozen if frozen and all(_number(v) for v in frozen) else None
 
 
-def ema(values: list[float], period: int) -> Optional[float]:
-    """指数移动平均（递推）；不足长度返回简单平均。"""
-    if not values or period <= 0:
+def _period(value: object) -> bool:
+    return type(value) is int and value > 0
+
+
+def _finite(value: float) -> float | None:
+    return value if math.isfinite(value) else None
+
+
+def sma(values: list[float], period: int) -> float | None:
+    """Simple average of the complete requested window."""
+    data = _series(values)
+    if not _period(period) or data is None or len(data) < period:
         return None
-    if len(values) < period:
-        return sum(values) / len(values)
-    k = 2.0 / (period + 1)
-    prev = sum(values[:period]) / period
-    for v in values[period:]:
-        prev = v * k + prev * (1 - k)
-    return prev
+    try:
+        return _finite(sum(data[-period:]) / period)
+    except OverflowError:
+        return None
+
+
+def ema(values: list[float], period: int) -> float | None:
+    """SMA-seeded EMA; legacy short input returns its mean, not a warmed-up EMA."""
+    data = _series(values)
+    if not _period(period) or data is None:
+        return None
+    try:
+        if len(data) < period:
+            return _finite(sum(data) / len(data))
+        k = 2.0 / (period + 1)
+        previous = sum(data[:period]) / period
+        for value in data[period:]:
+            previous = value * k + previous * (1 - k)
+        return _finite(previous)
+    except OverflowError:
+        return None
 
 
 def macd(values: list[float], fast: int = 12, slow: int = 26, signal: int = 9
-         ) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-    """返回 (dif, dea, hist)。"""
-    if not values or len(values) < slow:
-        return None, None, None
-    dif_series = []
-    ema_fast = ema(values, fast)
-    ema_slow = ema(values, slow)
-    # 逐点计算 dif 序列以得 dea
-    fast_k = 2.0 / (fast + 1)
-    slow_k = 2.0 / (slow + 1)
-    pf = sum(values[:fast]) / fast
-    ps = sum(values[:slow]) / slow
-    difs: list[float] = []
-    for i, v in enumerate(values):
-        pf = v * fast_k + pf * (1 - fast_k) if i >= fast else pf
-        ps = v * slow_k + ps * (1 - slow_k) if i >= slow else ps
-        if i >= slow - 1:
-            difs.append(pf - ps)
-    if len(difs) < signal:
-        return difs[-1] if difs else None, None, None
-    dea = ema(difs, signal)
-    dif = difs[-1]
-    hist = dif - dea if dea is not None else None
-    return dif, dea, hist
+         ) -> tuple[float | None, float | None, float | None]:
+    """DIF, signal EMA, DIF-DEA; slow+signal-1 samples for the full default tuple."""
+    data = _series(values)
+    missing = (None, None, None)
+    if (not all(_period(p) for p in (fast, slow, signal)) or fast >= slow
+            or data is None or len(data) < slow):
+        return missing
+    try:
+        fk, sk = 2.0 / (fast + 1), 2.0 / (slow + 1)
+        pf, ps = sum(data[:fast]) / fast, sum(data[:slow]) / slow
+        difs: list[float] = []
+        for i, value in enumerate(data):
+            pf = value * fk + pf * (1 - fk) if i >= fast else pf
+            ps = value * sk + ps * (1 - sk) if i >= slow else ps
+            if i >= slow - 1:
+                difs.append(pf - ps)
+        if not all(math.isfinite(d) for d in difs):
+            return missing
+        if len(difs) < signal:
+            return difs[-1], None, None
+        dea = ema(difs, signal)
+        return difs[-1], dea, _finite(difs[-1] - dea) if dea is not None else None
+    except OverflowError:
+        return missing
 
 
-def rsi(values: list[float], period: int = 14) -> Optional[float]:
-    """相对强弱指标 0–100。"""
-    if not values or len(values) < period + 1:
+def rsi(values: list[float], period: int = 14) -> float | None:
+    """Rolling-average RSI. Zero-loss convention is 100, including flat input."""
+    data = _series(values)
+    if not _period(period) or data is None or len(data) < period + 1:
         return None
-    gains = 0.0
-    losses = 0.0
-    for i in range(-period, 0):
-        ch = values[i] - values[i - 1]
-        if ch >= 0:
-            gains += ch
-        else:
-            losses -= ch
-    avg_gain = gains / period
-    avg_loss = losses / period
-    if avg_loss == 0:
-        return 100.0
-    rs = avg_gain / avg_loss
-    return 100.0 - (100.0 / (1.0 + rs))
-
-
-def atr(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> Optional[float]:
-    """平均真实波幅。"""
-    n = min(len(highs), len(lows), len(closes))
-    if n < period + 1:
+    try:
+        gains = losses = 0.0
+        for i in range(-period, 0):
+            change = data[i] - data[i - 1]
+            if change >= 0:
+                gains += change
+            else:
+                losses -= change
+        avg_gain, avg_loss = gains / period, losses / period
+        if not math.isfinite(avg_gain) or not math.isfinite(avg_loss):
+            return None
+        if avg_loss == 0:
+            return 100.0
+        return _finite(100.0 - 100.0 / (1.0 + avg_gain / avg_loss))
+    except OverflowError:
         return None
-    trs: list[float] = []
-    for i in range(1, n):
-        h, l, c, pc = highs[i], lows[i], closes[i], closes[i - 1]
-        tr = max(h - l, abs(h - pc), abs(l - pc))
-        trs.append(tr)
-    return sum(trs[-period:]) / period
 
 
-def roc(values: list[float], period: int) -> Optional[float]:
-    """变化率（%）；（当前-period前）/period前*100。"""
-    if not values or len(values) <= period:
+def atr(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> float | None:
+    """Arithmetic mean true range; do not truncate misaligned or invalid OHLC."""
+    h, lo, c = _series(highs), _series(lows), _series(closes)
+    if (not _period(period) or h is None or lo is None or c is None
+            or len(h) != len(lo) or len(h) != len(c) or len(h) < period + 1):
         return None
-    base = values[-period - 1]
-    if base == 0:
+    if any(not low <= close <= high for high, low, close in zip(h, lo, c, strict=True)):
         return None
-    return (values[-1] - base) / base * 100.0
-
-
-def rolling_percentile(values: list[float], window: int, pct: float) -> Optional[float]:
-    """窗口内分位数。"""
-    if not values or len(values) < 2:
+    try:
+        ranges = [max(h[i] - lo[i], abs(h[i] - c[i-1]), abs(lo[i] - c[i-1])) for i in range(1, len(h))]
+        return _finite(sum(ranges[-period:]) / period)
+    except OverflowError:
         return None
-    window_vals = values[-window:] if len(values) >= window else values
-    s = sorted(window_vals)
-    k = max(0, min(len(s) - 1, int(round((pct / 100.0) * (len(s) - 1)))))
-    return s[k]
 
 
-def stdev(values: list[float]) -> Optional[float]:
-    """样本标准差。"""
-    if not values or len(values) < 2:
+def roc(values: list[float], period: int) -> float | None:
+    """Percent change, not a fraction; requires a nonzero reference observation."""
+    data = _series(values)
+    if not _period(period) or data is None or len(data) <= period or data[-period-1] == 0:
         return None
-    m = sum(values) / len(values)
-    var = sum((x - m) ** 2 for x in values) / (len(values) - 1)
-    return math.sqrt(var)
-
-
-def stdev_pop(values: list[float]) -> Optional[float]:
-    if not values:
+    try:
+        return _finite((data[-1] - data[-period-1]) / data[-period-1] * 100.0)
+    except OverflowError:
         return None
-    m = sum(values) / len(values)
-    return math.sqrt(sum((x - m) ** 2 for x in values) / len(values))
+
+
+def rolling_percentile(values: list[float], window: int, pct: float) -> float | None:
+    """Legacy round-half-even nearest observation, using available short input."""
+    data = _series(values)
+    if not _period(window) or not _number(pct) or not 0 <= pct <= 100 or data is None or len(data) < 2:
+        return None
+    ordered = sorted(data[-window:])
+    index = max(0, min(len(ordered) - 1, round((pct / 100.0) * (len(ordered) - 1))))
+    return ordered[index]
+
+
+def _std(values: list[float], *, sample: bool) -> float | None:
+    data = _series(values)
+    if data is None or len(data) < (2 if sample else 1):
+        return None
+    try:
+        mean = sum(data) / len(data)
+        variance = sum((v - mean) ** 2 for v in data) / (len(data) - int(sample))
+        return _finite(math.sqrt(variance))
+    except OverflowError:
+        return None
+
+
+def stdev(values: list[float]) -> float | None:
+    """Sample standard deviation, ddof=1."""
+    return _std(values, sample=True)
+
+
+def stdev_pop(values: list[float]) -> float | None:
+    """Population standard deviation, ddof=0."""
+    return _std(values, sample=False)
