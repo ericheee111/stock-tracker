@@ -35,6 +35,20 @@ def _finite_result(value: float, name: str) -> float:
     return value
 
 
+def _finite_quotient(numerator: float, denominator: float, name: str) -> float:
+    result = _finite_result(numerator / denominator, name)
+    if numerator != 0 and result == 0:
+        raise MetricContractError(f"{name} nonzero quotient underflowed to zero")
+    return result
+
+
+def _finite_product(left: float, right: float, name: str) -> float:
+    result = _finite_result(left * right, name)
+    if left != 0 and right != 0 and result == 0:
+        raise MetricContractError(f"{name} nonzero product underflowed to zero")
+    return result
+
+
 def _rank_count(k: int, count: int) -> None:
     if type(k) is not int or not 0 < k <= count:
         raise MetricContractError("k must be an integer in [1, sample_count]")
@@ -74,7 +88,15 @@ def _paired(
 
 def brier_score(y_true: Iterable[int | float], y_prob: Iterable[float]) -> float:
     labels, probs = _paired(y_true, y_prob)
-    return sum((prob - label) ** 2 for label, prob in zip(labels, probs)) / len(labels)
+    # Keep summation order, but a nonzero error cannot disappear by underflow.
+    squared = []
+    for label, prob in zip(labels, probs):
+        error = prob - label
+        term = _finite_result(error ** 2, "Brier squared error")
+        if error != 0 and term == 0:
+            raise MetricContractError("nonzero Brier squared error underflowed to zero")
+        squared.append(term)
+    return _finite_quotient(sum(squared), len(labels), "Brier mean")
 
 
 def log_loss(
@@ -125,7 +147,7 @@ def calibration_curve(
                 lower=index / bins,
                 upper=(index + 1) / bins,
                 count=len(bucket),
-                mean_probability=sum(item[1] for item in bucket) / len(bucket),
+                mean_probability=_finite_quotient(sum(prob for _, prob in bucket), len(bucket), "calibration mean"),
                 observed_rate=sum(item[0] for item in bucket) / len(bucket),
             )
         )
@@ -141,8 +163,8 @@ def expected_calibration_error(
     labels, probs = _paired(y_true, y_prob)
     curve = calibration_curve(labels, probs, bins=bins)
     return sum(
-        bucket.count / len(labels)
-        * abs(bucket.mean_probability - bucket.observed_rate)
+        _finite_product(bucket.count / len(labels),
+                        abs(bucket.mean_probability - bucket.observed_rate), "weighted calibration error")
         for bucket in curve
     )
 
@@ -180,7 +202,8 @@ def top_k_net_expectancy(
         raise MetricContractError("costs must be nonnegative; rebates require a separate model")
     _rank_count(k, len(values))
     ranked = sorted(range(len(values)), key=lambda index: (-probs[index], index))[:k]
-    return _finite_result(sum(values[index] - costs[index] for index in ranked) / k, "net expectancy")
+    numerator = _finite_result(sum(values[index] - costs[index] for index in ranked), "net expectancy sum")
+    return _finite_quotient(numerator, k, "net expectancy")
 
 
 
@@ -197,7 +220,7 @@ def profit_factor(returns: Iterable[float]) -> float:
     gross_loss = _finite_result(-sum(value for value in values if value < 0), "gross loss")
     if gross_loss == 0:
         return math.inf if gross_profit > 0 else 0.0
-    return _finite_result(gross_profit / gross_loss, "profit factor")
+    return _finite_quotient(gross_profit, gross_loss, "profit factor")
 
 
 def max_drawdown(returns: Iterable[float], initial_equity: float = 1.0) -> float:

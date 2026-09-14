@@ -98,6 +98,25 @@ class TestMetricInputPolicy(unittest.TestCase):
             with self.subTest(initial_equity=equity):
                 self.assertAlmostEqual(M.max_drawdown([-.25], initial_equity=equity), .25)
 
+    def test_nonzero_division_underflow_is_not_reported_as_zero(self):
+        with self.assertRaises(M.MetricContractError):
+            M.profit_factor([1e-200, -1e200])
+        with self.assertRaises(M.MetricContractError):
+            M.top_k_net_expectancy([5e-324, 0.0], [1, 0], 2)
+        with self.assertRaises(M.MetricContractError):
+            M.top_k_net_expectancy([-5e-324, 0.0], [1, 0], 2)
+        self.assertEqual(M.top_k_net_expectancy([0.0, 0.0], [1, 0], 2), 0.0)
+        self.assertEqual(M.profit_factor([0.0, -1.0]), 0.0)
+        self.assertTrue(math.isinf(M.profit_factor([1.0])))
+
+    def test_probability_error_underflow_is_not_perfect_calibration(self):
+        with self.assertRaises(M.MetricContractError):
+            M.brier_score([0], [1e-200])
+        with self.assertRaises(M.MetricContractError):
+            M.calibration_curve([0, 0], [5e-324, 0.0], bins=1)
+        self.assertEqual(M.brier_score([0, 1], [0, 1]), 0.0)
+        self.assertEqual(M.expected_calibration_error([0, 1], [0, 1]), 0.0)
+
     def test_profit_factor_no_loss_convention_is_explicit(self):
         self.assertEqual(M.profit_factor([1, 2, -1]), 3.0)
         self.assertTrue(math.isinf(M.profit_factor([1, 2])))
