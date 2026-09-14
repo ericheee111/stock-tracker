@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import sys
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import cast
@@ -204,11 +205,13 @@ def max_drawdown(returns: Iterable[float], initial_equity: float = 1.0) -> float
 
     A -1 return exhausts capital; it cannot resurrect. Empty input retains the
     legacy diagnostic zero and is not evidence of a zero-risk strategy.
+    Positive equity must remain in the normal float range; subnormal scales
+    are rejected rather than allowing rounding to hide loss.
     """
     values = tuple(_finite_number(value, "fractional return") for value in returns)
     initial_equity = _finite_number(initial_equity, "initial equity")
-    if initial_equity <= 0:
-        raise MetricContractError("initial_equity must be finite and positive")
+    if initial_equity < sys.float_info.min:
+        raise MetricContractError("initial_equity must be a positive normal float; subnormal scales are unsupported")
     if any(value < -1 for value in values):
         raise MetricContractError("fractional returns cannot be below -1; R multiples need another metric")
     equity = peak = initial_equity
@@ -216,8 +219,8 @@ def max_drawdown(returns: Iterable[float], initial_equity: float = 1.0) -> float
     for value in values:
         previous = equity
         equity = _finite_result(equity * (1 + value), "equity")
-        if previous > 0 and value > -1 and equity == 0:
-            raise MetricContractError("positive equity underflow cannot be treated as a full loss")
+        if previous > 0 and value > -1 and equity < sys.float_info.min:
+            raise MetricContractError("subnormal equity rounding cannot be treated as a reliable drawdown")
         peak = max(peak, equity)
         drawdown = max(drawdown, 1 - equity / peak)
     return drawdown

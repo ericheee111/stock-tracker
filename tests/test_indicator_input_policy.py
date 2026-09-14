@@ -112,6 +112,13 @@ class TestIndicatorInputPolicy(unittest.TestCase):
         self.assertIsNone(I.roc([1e-308, 1e308], 1))
         self.assertEqual(I.macd([1e308]*70), (None, None, None))
 
+    def test_rsi_underflow_and_ratio_overflow_are_unavailable(self):
+        self.assertIsNone(I.rsi([1e-323, 1.5e-323, 1e-323], 2))
+        self.assertIsNone(I.rsi([1e-300, 0.0, 1e30], 2))
+        self.assertEqual(I.rsi([1.0, 2.0, 1.0], 2), 50.0)
+        self.assertEqual(I.rsi([1e-300, 2e-300, 1e-300], 2), 50.0)
+        self.assertEqual(I.rsi([1.0, 1.0, 1.0], 2), 100.0)
+
     def test_read_does_not_mutate_inputs_and_tuple_works(self):
         values = [10.0, 11.0, 12.0]
         before = values[:]

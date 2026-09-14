@@ -88,6 +88,16 @@ class TestMetricInputPolicy(unittest.TestCase):
             with self.subTest(call=call), self.assertRaises(M.MetricContractError):
                 call()
 
+    def test_subnormal_equity_cannot_hide_loss(self):
+        for equity in (5e-324, 1e-310):
+            with self.subTest(initial_equity=equity), self.assertRaises(M.MetricContractError):
+                M.max_drawdown([-.25], initial_equity=equity)
+        with self.assertRaises(M.MetricContractError):
+            M.max_drawdown([-.99], initial_equity=1e-307)
+        for equity in (1.0, 100.0, 1e-200):
+            with self.subTest(initial_equity=equity):
+                self.assertAlmostEqual(M.max_drawdown([-.25], initial_equity=equity), .25)
+
     def test_profit_factor_no_loss_convention_is_explicit(self):
         self.assertEqual(M.profit_factor([1, 2, -1]), 3.0)
         self.assertTrue(math.isinf(M.profit_factor([1, 2])))

@@ -109,9 +109,14 @@ def rsi(values: list[float], period: int = 14) -> float | None:
         avg_gain, avg_loss = gains / period, losses / period
         if not math.isfinite(avg_gain) or not math.isfinite(avg_loss):
             return None
+        if (gains > 0 and avg_gain == 0) or (losses > 0 and avg_loss == 0):
+            return None  # Arithmetic underflow is not an all-gain/flat observation.
         if avg_loss == 0:
             return 100.0
-        return _finite(100.0 - 100.0 / (1.0 + avg_gain / avg_loss))
+        ratio = avg_gain / avg_loss
+        if not math.isfinite(ratio):
+            return None
+        return _finite(100.0 - 100.0 / (1.0 + ratio))
     except OverflowError:
         return None
 
