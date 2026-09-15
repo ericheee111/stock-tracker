@@ -1,5 +1,7 @@
 # 指标与算法治理合同：再评估提案
 
+> **N4已交付范围（2026-09-15）：** 实现`7b8816bf6b7f3dcf9272b2039c84318554a855d1`已通过独立Review和工程门禁。N4a为同输入旧规则/缺失候选只读对照及可折叠UI；N4b为声明日历周线聚合、episode去重/purge/embargo实验清单及离线CLI。未启用候选评分、训练/校准、PIT准入或实盘战绩。验证见`N4-VALIDATION-20260914.md`，后续以`N4-NEXT-STAGES-20260914.md`为准。
+
 <!-- NUMERICAL_INTEGRATION_CURRENT_BEGIN -->
 > **当前交付（2026-09-14）：** 数值基础与已发布指标诊断UI已受控合并，实现 `97e3694aadf11929f308e732755123ae51c1a0e1` 通过独立只读Review；组合Runtime 921通过/1skip、Quant 753通过。保留两个作者历史、诊断UI/API和参数上限；加入HTTPS无重定向及数值下溢防御，评价v3保留有序非空输入。已合并不等于实盘有效，真实策略、数据准入与B1d仍待推进。见 `NUMERICAL-INTEGRATION-VALIDATION-20260914.md`、`NEXT-PRODUCT-STAGES-20260914.md`。本段覆盖下方两分支各自历史状态；最终push身份见外部DELIVERY.json。
 <!-- NUMERICAL_INTEGRATION_CURRENT_END -->

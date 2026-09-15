@@ -1,7 +1,7 @@
 # Stock Tracker v1.1 项目概览
 
 <!-- N4_CONTINUATION_CURRENT_BEGIN -->
-> **当前续作（2026-09-15）：** 承接N4a/b已有实现，贡献图/时区/报价状态审查问题已闭环；补齐时机分乘数与舍入说明以及非timing乘数拒绝，63/63 Chromium通过。当前等待新精确提交独立Review和完整门禁，尚未发布。默认评分/风险/持仓/物理Store未改，未审查的其他Store/Path/Fill草稿不合入。见 `docs/N4-REVIEW-CLOSURE-20260914.md`、`docs/N4-NEXT-STAGES-20260914.md`。
+> **当前交付（2026-09-15）：** N4a只读评分缺失对照与详情解释、N4b声明周线/实验清单及CLI已完成；实现`7b8816bf6b7f3dcf9272b2039c84318554a855d1`通过独立只读Review，Runtime 998通过/1skip、Quant 753通过、解释Chromium63/63。旧live评分、风险/仓位参数不变，不是研究级数据或有效策略晋级。见`docs/N4-VALIDATION-20260914.md`与`docs/N4-NEXT-STAGES-20260914.md`。下一步先B1d实际字节ReadPort及旧草稿审计；未review的Path/Fill草稿不自动合并。最终推送身份见外置DELIVERY.json，下方历史状态不覆盖本条。
 <!-- N4_CONTINUATION_CURRENT_END -->
 
 <!-- NUMERICAL_INTEGRATION_CURRENT_BEGIN -->
