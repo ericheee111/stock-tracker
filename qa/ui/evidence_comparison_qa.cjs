@@ -14,7 +14,8 @@ const scenarioIds=['complete','rsi-zero','ma60-short','rsi-short','macd-short','
 const extraIds=['wrong-symbol','wrong-market','wrong-interval','unknown-schema','unknown-policy','untrusted-assurance','auto-trade','probability','duplicate-family','missing-score','wrong-delta','bool-score','nonfinite-term','false-sample-count','numeric-term-missing-dependency','nonfinite-multiplier','null-multiplier-with-total','split-capture-clock','prototype-market','missing-enhancement','escaping','unknown-not-zero','real-zero-term','keyboard','mobile-360','desktop-1440','app-wiring'];
 const reviewIds=['missing-term-with-total','missing-group-dependency','missing-family-with-numeric-dependent-score','missing-quote-status','unknown-quote-status','nonlive-without-warning','live-with-false-warning','status-live','status-delayed','status-stale','status-unknown'];
 const schemaIds=['omitted-each-contribution','omitted-each-input','omitted-input-with-missing-family','added-contribution','added-input','liquidity-branch-shape','invalid-input-value-type'];
-const expected=[...scenarioIds,...extraIds,...reviewIds,...schemaIds];
+const timingIds=['timing-risk-off','timing-overheated','timing-neutral','timing-missing-context','family-multiplier-rejected','other-score-multiplier-rejected'];
+const expected=[...scenarioIds,...extraIds,...reviewIds,...schemaIds,...timingIds];
 const results=[],pageErrors=[];let browser,page,fatal=null;
 const clone=v=>JSON.parse(JSON.stringify(v));
 async function check(id,fn){try{await fn();results.push({id,status:'PASS'});console.log('PASS '+id);}catch(e){results.push({id,status:'FAIL',error:String(e.stack||e)});console.error('FAIL '+id+': '+e);}}
@@ -35,6 +36,26 @@ async function expand(){const panel=page.locator('details.ec-panel');if(await pa
     const fixture=JSON.parse(child.stdout);assert.equal(fixture.passed,true);assert.deepEqual(fixture.expected_cases,scenarioIds);
     assert.equal(fixture.executed,12);assert.deepEqual(fixture.cases.map(c=>c.case),scenarioIds);
     const reports=Object.fromEntries(fixture.cases.map(c=>[c.case,c.report]));
+    // Exercise actual Python output, not hand-edited score totals or multipliers.
+    const timingCode=[
+      'import json',
+      'from scripts.run_evidence_comparison import AT, fixture_context',
+      'from stock_tracker.core import types as T',
+      'from stock_tracker.features.evidence_comparison import compare_evidence',
+      'reports = {}',
+      'for name in ("RISK_OFF", "OVERHEATED", "ROTATION"):',
+      '    ctx = fixture_context("complete")',
+      '    ctx.regime.regime = T.RegimeState(name)',
+      '    reports[name] = compare_evidence(ctx, AT)',
+      'print(json.dumps(reports, allow_nan=False))'
+    ].join('\n');
+    const timingChild=cp.spawnSync(exe,[...(exe==='py'?['-3.14']:[]),'-X','utf8','-B','-c',timingCode],
+      {cwd:ROOT,encoding:'utf8',timeout:30000,maxBuffer:4*1024*1024,env:{...process.env,PYTHONIOENCODING:'utf-8',PYTHONDONTWRITEBYTECODE:'1'}});
+    fs.writeFileSync(path.join(output,'timing-fixture-stdout.json'),timingChild.stdout||'');
+    fs.writeFileSync(path.join(output,'timing-fixture-stderr.log'),timingChild.stderr||'');
+    assert.equal(timingChild.status,0,String(timingChild.error||timingChild.stderr));
+    const timingReports=JSON.parse(timingChild.stdout);
+    assert.deepEqual(Object.keys(timingReports),['RISK_OFF','OVERHEATED','ROTATION']);
     browser=await chromium.launch({headless:true});page=await browser.newPage({viewport:{width:1440,height:1000}});
     page.on('pageerror',e=>pageErrors.push(String(e)));
     await page.route('**/*',route=>route.abort());
@@ -131,6 +152,28 @@ async function expand(){const panel=page.locator('details.ec-panel');if(await pa
     await check('keyboard',async()=>{await render(reports.complete);await page.locator('details.ec-panel > summary').focus();await page.keyboard.press('Enter');assert.equal(await page.locator('details.ec-panel').evaluate(e=>e.open),true);});
     await check('mobile-360',async()=>{await page.setViewportSize({width:360,height:800});await render(reports['contexts-missing']);await expand();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));await page.screenshot({path:path.join(output,'mobile.png'),fullPage:true});});
     await check('desktop-1440',async()=>{await page.setViewportSize({width:1440,height:1000});await render(reports.complete);await expand();assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));await page.screenshot({path:path.join(output,'desktop.png'),fullPage:true});});
+    for(const [id,state,multiplier] of [['timing-risk-off','RISK_OFF',.8],['timing-overheated','OVERHEATED',.9],['timing-neutral','ROTATION',1]])await check(id,async()=>{
+      const d=timingReports[state],timing=d.candidate.scores.find(g=>g.key==='timing');
+      assert.equal(timing.multiplier,multiplier);
+      assert.equal((await render(d)).accepted,true);await expand();
+      const group=page.locator('[data-ec-group="timing"]');assert.equal(await group.count(),1);
+      await group.evaluate(el=>el.open=true);
+      const note=await group.locator('[data-ec-method]').innerText();
+      assert(note.includes('市场状态乘数 ×'+String(multiplier)));
+      assert(note.includes('0–100'));assert(note.includes('Python round'));assert(note.includes('半偶'));
+      assert.equal((await page.locator('[data-ec-key="timing"] td').nth(1).innerText()).trim(),String(timing.value));
+    });
+    await check('timing-missing-context',async()=>{
+      const d=reports['contexts-missing'];assert.equal((await render(d)).accepted,true);await expand();
+      const group=page.locator('[data-ec-group="timing"]');assert.equal(await group.count(),1);await group.evaluate(el=>el.open=true);
+      const note=await group.locator('[data-ec-method]').innerText();
+      assert(note.includes('市场状态乘数 —'));assert(note.includes('不生成总分'));
+      assert.equal((await page.locator('[data-ec-key="timing"] td').nth(1).innerText()).trim(),'—');
+    });
+    for(const [id,section,index] of [['family-multiplier-rejected','families',0],['other-score-multiplier-rejected','scores',0]])await check(id,async()=>{
+      const d=clone(reports.complete);d.candidate[section][index].multiplier=.8;
+      const result=await render(d);assert.equal(result.accepted,false);assert.equal(result.tableRows,0);
+    });
     await check('app-wiring',async()=>{
       const html=fs.readFileSync(path.join(ROOT,'web/index.html'),'utf8');const app=fs.readFileSync(path.join(ROOT,'web/js/app.js'),'utf8');
       assert(html.includes('css/evidence_comparison.css'));assert(html.indexOf('js/evidence_comparison.js')<html.indexOf('js/app.js'));

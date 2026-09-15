@@ -64,6 +64,7 @@
     if ((group.value === null) !== (group.missing.length > 0)) return false;
     if (group.multiplier !== null && (!finite(group.multiplier) || ![.8,.9,1].includes(group.multiplier))) return false;
     if (group.multiplier === null && group.value !== null) return false;
+    if (key !== 'timing' && group.multiplier !== 1) return false; // Only timing has a market-state multiplier in this recipe.
     if (group.status !== (group.value === null ? 'MISSING_INPUT' : 'NUMERIC_ONLY')) return false;
     if (!Object.hasOwn(termSchema,key)) return false;
     const shape = termSchema[key];
@@ -162,9 +163,18 @@
     const info=d.sample_info;
     const table = d.differences.map(diff => '<tr data-ec-key="'+esc(diff.key)+'"><th scope="row">'+esc(labels[diff.key])+'</th><td>'+num(diff.legacy_value)+
       '</td><td>'+num(diff.candidate_value)+'</td><td>'+num(diff.delta)+'</td></tr>').join('');
-    const terms = [...d.candidate.families,...d.candidate.scores].map(g => '<details class="ec-group"><summary>'+esc(labels[g.key])+' · '+num(g.value)+
-      (g.missing.length ? ' · 缺少 '+g.missing.map(x=>esc(Object.hasOwn(missing,x)?missing[x]:x)).join('、') : '')+'</summary><ul>'+g.terms.map(t =>
-      '<li><span>'+esc(t.label)+'</span><strong>'+num(t.value)+'</strong>'+(t.missing.length?'<small>需要 '+t.missing.map(x=>esc(Object.hasOwn(missing,x)?missing[x]:x)).join('、')+'</small>':'')+'</li>').join('')+'</ul></details>').join('');
+    const terms = [...d.candidate.families,...d.candidate.scores].map(g => {
+      // Describe the returned recipe; never recompute a score in the browser.
+      const method = g.key === 'timing'
+        ? '贡献项依次求和后应用市场状态乘数 '+(g.multiplier === null ? '—（上下文缺失）' : '×'+num(g.multiplier))+
+          '，限定在 0–100，再按 Python round 舍入（半偶）。'+(g.value === null ? '缺少依赖，不生成总分。' : '')
+        : '贡献项依次求和，限定在 0–100，'+(scores.includes(g.key) ? '按 Python round 舍入（半偶）。' : '按旧规则截断为整数。')+
+          (g.value === null ? '缺少依赖，不生成总分。' : '');
+      return '<details class="ec-group" data-ec-group="'+esc(g.key)+'"><summary>'+esc(labels[g.key])+' · '+num(g.value)+
+        (g.missing.length ? ' · 缺少 '+g.missing.map(x=>esc(Object.hasOwn(missing,x)?missing[x]:x)).join('、') : '')+'</summary><ul>'+g.terms.map(t =>
+        '<li><span>'+esc(t.label)+'</span><strong>'+num(t.value)+'</strong>'+(t.missing.length?'<small>需要 '+t.missing.map(x=>esc(Object.hasOwn(missing,x)?missing[x]:x)).join('、')+'</small>':'')+'</li>').join('')+
+        '</ul><p class="ec-meta" data-ec-method>'+esc(method)+'</p></details>';
+    }).join('');
     const warnings = [];
     if(d.warnings.includes('QUOTE_NOT_DECLARED_LIVE')) warnings.push('报价未声明为实时；本表仅解释所提供输入，不授权交易或提升数据等级。');
     if(d.warnings.includes('NAIVE_TIME_NOT_PIT')) warnings.push('来源时间包含无时区旧格式，仅作为原日期标签展示。');

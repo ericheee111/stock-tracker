@@ -1,7 +1,7 @@
 # ChatGPT Handoff
 
 <!-- N4_CONTINUATION_CURRENT_BEGIN -->
-> **当前续作（2026-09-14）：** N4a/b基础与前三项Review问题已实现；末轮复查的贡献/依赖键删除绕过已修复，57/57 Chromium通过。当前处于最终精确提交独立复审与完整门禁，未发布；旧候选PASS不自动继承。默认评分/风险/持仓及物理Store保持，见`docs/N4-REVIEW-CLOSURE-20260914.md`，后续见`docs/N4-NEXT-STAGES-20260914.md`。
+> **当前续作（2026-09-15）：** 承接N4a/b已有实现，贡献图/时区/报价状态审查问题已闭环；补齐时机分乘数与舍入说明以及非timing乘数拒绝，63/63 Chromium通过。当前等待新精确提交独立Review和完整门禁，尚未发布。默认评分/风险/持仓/物理Store未改，未审查的其他Store/Path/Fill草稿不合入。见 `docs/N4-REVIEW-CLOSURE-20260914.md`、`docs/N4-NEXT-STAGES-20260914.md`。
 <!-- N4_CONTINUATION_CURRENT_END -->
 
 <!-- NUMERICAL_INTEGRATION_CURRENT_BEGIN -->
